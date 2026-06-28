@@ -10,7 +10,7 @@
 #
 # La app de Node debe estar corriendo en el puerto 3001 (con PM2).
 
-tudominio.com, www.tudominio.com {
+luxarma.cloud, www.luxarma.cloud {
 	# Redirige todo el tráfico al servidor Node/Express local
 	reverse_proxy 127.0.0.1:3001
 

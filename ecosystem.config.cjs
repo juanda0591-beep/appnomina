@@ -25,7 +25,7 @@ module.exports = {
         NODE_ENV: 'production',
         PORT: 3001,
         // Restringe CORS a tu dominio. Cambia esto por el tuyo (con y sin www).
-        ALLOWED_ORIGIN: 'https://tudominio.com,https://www.tudominio.com',
+        ALLOWED_ORIGIN: 'https://luxarma.cloud,https://www.luxarma.cloud',
       },
     },
   ],
