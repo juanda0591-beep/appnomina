@@ -1,0 +1,7 @@
+node_modules
+dist
+*.local
+.DS_Store
+backend/nomina.db
+backend/nomina.db-wal
+backend/nomina.db-shm

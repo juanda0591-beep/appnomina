@@ -1,0 +1,29 @@
+{
+  "name": "app-nomina",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n \"API,WEB\" -c \"green,cyan\" \"npm:server\" \"npm:web\"",
+    "web": "vite",
+    "server": "node backend/server.js",
+    "build": "vite build",
+    "start": "vite build && node backend/server.js",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "jspdf": "^2.5.2",
+    "jspdf-autotable": "^3.8.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "concurrently": "^9.1.2",
+    "vite": "^5.4.8"
+  }
+}

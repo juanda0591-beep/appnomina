@@ -1,0 +1,431 @@
+import express from 'express'
+import cors from 'cors'
+import { fileURLToPath } from 'url'
+import { dirname, join } from 'path'
+import { existsSync } from 'fs'
+import db from './db.js'
+import { authRequired, login, cambiarPassword, seedUsuario } from './auth.js'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const app = express()
+
+// En producción, detrás del reverse proxy (Caddy/Nginx), el frontend se sirve
+// desde el mismo origen que la API, así que CORS no hace falta. Si defines
+// ALLOWED_ORIGIN (uno o varios dominios separados por coma) se restringe a ellos;
+// si no, se permite todo (cómodo para desarrollo y acceso por IP en la red local).
+const allowedOrigins = (process.env.ALLOWED_ORIGIN || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean)
+if (allowedOrigins.length > 0) {
+  app.use(cors({ origin: allowedOrigins }))
+} else {
+  app.use(cors())
+}
+
+// Confía en el proxy (Caddy/Nginx) para leer la IP real del cliente (X-Forwarded-For)
+app.set('trust proxy', 1)
+
+app.use(express.json({ limit: '20mb' })) // amplio para logo y comprobantes en base64
+
+seedUsuario() // crea el usuario admin la primera vez
+app.use(authRequired) // protege todas las rutas /api excepto /api/login
+
+const PORT = process.env.PORT || 3001
+
+// ============ AUTENTICACIÓN ============
+// Límite simple de intentos de login por IP (en memoria) para frenar fuerza bruta.
+const MAX_INTENTOS = 8
+const VENTANA_MS = 15 * 60 * 1000 // 15 minutos
+const intentos = new Map() // ip -> { count, primero }
+
+function revisarIntentos(ip) {
+  const ahora = Date.now()
+  const reg = intentos.get(ip)
+  if (!reg || ahora - reg.primero > VENTANA_MS) {
+    intentos.set(ip, { count: 0, primero: ahora })
+    return true
+  }
+  return reg.count < MAX_INTENTOS
+}
+function registrarFallo(ip) {
+  const reg = intentos.get(ip) || { count: 0, primero: Date.now() }
+  reg.count += 1
+  intentos.set(ip, reg)
+}
+// Limpieza periódica de entradas viejas
+setInterval(() => {
+  const ahora = Date.now()
+  for (const [ip, reg] of intentos) {
+    if (ahora - reg.primero > VENTANA_MS) intentos.delete(ip)
+  }
+}, VENTANA_MS).unref()
+
+app.post('/api/login', (req, res) => {
+  const ip = req.ip || req.headers['x-forwarded-for'] || 'desconocida'
+  if (!revisarIntentos(ip)) {
+    return res.status(429).json({ error: 'Demasiados intentos. Espera unos minutos e intenta de nuevo.' })
+  }
+  const { username, password } = req.body
+  const result = login(username, password)
+  if (!result) {
+    registrarFallo(ip)
+    return res.status(401).json({ error: 'Usuario o contraseña incorrectos' })
+  }
+  intentos.delete(ip) // login correcto → reinicia el contador
+  res.json(result)
+})
+
+app.post('/api/cambiar-password', (req, res) => {
+  const { actual, nueva } = req.body
+  const result = cambiarPassword(req.usuario, actual, nueva)
+  if (!result.ok) return res.status(400).json({ error: result.error })
+  res.json({ ok: true })
+})
+
+// ---------- Helpers para armar objetos anidados ----------
+function productoConProcesos(prod) {
+  const procesos = db.prepare('SELECT * FROM procesos WHERE producto_id = ?').all(prod.id)
+  return { ...prod, procesos }
+}
+
+// Registra un movimiento de gasto (usado por nómina y adelantos automáticos)
+const insertMovimiento = db.prepare(
+  `INSERT INTO movimientos (tipo, fecha, categoria, monto, descripcion, comprobante, comprobante_tipo, origen, ref_id)
+   VALUES (@tipo, @fecha, @categoria, @monto, @descripcion, @comprobante, @comprobante_tipo, @origen, @ref_id)`
+)
+function registrarGasto({ fecha, categoria, monto, descripcion, origen = 'manual', refId = null }) {
+  return insertMovimiento.run({
+    tipo: 'gasto',
+    fecha,
+    categoria: categoria || '',
+    monto: Number(monto) || 0,
+    descripcion: descripcion || '',
+    comprobante: null,
+    comprobante_tipo: null,
+    origen,
+    ref_id: refId,
+  })
+}
+
+function movimientoSalida(m) {
+  return {
+    id: m.id,
+    tipo: m.tipo,
+    fecha: m.fecha,
+    categoria: m.categoria || '',
+    monto: m.monto,
+    descripcion: m.descripcion || '',
+    tieneComprobante: !!m.comprobante,
+    comprobanteTipo: m.comprobante_tipo || '',
+    origen: m.origen || 'manual',
+    refId: m.ref_id,
+  }
+}
+
+// ============ PRODUCTOS ============
+app.get('/api/productos', (req, res) => {
+  const productos = db.prepare('SELECT * FROM productos ORDER BY nombre').all()
+  res.json(productos.map(productoConProcesos))
+})
+
+app.post('/api/productos', (req, res) => {
+  const { nombre, procesos = [] } = req.body
+  const insert = db.transaction(() => {
+    const r = db.prepare('INSERT INTO productos (nombre) VALUES (?)').run(nombre.trim())
+    const pid = r.lastInsertRowid
+    const ins = db.prepare('INSERT INTO procesos (producto_id, nombre, pago) VALUES (?, ?, ?)')
+    for (const p of procesos) ins.run(pid, p.nombre.trim(), Number(p.pago) || 0)
+    return pid
+  })
+  const pid = insert()
+  res.json(productoConProcesos(db.prepare('SELECT * FROM productos WHERE id = ?').get(pid)))
+})
+
+app.put('/api/productos/:id', (req, res) => {
+  const { id } = req.params
+  const { nombre, procesos = [] } = req.body
+  const update = db.transaction(() => {
+    db.prepare('UPDATE productos SET nombre = ? WHERE id = ?').run(nombre.trim(), id)
+    db.prepare('DELETE FROM procesos WHERE producto_id = ?').run(id)
+    const ins = db.prepare('INSERT INTO procesos (producto_id, nombre, pago) VALUES (?, ?, ?)')
+    for (const p of procesos) ins.run(id, p.nombre.trim(), Number(p.pago) || 0)
+  })
+  update()
+  res.json(productoConProcesos(db.prepare('SELECT * FROM productos WHERE id = ?').get(id)))
+})
+
+app.delete('/api/productos/:id', (req, res) => {
+  db.prepare('DELETE FROM productos WHERE id = ?').run(req.params.id)
+  res.json({ ok: true })
+})
+
+// ============ EMPLEADOS ============
+app.get('/api/empleados', (req, res) => {
+  res.json(db.prepare('SELECT * FROM empleados ORDER BY nombre').all())
+})
+
+app.post('/api/empleados', (req, res) => {
+  const { nombre, cedula, telefono, cargo } = req.body
+  const r = db
+    .prepare('INSERT INTO empleados (nombre, cedula, telefono, cargo) VALUES (?, ?, ?, ?)')
+    .run(nombre.trim(), cedula || '', telefono || '', cargo || '')
+  res.json(db.prepare('SELECT * FROM empleados WHERE id = ?').get(r.lastInsertRowid))
+})
+
+app.put('/api/empleados/:id', (req, res) => {
+  const { nombre, cedula, telefono, cargo } = req.body
+  db.prepare('UPDATE empleados SET nombre=?, cedula=?, telefono=?, cargo=? WHERE id=?')
+    .run(nombre.trim(), cedula || '', telefono || '', cargo || '', req.params.id)
+  res.json(db.prepare('SELECT * FROM empleados WHERE id = ?').get(req.params.id))
+})
+
+app.delete('/api/empleados/:id', (req, res) => {
+  db.prepare('DELETE FROM empleados WHERE id = ?').run(req.params.id)
+  res.json({ ok: true })
+})
+
+// ============ PRESTAMOS ============
+app.get('/api/prestamos', (req, res) => {
+  res.json(db.prepare('SELECT * FROM prestamos ORDER BY fecha DESC, id DESC').all())
+})
+
+app.post('/api/prestamos', (req, res) => {
+  const { empleadoId, monto, fecha, descripcion } = req.body
+  const m = Number(monto) || 0
+  const tx = db.transaction(() => {
+    const r = db
+      .prepare('INSERT INTO prestamos (empleado_id, monto, saldo, fecha, descripcion) VALUES (?, ?, ?, ?, ?)')
+      .run(empleadoId, m, m, fecha, descripcion || '')
+    const pid = r.lastInsertRowid
+    // El adelanto sale de caja → se registra como gasto automático
+    const emp = db.prepare('SELECT nombre FROM empleados WHERE id = ?').get(empleadoId)
+    registrarGasto({
+      fecha,
+      categoria: 'Adelanto',
+      monto: m,
+      descripcion: `Adelanto a ${emp?.nombre || 'empleado'}${descripcion ? ' — ' + descripcion : ''}`,
+      origen: 'prestamo',
+      refId: pid,
+    })
+    return pid
+  })
+  const pid = tx()
+  res.json(db.prepare('SELECT * FROM prestamos WHERE id = ?').get(pid))
+})
+
+app.delete('/api/prestamos/:id', (req, res) => {
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM prestamos WHERE id = ?').run(req.params.id)
+    // borra el gasto automático asociado a este adelanto
+    db.prepare("DELETE FROM movimientos WHERE origen = 'prestamo' AND ref_id = ?").run(req.params.id)
+  })
+  tx()
+  res.json({ ok: true })
+})
+
+// ============ NOMINAS ============
+function nominaCompleta(n) {
+  const items = db.prepare('SELECT * FROM nomina_items WHERE nomina_id = ?').all(n.id)
+  const descuentos = db.prepare('SELECT * FROM nomina_descuentos WHERE nomina_id = ?').all(n.id)
+  return {
+    id: n.id,
+    empleadoId: n.empleado_id,
+    fecha: n.fecha,
+    subtotal: n.subtotal,
+    totalDescuentos: n.total_descuentos,
+    total: n.total,
+    comentario: n.comentario || '',
+    items: items.map((it) => ({
+      productoNombre: it.producto_nombre,
+      procesoNombre: it.proceso_nombre,
+      cantidad: it.cantidad,
+      pago: it.pago,
+      subtotal: it.subtotal,
+    })),
+    descuentos: descuentos.map((d) => ({
+      prestamoId: d.prestamo_id,
+      monto: d.monto,
+      descripcion: d.descripcion,
+    })),
+  }
+}
+
+app.get('/api/nominas', (req, res) => {
+  const { desde, hasta } = req.query
+  let rows
+  if (desde && hasta) {
+    rows = db.prepare('SELECT * FROM nominas WHERE fecha BETWEEN ? AND ? ORDER BY fecha DESC, id DESC').all(desde, hasta)
+  } else {
+    rows = db.prepare('SELECT * FROM nominas ORDER BY fecha DESC, id DESC').all()
+  }
+  res.json(rows.map(nominaCompleta))
+})
+
+app.post('/api/nominas', (req, res) => {
+  const { empleadoId, fecha, items = [], descuentos = [], subtotal, totalDescuentos, total, comentario } = req.body
+  const tx = db.transaction(() => {
+    const r = db
+      .prepare('INSERT INTO nominas (empleado_id, fecha, subtotal, total_descuentos, total, comentario) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(empleadoId, fecha, subtotal || 0, totalDescuentos || 0, total || 0, comentario || '')
+    const nid = r.lastInsertRowid
+
+    const insItem = db.prepare(
+      'INSERT INTO nomina_items (nomina_id, producto_nombre, proceso_nombre, cantidad, pago, subtotal) VALUES (?, ?, ?, ?, ?, ?)'
+    )
+    for (const it of items) {
+      insItem.run(nid, it.productoNombre, it.procesoNombre, it.cantidad, it.pago, it.subtotal)
+    }
+
+    const insDesc = db.prepare(
+      'INSERT INTO nomina_descuentos (nomina_id, prestamo_id, monto, descripcion) VALUES (?, ?, ?, ?)'
+    )
+    const updPrestamo = db.prepare('UPDATE prestamos SET saldo = MAX(0, saldo - ?) WHERE id = ?')
+    for (const d of descuentos) {
+      insDesc.run(nid, d.prestamoId, d.monto, d.descripcion || 'Préstamo')
+      if (d.prestamoId) updPrestamo.run(d.monto, d.prestamoId)
+    }
+
+    // El pago de nómina sale de caja → gasto automático (por el neto pagado)
+    const emp = db.prepare('SELECT nombre FROM empleados WHERE id = ?').get(empleadoId)
+    registrarGasto({
+      fecha,
+      categoria: 'Nómina',
+      monto: total || 0,
+      descripcion: `Pago de nómina a ${emp?.nombre || 'empleado'}`,
+      origen: 'nomina',
+      refId: nid,
+    })
+    return nid
+  })
+  const nid = tx()
+  res.json(nominaCompleta(db.prepare('SELECT * FROM nominas WHERE id = ?').get(nid)))
+})
+
+app.delete('/api/nominas/:id', (req, res) => {
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM nominas WHERE id = ?').run(req.params.id)
+    // borra el gasto automático asociado a esta nómina
+    db.prepare("DELETE FROM movimientos WHERE origen = 'nomina' AND ref_id = ?").run(req.params.id)
+  })
+  tx()
+  res.json({ ok: true })
+})
+
+// ============ MOVIMIENTOS (Control de dinero) ============
+app.get('/api/movimientos', (req, res) => {
+  const { desde, hasta } = req.query
+  let rows
+  if (desde && hasta) {
+    rows = db.prepare('SELECT * FROM movimientos WHERE fecha BETWEEN ? AND ? ORDER BY fecha DESC, id DESC').all(desde, hasta)
+  } else {
+    rows = db.prepare('SELECT * FROM movimientos ORDER BY fecha DESC, id DESC').all()
+  }
+  res.json(rows.map(movimientoSalida))
+})
+
+// Balance global: total ingresos, gastos y saldo actual
+app.get('/api/movimientos/balance', (req, res) => {
+  const ingresos = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'ingreso'").get().t
+  const gastos = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'gasto'").get().t
+  res.json({ ingresos, gastos, balance: ingresos - gastos })
+})
+
+// Descarga / vista del comprobante (PDF o imagen) de un movimiento
+app.get('/api/movimientos/:id/comprobante', (req, res) => {
+  const m = db.prepare('SELECT comprobante, comprobante_tipo FROM movimientos WHERE id = ?').get(req.params.id)
+  if (!m || !m.comprobante) return res.status(404).json({ error: 'Sin comprobante' })
+  const match = /^data:(.+?);base64,(.+)$/s.exec(m.comprobante)
+  if (!match) return res.status(400).json({ error: 'Comprobante inválido' })
+  const buffer = Buffer.from(match[2], 'base64')
+  res.setHeader('Content-Type', m.comprobante_tipo || match[1])
+  res.send(buffer)
+})
+
+app.post('/api/movimientos', (req, res) => {
+  const { tipo, fecha, categoria, monto, descripcion, comprobante, comprobanteTipo } = req.body
+  if (tipo !== 'ingreso' && tipo !== 'gasto') {
+    return res.status(400).json({ error: 'tipo debe ser ingreso o gasto' })
+  }
+  const r = insertMovimiento.run({
+    tipo,
+    fecha,
+    categoria: categoria || '',
+    monto: Number(monto) || 0,
+    descripcion: descripcion || '',
+    comprobante: comprobante || null,
+    comprobante_tipo: comprobanteTipo || null,
+    origen: 'manual',
+    ref_id: null,
+  })
+  res.json(movimientoSalida(db.prepare('SELECT * FROM movimientos WHERE id = ?').get(r.lastInsertRowid)))
+})
+
+app.delete('/api/movimientos/:id', (req, res) => {
+  const m = db.prepare('SELECT origen FROM movimientos WHERE id = ?').get(req.params.id)
+  if (m && m.origen !== 'manual') {
+    return res.status(400).json({ error: 'Este movimiento es automático; elimina la nómina o el adelanto que lo originó.' })
+  }
+  db.prepare('DELETE FROM movimientos WHERE id = ?').run(req.params.id)
+  res.json({ ok: true })
+})
+
+// ============ EMPRESA ============
+app.get('/api/empresa', (req, res) => {
+  res.json(db.prepare('SELECT * FROM empresa WHERE id = 1').get())
+})
+
+app.put('/api/empresa', (req, res) => {
+  const { nombre, direccion, telefono, correo, nit, logo } = req.body
+  db.prepare(
+    'UPDATE empresa SET nombre=?, direccion=?, telefono=?, correo=?, nit=?, logo=? WHERE id = 1'
+  ).run(nombre || '', direccion || '', telefono || '', correo || '', nit || '', logo || '')
+  res.json(db.prepare('SELECT * FROM empresa WHERE id = 1').get())
+})
+
+// ============ REPORTES ============
+app.get('/api/reportes', (req, res) => {
+  const { desde, hasta } = req.query
+  if (!desde || !hasta) return res.status(400).json({ error: 'desde y hasta son requeridos' })
+
+  const nominas = db
+    .prepare('SELECT * FROM nominas WHERE fecha BETWEEN ? AND ? ORDER BY fecha ASC')
+    .all(desde, hasta)
+    .map(nominaCompleta)
+
+  const totalPagado = nominas.reduce((s, n) => s + n.total, 0)
+  const totalDescuentos = nominas.reduce((s, n) => s + n.totalDescuentos, 0)
+  const totalBruto = nominas.reduce((s, n) => s + n.subtotal, 0)
+
+  // Resumen por empleado
+  const porEmpleadoMap = {}
+  for (const n of nominas) {
+    const key = n.empleadoId
+    if (!porEmpleadoMap[key]) porEmpleadoMap[key] = { empleadoId: key, pagos: 0, bruto: 0, descuentos: 0, total: 0 }
+    porEmpleadoMap[key].pagos += 1
+    porEmpleadoMap[key].bruto += n.subtotal
+    porEmpleadoMap[key].descuentos += n.totalDescuentos
+    porEmpleadoMap[key].total += n.total
+  }
+  const empleados = db.prepare('SELECT id, nombre FROM empleados').all()
+  const empMap = Object.fromEntries(empleados.map((e) => [e.id, e.nombre]))
+  const porEmpleado = Object.values(porEmpleadoMap).map((x) => ({
+    ...x,
+    nombre: empMap[x.empleadoId] || '— (eliminado)',
+  }))
+
+  res.json({ desde, hasta, totalBruto, totalDescuentos, totalPagado, cantidad: nominas.length, porEmpleado, nominas })
+})
+
+// ============ Servir frontend compilado (producción / acceso LAN) ============
+const distPath = join(__dirname, '..', 'dist')
+if (existsSync(distPath)) {
+  app.use(express.static(distPath))
+  app.get('*', (req, res) => res.sendFile(join(distPath, 'index.html')))
+}
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`\n  Servidor de Nómina escuchando en:`)
+  console.log(`  → Local:   http://localhost:${PORT}`)
+  console.log(`  → Red:     http://<IP-de-tu-PC>:${PORT}  (para celular/tablet en la misma WiFi)\n`)
+})

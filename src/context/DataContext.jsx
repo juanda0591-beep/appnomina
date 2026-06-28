@@ -1,0 +1,189 @@
+import { createContext, useContext, useEffect, useState } from 'react'
+
+const DataContext = createContext(null)
+
+// En desarrollo Vite hace proxy de /api -> :3001. En producción el mismo
+// servidor Express sirve el frontend, así que /api también funciona.
+const API = '/api'
+
+async function http(path, options = {}) {
+  const token = localStorage.getItem('nomina_token')
+  const res = await fetch(API + path, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {}),
+    },
+  })
+  if (res.status === 401) {
+    // sesión expirada o inválida → volver al login
+    localStorage.removeItem('nomina_token')
+    localStorage.removeItem('nomina_user')
+    window.location.reload()
+    throw new Error('Sesión expirada')
+  }
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '')
+    throw new Error(`Error ${res.status}: ${msg}`)
+  }
+  return res.status === 204 ? null : res.json()
+}
+
+export function DataProvider({ children }) {
+  const [productos, setProductos] = useState([])
+  const [empleados, setEmpleados] = useState([])
+  const [prestamos, setPrestamos] = useState([])
+  const [nominas, setNominas] = useState([])
+  const [movimientos, setMovimientos] = useState([])
+  const [empresa, setEmpresa] = useState(null)
+  const [cargando, setCargando] = useState(true)
+  const [error, setError] = useState(null)
+
+  const recargar = async () => {
+    try {
+      const [prod, emp, pres, nom, mov, empr] = await Promise.all([
+        http('/productos'),
+        http('/empleados'),
+        http('/prestamos'),
+        http('/nominas'),
+        http('/movimientos'),
+        http('/empresa'),
+      ])
+      setProductos(prod)
+      setEmpleados(emp)
+      setPrestamos(pres)
+      setNominas(nom)
+      setMovimientos(mov)
+      setEmpresa(empr)
+      setError(null)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setCargando(false)
+    }
+  }
+
+  useEffect(() => {
+    recargar()
+  }, [])
+
+  // ---------- PRODUCTOS ----------
+  const addProducto = async (nombre, procesos) => {
+    await http('/productos', { method: 'POST', body: JSON.stringify({ nombre, procesos }) })
+    await recargar()
+  }
+  const updateProducto = async (id, nombre, procesos) => {
+    await http(`/productos/${id}`, { method: 'PUT', body: JSON.stringify({ nombre, procesos }) })
+    await recargar()
+  }
+  const deleteProducto = async (id) => {
+    await http(`/productos/${id}`, { method: 'DELETE' })
+    await recargar()
+  }
+
+  // ---------- EMPLEADOS ----------
+  const addEmpleado = async (emp) => {
+    await http('/empleados', { method: 'POST', body: JSON.stringify(emp) })
+    await recargar()
+  }
+  const updateEmpleado = async (id, emp) => {
+    await http(`/empleados/${id}`, { method: 'PUT', body: JSON.stringify(emp) })
+    await recargar()
+  }
+  const deleteEmpleado = async (id) => {
+    await http(`/empleados/${id}`, { method: 'DELETE' })
+    await recargar()
+  }
+
+  // ---------- PRESTAMOS ----------
+  const addPrestamo = async (prestamo) => {
+    await http('/prestamos', { method: 'POST', body: JSON.stringify(prestamo) })
+    await recargar()
+  }
+  const deletePrestamo = async (id) => {
+    await http(`/prestamos/${id}`, { method: 'DELETE' })
+    await recargar()
+  }
+
+  // ---------- NOMINAS ----------
+  const addNomina = async (nomina) => {
+    const creada = await http('/nominas', { method: 'POST', body: JSON.stringify(nomina) })
+    await recargar()
+    return creada
+  }
+  const deleteNomina = async (id) => {
+    await http(`/nominas/${id}`, { method: 'DELETE' })
+    await recargar()
+  }
+
+  // ---------- MOVIMIENTOS (Control de dinero) ----------
+  const addMovimiento = async (mov) => {
+    const creado = await http('/movimientos', { method: 'POST', body: JSON.stringify(mov) })
+    await recargar()
+    return creado
+  }
+  const deleteMovimiento = async (id) => {
+    await http(`/movimientos/${id}`, { method: 'DELETE' })
+    await recargar()
+  }
+  const getBalance = () => http('/movimientos/balance')
+  const getMovimientos = (desde, hasta) =>
+    http(`/movimientos?desde=${desde}&hasta=${hasta}`)
+
+  // ---------- EMPRESA ----------
+  const updateEmpresa = async (datos) => {
+    const actualizada = await http('/empresa', { method: 'PUT', body: JSON.stringify(datos) })
+    setEmpresa(actualizada)
+    return actualizada
+  }
+
+  // ---------- REPORTES ----------
+  const getReporte = (desde, hasta) =>
+    http(`/reportes?desde=${desde}&hasta=${hasta}`)
+
+  // Helpers de consulta (sobre estado en memoria)
+  const getEmpleado = (id) => empleados.find((e) => String(e.id) === String(id))
+  const getProducto = (id) => productos.find((p) => String(p.id) === String(id))
+  const prestamosDeEmpleado = (empleadoId) =>
+    prestamos.filter((p) => String(p.empleado_id) === String(empleadoId) && p.saldo > 0)
+
+  const value = {
+    productos,
+    empleados,
+    prestamos,
+    nominas,
+    movimientos,
+    empresa,
+    cargando,
+    error,
+    recargar,
+    updateEmpresa,
+    addProducto,
+    updateProducto,
+    deleteProducto,
+    addEmpleado,
+    updateEmpleado,
+    deleteEmpleado,
+    addPrestamo,
+    deletePrestamo,
+    addNomina,
+    deleteNomina,
+    addMovimiento,
+    deleteMovimiento,
+    getBalance,
+    getMovimientos,
+    getReporte,
+    getEmpleado,
+    getProducto,
+    prestamosDeEmpleado,
+  }
+
+  return <DataContext.Provider value={value}>{children}</DataContext.Provider>
+}
+
+export function useData() {
+  const ctx = useContext(DataContext)
+  if (!ctx) throw new Error('useData debe usarse dentro de DataProvider')
+  return ctx
+}
