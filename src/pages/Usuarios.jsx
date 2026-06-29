@@ -1,9 +1,23 @@
 import { useEffect, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
+import { PAGINAS, ACCION_LABEL, TODAS_ACCIONES, permisosVacios, permisosCompletos } from '../permisos.js'
+
+// Normaliza un objeto de permisos (puede venir null o incompleto) a la forma
+// completa del catálogo, para que la matriz de checkboxes siempre tenga valores.
+function normalizar(permisos) {
+  const base = permisosVacios()
+  if (!permisos) return permisosCompletos() // null = acceso amplio (compatibilidad)
+  for (const pag of PAGINAS) {
+    for (const a of pag.acciones) {
+      base[pag.id][a] = !!(permisos[pag.id] && permisos[pag.id][a])
+    }
+  }
+  return base
+}
 
 export default function Usuarios() {
-  const { getUsuarios, addUsuario, deleteUsuario, resetUsuarioPassword } = useData()
+  const { getUsuarios, addUsuario, deleteUsuario, resetUsuarioPassword, updateUsuarioPermisos } = useData()
   const { usuario: yo } = useAuth()
   const [usuarios, setUsuarios] = useState([])
   const [msg, setMsg] = useState(null)
@@ -14,6 +28,11 @@ export default function Usuarios() {
   const [password, setPassword] = useState('')
   const [rol, setRol] = useState('usuario')
   const [guardando, setGuardando] = useState(false)
+
+  // edición de permisos: { [userId]: objetoPermisos }
+  const [editPerm, setEditPerm] = useState(null) // usuario en edición
+  const [permDraft, setPermDraft] = useState(null)
+  const [guardandoPerm, setGuardandoPerm] = useState(false)
 
   const recargar = async () => {
     try {
@@ -34,7 +53,10 @@ export default function Usuarios() {
     setMsg(null)
     setGuardando(true)
     try {
-      await addUsuario(username, password, rol)
+      // Los usuarios nuevos nacen con permiso mínimo (solo ver inicio); el admin
+      // luego les concede el resto desde la matriz. Los admin no usan permisos.
+      const permisos = rol === 'admin' ? null : permisosVacios()
+      await addUsuario(username, password, rol, permisos)
       setMsg({ tipo: 'ok', texto: '✅ Usuario creado' })
       setUsername(''); setPassword(''); setRol('usuario')
       await recargar()
@@ -68,10 +90,54 @@ export default function Usuarios() {
     }
   }
 
+  // --- Edición de permisos ---
+  const abrirPermisos = (u) => {
+    setEditPerm(u)
+    setPermDraft(normalizar(u.permisos))
+    setMsg(null)
+  }
+
+  const cerrarPermisos = () => {
+    setEditPerm(null)
+    setPermDraft(null)
+  }
+
+  const togglePerm = (pagId, accion) => {
+    setPermDraft((d) => {
+      const next = { ...d, [pagId]: { ...d[pagId], [accion]: !d[pagId][accion] } }
+      // Si se desmarca "ver", no tiene sentido conservar las demás acciones de esa página.
+      if (accion === 'ver' && !next[pagId].ver) {
+        for (const a of Object.keys(next[pagId])) next[pagId][a] = false
+      }
+      // Si se marca cualquier acción, asegurar que pueda ver la página.
+      if (accion !== 'ver' && next[pagId][accion]) next[pagId].ver = true
+      return next
+    })
+  }
+
+  const marcarTodo = (valor) => {
+    setPermDraft(valor ? permisosCompletos() : permisosVacios())
+  }
+
+  const guardarPermisos = async () => {
+    setGuardandoPerm(true)
+    setMsg(null)
+    try {
+      await updateUsuarioPermisos(editPerm.id, permDraft)
+      setMsg({ tipo: 'ok', texto: `✅ Permisos de ${editPerm.username} actualizados. Verá los cambios al volver a iniciar sesión.` })
+      cerrarPermisos()
+      await recargar()
+    } catch (e) {
+      setMsg({ tipo: 'error', texto: e.message })
+    } finally {
+      setGuardandoPerm(false)
+    }
+  }
+
   return (
     <div>
       <h2>👥 Usuarios</h2>
-      <p className="muted">Crea cuentas para que otras personas ingresen al sistema.</p>
+      <p className="muted">Crea cuentas y define qué páginas y acciones puede usar cada persona.</p>
 
       {msg && (
         <div className={`banner ${msg.tipo === 'error' ? 'error' : ''}`}>{msg.texto}</div>
@@ -96,6 +162,10 @@ export default function Usuarios() {
             </select>
           </div>
         </div>
+        <p className="muted small">
+          El administrador tiene acceso total. Un usuario nuevo solo podrá ver el inicio;
+          luego le concedes permisos con el botón "Permisos".
+        </p>
         <div className="form-actions">
           <button type="submit" className="btn-primary" disabled={guardando}>
             {guardando ? 'Creando…' : 'Crear usuario'}
@@ -120,6 +190,11 @@ export default function Usuarios() {
                 </span>
               </div>
               <div className="actions">
+                {u.rol !== 'admin' && (
+                  <button className="btn-secondary" onClick={() => abrirPermisos(u)}>
+                    Permisos
+                  </button>
+                )}
                 <button className="btn-secondary" onClick={() => cambiarClave(u)}>
                   Cambiar contraseña
                 </button>
@@ -131,6 +206,58 @@ export default function Usuarios() {
           ))
         )}
       </div>
+
+      {/* Editor de permisos (matriz de checkboxes) */}
+      {editPerm && permDraft && (
+        <div className="card">
+          <div className="card-head">
+            <h3>Permisos de {editPerm.username}</h3>
+            <button className="btn-secondary" onClick={cerrarPermisos}>Cerrar</button>
+          </div>
+          <div className="quick-ranges" style={{ marginBottom: 12 }}>
+            <button className="btn-secondary" onClick={() => marcarTodo(true)}>Marcar todo</button>
+            <button className="btn-secondary" onClick={() => marcarTodo(false)}>Quitar todo</button>
+          </div>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Página</th>
+                  {TODAS_ACCIONES.map((a) => (
+                    <th key={a} className="num">{ACCION_LABEL[a]}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {PAGINAS.map((pag) => (
+                  <tr key={pag.id}>
+                    <td>{pag.label}</td>
+                    {TODAS_ACCIONES.map((a) => (
+                      <td key={a} className="num">
+                        {pag.acciones.includes(a) ? (
+                          <input
+                            type="checkbox"
+                            checked={!!permDraft[pag.id][a]}
+                            onChange={() => togglePerm(pag.id, a)}
+                          />
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="form-actions">
+            <button className="btn-primary" onClick={guardarPermisos} disabled={guardandoPerm}>
+              {guardandoPerm ? 'Guardando…' : 'Guardar permisos'}
+            </button>
+            <button className="btn-secondary" onClick={cerrarPermisos}>Cancelar</button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

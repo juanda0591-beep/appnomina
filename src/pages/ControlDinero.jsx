@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha } from '../utils/format.js'
 
 const CATEGORIAS_INGRESO = ['Venta', 'Abono cliente', 'Préstamo recibido', 'Otro ingreso']
@@ -13,6 +14,9 @@ const ORIGEN_LABEL = { nomina: 'Pago de nómina', prestamo: 'Adelanto' }
 
 export default function ControlDinero() {
   const { movimientos, addMovimiento, deleteMovimiento, getBalance } = useData()
+  const { puede } = useAuth()
+  const puedeCrear = puede('control-dinero', 'crear')
+  const puedeEliminar = puede('control-dinero', 'eliminar')
 
   const [tab, setTab] = useState('balance') // 'ingreso' | 'gasto' | 'balance'
   const [form, setForm] = useState(formVacio())
@@ -117,7 +121,7 @@ export default function ControlDinero() {
       </div>
 
       {/* Formulario de ingreso / gasto */}
-      {tab !== 'balance' && (
+      {tab !== 'balance' && puedeCrear && (
         <form className="card" onSubmit={handleSubmit}>
           <h3>{tab === 'ingreso' ? 'Registrar ingreso' : 'Registrar gasto'}</h3>
           <div className="row">
@@ -209,15 +213,19 @@ export default function ControlDinero() {
                     </td>
                     <td>
                       {m.origen === 'manual' ? (
-                        <button
-                          className="btn-icon danger"
-                          title="Eliminar"
-                          onClick={() => {
-                            if (confirm('¿Eliminar este movimiento?')) deleteMovimiento(m.id)
-                          }}
-                        >
-                          ✕
-                        </button>
+                        puedeEliminar ? (
+                          <button
+                            className="btn-icon danger"
+                            title="Eliminar"
+                            onClick={() => {
+                              if (confirm('¿Eliminar este movimiento?')) deleteMovimiento(m.id)
+                            }}
+                          >
+                            ✕
+                          </button>
+                        ) : (
+                          <span className="muted small">—</span>
+                        )
                       ) : (
                         <span className="muted small" title="Se elimina desde la nómina o el adelanto que lo originó">🔒</span>
                       )}

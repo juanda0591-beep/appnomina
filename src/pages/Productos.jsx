@@ -1,11 +1,16 @@
 import { useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP } from '../utils/format.js'
 
 const emptyProceso = () => ({ nombre: '', pago: '' })
 
 export default function Productos() {
   const { productos, addProducto, updateProducto, deleteProducto } = useData()
+  const { puede } = useAuth()
+  const puedeCrear = puede('productos', 'crear')
+  const puedeEditar = puede('productos', 'editar')
+  const puedeEliminar = puede('productos', 'eliminar')
 
   const [nombre, setNombre] = useState('')
   const [procesos, setProcesos] = useState([emptyProceso()])
@@ -54,6 +59,7 @@ export default function Productos() {
         (ej: pintura $5, armado $8). El pago es por unidad realizada.
       </p>
 
+      {(puedeCrear || (editId && puedeEditar)) && (
       <form className="card" onSubmit={handleSubmit}>
         <h3>{editId ? 'Editar producto' : 'Nuevo producto'}</h3>
         <label>Nombre del producto</label>
@@ -101,6 +107,7 @@ export default function Productos() {
           )}
         </div>
       </form>
+      )}
 
       <div className="card">
         <h3>Productos registrados ({productos.length})</h3>
@@ -133,17 +140,22 @@ export default function Productos() {
                     </td>
                     <td className="num">
                       <div className="actions" style={{ justifyContent: 'flex-end' }}>
-                        <button className="btn-secondary" onClick={() => startEdit(prod)}>
-                          Editar
-                        </button>
-                        <button
-                          className="btn-danger"
-                          onClick={() => {
-                            if (confirm(`¿Eliminar "${prod.nombre}"?`)) deleteProducto(prod.id)
-                          }}
-                        >
-                          Eliminar
-                        </button>
+                        {puedeEditar && (
+                          <button className="btn-secondary" onClick={() => startEdit(prod)}>
+                            Editar
+                          </button>
+                        )}
+                        {puedeEliminar && (
+                          <button
+                            className="btn-danger"
+                            onClick={() => {
+                              if (confirm(`¿Eliminar "${prod.nombre}"?`)) deleteProducto(prod.id)
+                            }}
+                          >
+                            Eliminar
+                          </button>
+                        )}
+                        {!puedeEditar && !puedeEliminar && <span className="muted small">—</span>}
                       </div>
                     </td>
                   </tr>

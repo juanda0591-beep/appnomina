@@ -147,11 +147,21 @@ export function DataProvider({ children }) {
 
   // ---------- USUARIOS (solo admin) ----------
   const getUsuarios = () => http('/usuarios')
-  const addUsuario = (username, password, rol) =>
-    http('/usuarios', { method: 'POST', body: JSON.stringify({ username, password, rol }) })
+  const addUsuario = (username, password, rol, permisos) =>
+    http('/usuarios', { method: 'POST', body: JSON.stringify({ username, password, rol, permisos }) })
   const deleteUsuario = (id) => http(`/usuarios/${id}`, { method: 'DELETE' })
   const resetUsuarioPassword = (id, nueva) =>
     http(`/usuarios/${id}/password`, { method: 'POST', body: JSON.stringify({ nueva }) })
+  const updateUsuarioPermisos = (id, permisos) =>
+    http(`/usuarios/${id}/permisos`, { method: 'PUT', body: JSON.stringify({ permisos }) })
+
+  // ---------- COSTEOS (Costos de productos) ----------
+  const getCosteos = () => http('/costeos')
+  const addCosteo = (nombre, datos) =>
+    http('/costeos', { method: 'POST', body: JSON.stringify({ nombre, datos }) })
+  const updateCosteo = (id, nombre, datos) =>
+    http(`/costeos/${id}`, { method: 'PUT', body: JSON.stringify({ nombre, datos }) })
+  const deleteCosteo = (id) => http(`/costeos/${id}`, { method: 'DELETE' })
 
   // Helpers de consulta (sobre estado en memoria)
   const getEmpleado = (id) => empleados.find((e) => String(e.id) === String(id))
@@ -190,6 +200,11 @@ export function DataProvider({ children }) {
     addUsuario,
     deleteUsuario,
     resetUsuarioPassword,
+    updateUsuarioPermisos,
+    getCosteos,
+    addCosteo,
+    updateCosteo,
+    deleteCosteo,
     getEmpleado,
     getProducto,
     prestamosDeEmpleado,

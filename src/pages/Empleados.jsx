@@ -1,11 +1,16 @@
 import { useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP } from '../utils/format.js'
 
 const emptyEmp = { nombre: '', cedula: '', telefono: '', cargo: '' }
 
 export default function Empleados() {
   const { empleados, addEmpleado, updateEmpleado, deleteEmpleado, prestamosDeEmpleado } = useData()
+  const { puede } = useAuth()
+  const puedeCrear = puede('empleados', 'crear')
+  const puedeEditar = puede('empleados', 'editar')
+  const puedeEliminar = puede('empleados', 'eliminar')
   const [form, setForm] = useState(emptyEmp)
   const [editId, setEditId] = useState(null)
 
@@ -38,6 +43,7 @@ export default function Empleados() {
     <div>
       <h2>👷 Empleados</h2>
 
+      {(puedeCrear || (editId && puedeEditar)) && (
       <form className="card" onSubmit={handleSubmit}>
         <h3>{editId ? 'Editar empleado' : 'Nuevo empleado'}</h3>
         <div className="row">
@@ -72,6 +78,7 @@ export default function Empleados() {
           )}
         </div>
       </form>
+      )}
 
       <div className="card">
         <h3>Empleados registrados ({empleados.length})</h3>
@@ -95,15 +102,19 @@ export default function Empleados() {
                 )}
               </div>
               <div className="actions">
-                <button className="btn-secondary" onClick={() => startEdit(emp)}>Editar</button>
-                <button
-                  className="btn-danger"
-                  onClick={() => {
-                    if (confirm(`¿Eliminar a "${emp.nombre}"?`)) deleteEmpleado(emp.id)
-                  }}
-                >
-                  Eliminar
-                </button>
+                {puedeEditar && (
+                  <button className="btn-secondary" onClick={() => startEdit(emp)}>Editar</button>
+                )}
+                {puedeEliminar && (
+                  <button
+                    className="btn-danger"
+                    onClick={() => {
+                      if (confirm(`¿Eliminar a "${emp.nombre}"?`)) deleteEmpleado(emp.id)
+                    }}
+                  >
+                    Eliminar
+                  </button>
+                )}
               </div>
             </div>
           )

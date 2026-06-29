@@ -63,13 +63,30 @@ function verifyToken(token) {
   }
 }
 
+// Lee y parsea los permisos guardados (JSON). Devuelve null si no hay nada
+// guardado (NULL) → el front lo interpreta como "acceso amplio" para no romper
+// a los usuarios creados antes de esta función.
+function parsePermisos(raw) {
+  if (!raw) return null
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
 // ---------- Lógica de login / cambio de contraseña ----------
 export function login(username, password) {
   const user = db.prepare('SELECT * FROM usuarios WHERE username = ?').get(String(username || '').trim())
   if (!user) return null
   if (!verifyPassword(password, user.salt, user.hash)) return null
   const rol = user.rol || 'usuario'
-  return { token: makeToken(user.username, rol), username: user.username, rol }
+  return {
+    token: makeToken(user.username, rol),
+    username: user.username,
+    rol,
+    permisos: rol === 'admin' ? null : parsePermisos(user.permisos),
+  }
 }
 
 export function cambiarPassword(username, actual, nueva) {
@@ -84,10 +101,13 @@ export function cambiarPassword(username, actual, nueva) {
 
 // ---------- Gestión de usuarios (solo admin) ----------
 export function listarUsuarios() {
-  return db.prepare('SELECT id, username, rol FROM usuarios ORDER BY username').all()
+  return db
+    .prepare('SELECT id, username, rol, permisos FROM usuarios ORDER BY username')
+    .all()
+    .map((u) => ({ id: u.id, username: u.username, rol: u.rol, permisos: parsePermisos(u.permisos) }))
 }
 
-export function crearUsuario(username, password, rol = 'usuario') {
+export function crearUsuario(username, password, rol = 'usuario', permisos = null) {
   const u = String(username || '').trim()
   if (!u) return { ok: false, error: 'El nombre de usuario es obligatorio' }
   if (!password || String(password).length < 4) return { ok: false, error: 'La contraseña debe tener al menos 4 caracteres' }
@@ -95,8 +115,24 @@ export function crearUsuario(username, password, rol = 'usuario') {
   const existe = db.prepare('SELECT id FROM usuarios WHERE username = ?').get(u)
   if (existe) return { ok: false, error: 'Ya existe un usuario con ese nombre' }
   const { salt, hash } = hashPassword(password)
-  const res = db.prepare('INSERT INTO usuarios (username, salt, hash, rol) VALUES (?, ?, ?, ?)').run(u, salt, hash, r)
-  return { ok: true, usuario: { id: res.lastInsertRowid, username: u, rol: r } }
+  // Los admin no usan permisos (acceso total). Para usuarios normales se guarda
+  // el objeto recibido; si no llega nada, queda NULL (acceso amplio por compatibilidad).
+  const permJson = r === 'admin' || !permisos ? null : JSON.stringify(permisos)
+  const res = db
+    .prepare('INSERT INTO usuarios (username, salt, hash, rol, permisos) VALUES (?, ?, ?, ?, ?)')
+    .run(u, salt, hash, r, permJson)
+  return { ok: true, usuario: { id: res.lastInsertRowid, username: u, rol: r, permisos } }
+}
+
+// Actualiza la matriz de permisos de un usuario normal. A un admin no se le
+// tocan (siempre tiene acceso total).
+export function actualizarPermisos(id, permisos) {
+  const user = db.prepare('SELECT * FROM usuarios WHERE id = ?').get(id)
+  if (!user) return { ok: false, error: 'Usuario no encontrado' }
+  if (user.rol === 'admin') return { ok: false, error: 'El administrador siempre tiene acceso total' }
+  const permJson = permisos ? JSON.stringify(permisos) : null
+  db.prepare('UPDATE usuarios SET permisos = ? WHERE id = ?').run(permJson, id)
+  return { ok: true }
 }
 
 export function eliminarUsuario(id, solicitanteUsername) {
@@ -140,4 +176,18 @@ export function authRequired(req, res, next) {
 export function adminRequired(req, res, next) {
   if (req.rol !== 'admin') return res.status(403).json({ error: 'Solo el administrador puede hacer esto' })
   next()
+}
+
+// Restringe una ruta según la matriz de permisos del usuario. El admin siempre
+// pasa. Un usuario con permisos NULL (creado antes de esta función) también pasa
+// (acceso amplio por compatibilidad). El resto debe tener (pagina, accion) en true.
+export function permisoRequired(pagina, accion) {
+  return (req, res, next) => {
+    if (req.rol === 'admin') return next()
+    const user = db.prepare('SELECT permisos FROM usuarios WHERE username = ?').get(req.usuario)
+    const permisos = parsePermisos(user?.permisos)
+    if (!permisos) return next() // acceso amplio (compatibilidad)
+    if (permisos[pagina] && permisos[pagina][accion]) return next()
+    return res.status(403).json({ error: 'No tienes permiso para realizar esta acción' })
+  }
 }

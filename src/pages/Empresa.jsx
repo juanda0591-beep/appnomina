@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
 
 const vacio = { nombre: '', direccion: '', telefono: '', correo: '', nit: '', logo: '' }
 
 export default function Empresa() {
   const { empresa, updateEmpresa } = useData()
+  const { puede } = useAuth()
+  const puedeEditar = puede('empresa', 'editar')
   const [form, setForm] = useState(vacio)
   const [guardando, setGuardando] = useState(false)
   const [guardado, setGuardado] = useState(false)
@@ -93,10 +96,11 @@ export default function Empresa() {
         )}
 
         <div className="form-actions">
-          <button type="submit" className="btn-primary" disabled={guardando}>
+          <button type="submit" className="btn-primary" disabled={guardando || !puedeEditar}>
             {guardando ? 'Guardando…' : 'Guardar datos'}
           </button>
           {guardado && <span className="chip">✅ Guardado</span>}
+          {!puedeEditar && <span className="muted small">No tienes permiso para editar estos datos.</span>}
         </div>
       </form>
     </div>

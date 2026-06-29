@@ -322,3 +322,104 @@ function pieDePagina(doc, empresa, marginX) {
   const texto = empresa?.nombre ? `${empresa.nombre} · Sistema de Nómina` : 'Generado por Sistema de Nómina'
   doc.text(texto, marginX, doc.internal.pageSize.getHeight() - 10)
 }
+
+// Genera y descarga el PDF de un costeo de producto.
+// `r` es el objeto de resultados de calcularCosteo(); `nombre` el nombre del costeo.
+export function generarPdfCosteo({ empresa, nombre, r }) {
+  const doc = new jsPDF()
+  const marginX = 14
+
+  let y = drawEncabezadoEmpresa(doc, empresa, marginX)
+
+  doc.setFontSize(16)
+  doc.setTextColor(15, 23, 42)
+  doc.text('Costeo y rentabilidad', marginX, y)
+  y += 8
+
+  doc.setFontSize(12)
+  doc.setTextColor(90)
+  doc.text(`Producto: ${nombre || '—'}`, marginX, y)
+  y += 6
+
+  // Desglose de costos por categoría
+  const totalDesglose = r.desglose.reduce((s, d) => s + d.valor, 0)
+  autoTable(doc, {
+    startY: y,
+    head: [['Categoría de costo', 'Costo por unidad', '% del costo']],
+    body: r.desglose.map((d) => [
+      d.categoria,
+      formatCOP(d.valor),
+      totalDesglose > 0 ? `${((d.valor / totalDesglose) * 100).toFixed(1)}%` : '0%',
+    ]),
+    foot: [['Costo total unitario', formatCOP(r.costoTotalUnit), '100%']],
+    styles: { fontSize: 10 },
+    headStyles: { fillColor: [37, 99, 235] },
+    footStyles: { fillColor: [226, 232, 240], textColor: 0, fontStyle: 'bold' },
+    columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' } },
+    didParseCell: (data) => {
+      if ([1, 2].includes(data.column.index)) data.cell.styles.halign = 'right'
+    },
+  })
+  y = doc.lastAutoTable.finalY + 8
+
+  // Rentabilidad
+  doc.setFontSize(11)
+  doc.setTextColor(0)
+  doc.text(`Precio de venta: ${formatCOP(r.precioVenta)}`, marginX, y); y += 6
+  doc.text(`Ganancia unitaria: ${formatCOP(r.gananciaUnit)}`, marginX, y); y += 6
+  doc.text(`Margen: ${r.margenPct.toFixed(1)}%   ·   Markup: ${r.markupPct.toFixed(1)}%`, marginX, y); y += 8
+
+  // Escenarios de descuento por volumen
+  if (r.escenarios.length > 0) {
+    autoTable(doc, {
+      startY: y,
+      head: [['Tramo', '% desc.', 'Precio c/desc.', 'Ganancia und.', 'Ganancia tramo', 'Alerta']],
+      body: r.escenarios.map((e) => [
+        `${e.min}${e.max == null ? '+' : '–' + e.max}`,
+        `${e.descuentoPct}%`,
+        formatCOP(e.precioDesc),
+        formatCOP(e.gananciaDescUnit),
+        formatCOP(e.gananciaTramo),
+        e.alerta ? '⚠' : '',
+      ]),
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [37, 99, 235] },
+      columnStyles: {
+        1: { halign: 'right' }, 2: { halign: 'right' },
+        3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'center' },
+      },
+      didParseCell: (data) => {
+        if ([1, 2, 3, 4].includes(data.column.index)) data.cell.styles.halign = 'right'
+        if (data.column.index === 5) data.cell.styles.halign = 'center'
+        // Marca en rojo las filas con alerta (ganancia negativa o bajo el margen mínimo)
+        if (data.section === 'body' && r.escenarios[data.row.index]?.alerta) {
+          data.cell.styles.textColor = [220, 38, 38]
+        }
+      },
+    })
+    y = doc.lastAutoTable.finalY + 6
+    doc.setFontSize(9)
+    doc.setTextColor(150)
+    doc.text(`Ganancia original (sin descuento): ${formatCOP(r.gananciaUnit)} por unidad · margen mínimo: ${r.margenMinimo}%`, marginX, y)
+  }
+
+  pieDePagina(doc, empresa, marginX)
+  doc.save(`costeo_${(nombre || 'producto').replace(/\s+/g, '_')}.pdf`)
+}
+
+// Arma un CSV a partir de filas (array de arrays) y lo descarga.
+// Se abre directo en Excel. Usa ; como separador (locale es-CO) y BOM para acentos.
+export function descargarCSV(nombreArchivo, filas) {
+  const escapar = (v) => {
+    const s = String(v ?? '')
+    return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  const contenido = '﻿' + filas.map((fila) => fila.map(escapar).join(';')).join('\n')
+  const blob = new Blob([contenido], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = nombreArchivo
+  a.click()
+  URL.revokeObjectURL(url)
+}

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha } from '../utils/format.js'
 import { generarPdfReporte, generarPdfMovimientos } from '../utils/pdf.js'
 
@@ -10,6 +11,8 @@ function inicioDeMes() {
 
 export default function Reportes() {
   const { getReporte, getMovimientos, empresa } = useData()
+  const { puede } = useAuth()
+  const puedeExportar = puede('reportes', 'exportar')
   const hoy = new Date().toISOString().slice(0, 10)
 
   const [desde, setDesde] = useState(inicioDeMes())
@@ -92,7 +95,7 @@ export default function Reportes() {
           <div className="card">
             <div className="card-head">
               <h3>Resumen por empleado</h3>
-              {reporte.cantidad > 0 && (
+              {reporte.cantidad > 0 && puedeExportar && (
                 <button className="btn-secondary" onClick={() => generarPdfReporte({ ...reporte, empresa })}>
                   📄 Descargar PDF
                 </button>
@@ -145,7 +148,7 @@ export default function Reportes() {
             <div className="card">
               <div className="card-head">
                 <h3>Movimientos del periodo</h3>
-                {movs.lista.length > 0 && (
+                {movs.lista.length > 0 && puedeExportar && (
                   <button
                     className="btn-secondary"
                     onClick={() =>

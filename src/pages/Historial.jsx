@@ -1,10 +1,14 @@
 import { useState } from "react"
 import { useData } from "../context/DataContext.jsx"
+import { useAuth } from "../context/AuthContext.jsx"
 import { formatCOP, formatFecha } from "../utils/format.js"
 import { generarPdfNomina } from "../utils/pdf.js"
 
 export default function Historial() {
   const { nominas, empresa, prestamos, getEmpleado, deleteNomina } = useData()
+  const { puede } = useAuth()
+  const puedeEliminar = puede("historial", "eliminar")
+  const puedeExportar = puede("historial", "exportar")
 
   // Saldo actual (de hoy) de los préstamos pendientes de un empleado
   const saldoActualEmpleado = (empleadoId) =>
@@ -152,7 +156,7 @@ export default function Historial() {
         </div>
 
         <div style={{ marginTop: 10, display: "flex", gap: 10 }}>
-          <button onClick={exportarExcel}>📊 Excel</button>
+          {puedeExportar && <button onClick={exportarExcel}>📊 Excel</button>}
         </div>
       </div>
 
@@ -192,19 +196,21 @@ export default function Historial() {
                 <button onClick={() => reimprimir(n)}>📄 PDF</button>
                 <button onClick={() => enviarWhatsApp(n)}>📱 WhatsApp</button>
 
-                <button
-                  className="btn-danger"
-                  onClick={() => {
-                    if (
-                      confirm(
-                        "¿Eliminar este pago? (No se puede revertir)"
+                {puedeEliminar && (
+                  <button
+                    className="btn-danger"
+                    onClick={() => {
+                      if (
+                        confirm(
+                          "¿Eliminar este pago? (No se puede revertir)"
+                        )
                       )
-                    )
-                      deleteNomina(n.id)
-                  }}
-                >
-                  Eliminar
-                </button>
+                        deleteNomina(n.id)
+                    }}
+                  >
+                    Eliminar
+                  </button>
+                )}
               </div>
             </div>
 

@@ -8,39 +8,52 @@ import Nomina from './pages/Nomina.jsx'
 import ControlDinero from './pages/ControlDinero.jsx'
 import Historial from './pages/Historial.jsx'
 import Reportes from './pages/Reportes.jsx'
+import Costos from './pages/Costos.jsx'
 import Empresa from './pages/Empresa.jsx'
 import Usuarios from './pages/Usuarios.jsx'
 import Cuenta from './pages/Cuenta.jsx'
 import { useData } from './context/DataContext.jsx'
 import { useAuth } from './context/AuthContext.jsx'
 
-// Cada enlace puede pedir rol 'admin'. Sin rol → visible para todos.
+// Enlaces del menú. `pagina` se cruza con los permisos del usuario (puede(pagina,'ver')).
+// `solo` marca enlaces de regla fija: 'admin' (gestión de usuarios) o 'todos' (Mi cuenta).
 const links = [
-  { to: '/inicio', label: '🏠 Inicio' },
-  { to: '/nomina', label: '🧾 Pago de Nómina' },
-  { to: '/productos', label: '📦 Productos' },
-  { to: '/empleados', label: '👷 Empleados' },
-  { to: '/prestamos', label: '💵 Préstamos' },
-  { to: '/control-dinero', label: '💰 Control de Dinero' },
-  { to: '/historial', label: '📚 Historial' },
-  { to: '/reportes', label: '📊 Reportes' },
-  { to: '/empresa', label: '🏢 Empresa' },
-  { to: '/usuarios', label: '👥 Usuarios', rol: 'admin' },
-  { to: '/cuenta', label: '🔒 Mi cuenta' },
+  { to: '/inicio', label: '🏠 Inicio', pagina: 'inicio' },
+  { to: '/nomina', label: '🧾 Pago de Nómina', pagina: 'nomina' },
+  { to: '/productos', label: '📦 Productos', pagina: 'productos' },
+  { to: '/empleados', label: '👷 Empleados', pagina: 'empleados' },
+  { to: '/prestamos', label: '💵 Préstamos', pagina: 'prestamos' },
+  { to: '/control-dinero', label: '💰 Control de Dinero', pagina: 'control-dinero' },
+  { to: '/historial', label: '📚 Historial', pagina: 'historial' },
+  { to: '/reportes', label: '📊 Reportes', pagina: 'reportes' },
+  { to: '/costos', label: '💲 Costos', pagina: 'costos' },
+  { to: '/empresa', label: '🏢 Empresa', pagina: 'empresa' },
+  { to: '/usuarios', label: '👥 Usuarios', solo: 'admin' },
+  { to: '/cuenta', label: '🔒 Mi cuenta', solo: 'todos' },
 ]
 
 export default function App() {
   const [menuOpen, setMenuOpen] = useState(false)
   const { cargando, error } = useData()
-  const { usuario, rol, logout } = useAuth()
+  const { usuario, rol, puede, logout } = useAuth()
   const location = useLocation()
 
   // cerrar el menú al cambiar de página (móvil)
   const closeMenu = () => setMenuOpen(false)
 
-  // Oculta los enlaces que exigen un rol que el usuario no tiene
-  const visibles = links.filter((l) => !l.rol || l.rol === rol)
   const esAdmin = rol === 'admin'
+
+  // Filtra el menú: 'admin' solo para administradores; 'todos' siempre visible;
+  // el resto según el permiso de ver la página.
+  const visibles = links.filter((l) => {
+    if (l.solo === 'admin') return esAdmin
+    if (l.solo === 'todos') return true
+    return puede(l.pagina, 'ver')
+  })
+
+  // Envuelve una página: si el usuario no puede verla, redirige al inicio.
+  const protegida = (pagina, elemento) =>
+    puede(pagina, 'ver') ? elemento : <Navigate to="/inicio" replace />
 
   return (
     <div className="app">
@@ -80,14 +93,15 @@ export default function App() {
         <Routes location={location}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/inicio" element={<Dashboard />} />
-          <Route path="/nomina" element={<Nomina />} />
-          <Route path="/productos" element={<Productos />} />
-          <Route path="/empleados" element={<Empleados />} />
-          <Route path="/prestamos" element={<Prestamos />} />
-          <Route path="/control-dinero" element={<ControlDinero />} />
-          <Route path="/historial" element={<Historial />} />
-          <Route path="/reportes" element={<Reportes />} />
-          <Route path="/empresa" element={<Empresa />} />
+          <Route path="/nomina" element={protegida('nomina', <Nomina />)} />
+          <Route path="/productos" element={protegida('productos', <Productos />)} />
+          <Route path="/empleados" element={protegida('empleados', <Empleados />)} />
+          <Route path="/prestamos" element={protegida('prestamos', <Prestamos />)} />
+          <Route path="/control-dinero" element={protegida('control-dinero', <ControlDinero />)} />
+          <Route path="/historial" element={protegida('historial', <Historial />)} />
+          <Route path="/reportes" element={protegida('reportes', <Reportes />)} />
+          <Route path="/costos" element={protegida('costos', <Costos />)} />
+          <Route path="/empresa" element={protegida('empresa', <Empresa />)} />
           <Route path="/usuarios" element={esAdmin ? <Usuarios /> : <Navigate to="/inicio" replace />} />
           <Route path="/cuenta" element={<Cuenta />} />
         </Routes>

@@ -99,7 +99,15 @@ db.exec(`
     username TEXT UNIQUE NOT NULL,
     salt TEXT NOT NULL,
     hash TEXT NOT NULL,
-    rol TEXT NOT NULL DEFAULT 'usuario'
+    rol TEXT NOT NULL DEFAULT 'usuario',
+    permisos TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS costeos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL,
+    datos TEXT NOT NULL DEFAULT '{}',
+    actualizado TEXT
   );
 
   CREATE TABLE IF NOT EXISTS app_secret (
@@ -121,6 +129,13 @@ if (!colsUsuarios.some((c) => c.name === 'rol')) {
   db.exec("ALTER TABLE usuarios ADD COLUMN rol TEXT NOT NULL DEFAULT 'usuario'")
   const primero = db.prepare('SELECT id FROM usuarios ORDER BY id ASC LIMIT 1').get()
   if (primero) db.prepare("UPDATE usuarios SET rol = 'admin' WHERE id = ?").run(primero.id)
+}
+
+// Columna de permisos granulares (JSON) en usuarios. Los usuarios que ya
+// existían (permisos NULL) conservan acceso amplio; el front interpreta NULL
+// como "todo permitido" para no romper el comportamiento previo.
+if (!colsUsuarios.some((c) => c.name === 'permisos')) {
+  db.exec('ALTER TABLE usuarios ADD COLUMN permisos TEXT')
 }
 
 // Garantiza que exista la fila única de configuración de empresa

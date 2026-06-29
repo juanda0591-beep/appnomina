@@ -1,9 +1,13 @@
 import { useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha } from '../utils/format.js'
 
 export default function Prestamos() {
   const { empleados, prestamos, addPrestamo, deletePrestamo, getEmpleado } = useData()
+  const { puede } = useAuth()
+  const puedeCrear = puede('prestamos', 'crear')
+  const puedeEliminar = puede('prestamos', 'eliminar')
 
   const hoy = new Date().toISOString().slice(0, 10)
   const [empleadoId, setEmpleadoId] = useState('')
@@ -31,6 +35,7 @@ export default function Prestamos() {
         aplicas un descuento en el pago de nómina.
       </p>
 
+      {puedeCrear && (
       <form className="card" onSubmit={handleSubmit}>
         <h3>Nuevo préstamo</h3>
         <div className="row">
@@ -62,6 +67,7 @@ export default function Prestamos() {
           <p className="muted small">Primero agrega empleados en la sección Empleados.</p>
         )}
       </form>
+      )}
 
       <div className="card">
         <h3>Préstamos registrados</h3>
@@ -94,15 +100,17 @@ export default function Prestamos() {
                     <td className="num">{formatCOP(p.monto)}</td>
                     <td className="num">{p.saldo === 0 ? '✅ Pagado' : formatCOP(p.saldo)}</td>
                     <td>
-                      <button
-                        className="btn-icon danger"
-                        title="Eliminar"
-                        onClick={() => {
-                          if (confirm('¿Eliminar este préstamo?')) deletePrestamo(p.id)
-                        }}
-                      >
-                        ✕
-                      </button>
+                      {puedeEliminar && (
+                        <button
+                          className="btn-icon danger"
+                          title="Eliminar"
+                          onClick={() => {
+                            if (confirm('¿Eliminar este préstamo?')) deletePrestamo(p.id)
+                          }}
+                        >
+                          ✕
+                        </button>
+                      )}
                     </td>
                   </tr>
                 )

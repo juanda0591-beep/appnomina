@@ -7,11 +7,13 @@ import db from './db.js'
 import {
   authRequired,
   adminRequired,
+  permisoRequired,
   login,
   cambiarPassword,
   seedUsuario,
   listarUsuarios,
   crearUsuario,
+  actualizarPermisos,
   eliminarUsuario,
   resetPassword,
 } from './auth.js'
@@ -99,10 +101,16 @@ app.get('/api/usuarios', adminRequired, (req, res) => {
 })
 
 app.post('/api/usuarios', adminRequired, (req, res) => {
-  const { username, password, rol } = req.body
-  const result = crearUsuario(username, password, rol)
+  const { username, password, rol, permisos } = req.body
+  const result = crearUsuario(username, password, rol, permisos)
   if (!result.ok) return res.status(400).json({ error: result.error })
   res.json(result.usuario)
+})
+
+app.put('/api/usuarios/:id/permisos', adminRequired, (req, res) => {
+  const result = actualizarPermisos(Number(req.params.id), req.body.permisos)
+  if (!result.ok) return res.status(400).json({ error: result.error })
+  res.json({ ok: true })
 })
 
 app.post('/api/usuarios/:id/password', adminRequired, (req, res) => {
@@ -201,7 +209,7 @@ app.get('/api/productos', (req, res) => {
   res.json(productos.map(productoConProcesos))
 })
 
-app.post('/api/productos', (req, res) => {
+app.post('/api/productos', permisoRequired('productos', 'crear'), (req, res) => {
   const { nombre, procesos = [] } = req.body
   const insert = db.transaction(() => {
     const r = db.prepare('INSERT INTO productos (nombre) VALUES (?)').run(nombre.trim())
@@ -214,7 +222,7 @@ app.post('/api/productos', (req, res) => {
   res.json(productoConProcesos(db.prepare('SELECT * FROM productos WHERE id = ?').get(pid)))
 })
 
-app.put('/api/productos/:id', (req, res) => {
+app.put('/api/productos/:id', permisoRequired('productos', 'editar'), (req, res) => {
   const { id } = req.params
   const { nombre, procesos = [] } = req.body
   const update = db.transaction(() => {
@@ -227,7 +235,7 @@ app.put('/api/productos/:id', (req, res) => {
   res.json(productoConProcesos(db.prepare('SELECT * FROM productos WHERE id = ?').get(id)))
 })
 
-app.delete('/api/productos/:id', (req, res) => {
+app.delete('/api/productos/:id', permisoRequired('productos', 'eliminar'), (req, res) => {
   db.prepare('DELETE FROM productos WHERE id = ?').run(req.params.id)
   res.json({ ok: true })
 })
@@ -237,7 +245,7 @@ app.get('/api/empleados', (req, res) => {
   res.json(db.prepare('SELECT * FROM empleados ORDER BY nombre').all())
 })
 
-app.post('/api/empleados', (req, res) => {
+app.post('/api/empleados', permisoRequired('empleados', 'crear'), (req, res) => {
   const { nombre, cedula, telefono, cargo } = req.body
   const r = db
     .prepare('INSERT INTO empleados (nombre, cedula, telefono, cargo) VALUES (?, ?, ?, ?)')
@@ -245,14 +253,14 @@ app.post('/api/empleados', (req, res) => {
   res.json(db.prepare('SELECT * FROM empleados WHERE id = ?').get(r.lastInsertRowid))
 })
 
-app.put('/api/empleados/:id', (req, res) => {
+app.put('/api/empleados/:id', permisoRequired('empleados', 'editar'), (req, res) => {
   const { nombre, cedula, telefono, cargo } = req.body
   db.prepare('UPDATE empleados SET nombre=?, cedula=?, telefono=?, cargo=? WHERE id=?')
     .run(nombre.trim(), cedula || '', telefono || '', cargo || '', req.params.id)
   res.json(db.prepare('SELECT * FROM empleados WHERE id = ?').get(req.params.id))
 })
 
-app.delete('/api/empleados/:id', (req, res) => {
+app.delete('/api/empleados/:id', permisoRequired('empleados', 'eliminar'), (req, res) => {
   db.prepare('DELETE FROM empleados WHERE id = ?').run(req.params.id)
   res.json({ ok: true })
 })
@@ -262,7 +270,7 @@ app.get('/api/prestamos', (req, res) => {
   res.json(db.prepare('SELECT * FROM prestamos ORDER BY fecha DESC, id DESC').all())
 })
 
-app.post('/api/prestamos', (req, res) => {
+app.post('/api/prestamos', permisoRequired('prestamos', 'crear'), (req, res) => {
   const { empleadoId, monto, fecha, descripcion } = req.body
   const m = Number(monto) || 0
   const tx = db.transaction(() => {
@@ -286,7 +294,7 @@ app.post('/api/prestamos', (req, res) => {
   res.json(db.prepare('SELECT * FROM prestamos WHERE id = ?').get(pid))
 })
 
-app.delete('/api/prestamos/:id', (req, res) => {
+app.delete('/api/prestamos/:id', permisoRequired('prestamos', 'eliminar'), (req, res) => {
   const tx = db.transaction(() => {
     db.prepare('DELETE FROM prestamos WHERE id = ?').run(req.params.id)
     // borra el gasto automático asociado a este adelanto
@@ -334,7 +342,7 @@ app.get('/api/nominas', (req, res) => {
   res.json(rows.map(nominaCompleta))
 })
 
-app.post('/api/nominas', (req, res) => {
+app.post('/api/nominas', permisoRequired('nomina', 'crear'), (req, res) => {
   const { empleadoId, fecha, items = [], descuentos = [], subtotal, totalDescuentos, total, comentario } = req.body
   const tx = db.transaction(() => {
     const r = db
@@ -374,7 +382,7 @@ app.post('/api/nominas', (req, res) => {
   res.json(nominaCompleta(db.prepare('SELECT * FROM nominas WHERE id = ?').get(nid)))
 })
 
-app.delete('/api/nominas/:id', (req, res) => {
+app.delete('/api/nominas/:id', permisoRequired('historial', 'eliminar'), (req, res) => {
   const tx = db.transaction(() => {
     db.prepare('DELETE FROM nominas WHERE id = ?').run(req.params.id)
     // borra el gasto automático asociado a esta nómina
@@ -414,7 +422,7 @@ app.get('/api/movimientos/:id/comprobante', (req, res) => {
   res.send(buffer)
 })
 
-app.post('/api/movimientos', (req, res) => {
+app.post('/api/movimientos', permisoRequired('control-dinero', 'crear'), (req, res) => {
   const { tipo, fecha, categoria, monto, descripcion, comprobante, comprobanteTipo } = req.body
   if (tipo !== 'ingreso' && tipo !== 'gasto') {
     return res.status(400).json({ error: 'tipo debe ser ingreso o gasto' })
@@ -433,7 +441,7 @@ app.post('/api/movimientos', (req, res) => {
   res.json(movimientoSalida(db.prepare('SELECT * FROM movimientos WHERE id = ?').get(r.lastInsertRowid)))
 })
 
-app.delete('/api/movimientos/:id', (req, res) => {
+app.delete('/api/movimientos/:id', permisoRequired('control-dinero', 'eliminar'), (req, res) => {
   const m = db.prepare('SELECT origen FROM movimientos WHERE id = ?').get(req.params.id)
   if (m && m.origen !== 'manual') {
     return res.status(400).json({ error: 'Este movimiento es automático; elimina la nómina o el adelanto que lo originó.' })
@@ -447,7 +455,7 @@ app.get('/api/empresa', (req, res) => {
   res.json(db.prepare('SELECT * FROM empresa WHERE id = 1').get())
 })
 
-app.put('/api/empresa', (req, res) => {
+app.put('/api/empresa', permisoRequired('empresa', 'editar'), (req, res) => {
   const { nombre, direccion, telefono, correo, nit, logo } = req.body
   db.prepare(
     'UPDATE empresa SET nombre=?, direccion=?, telefono=?, correo=?, nit=?, logo=? WHERE id = 1'
@@ -487,6 +495,47 @@ app.get('/api/reportes', (req, res) => {
   }))
 
   res.json({ desde, hasta, totalBruto, totalDescuentos, totalPagado, cantidad: nominas.length, porEmpleado, nominas })
+})
+
+// ============ COSTEOS (Costos de productos) ============
+// La estructura completa del costeo se guarda como JSON en la columna `datos`.
+function costeoSalida(c) {
+  let datos = {}
+  try {
+    datos = JSON.parse(c.datos || '{}')
+  } catch {
+    datos = {}
+  }
+  return { id: c.id, nombre: c.nombre, actualizado: c.actualizado, datos }
+}
+
+app.get('/api/costeos', permisoRequired('costos', 'ver'), (req, res) => {
+  const rows = db.prepare('SELECT * FROM costeos ORDER BY nombre').all()
+  res.json(rows.map(costeoSalida))
+})
+
+app.post('/api/costeos', permisoRequired('costos', 'crear'), (req, res) => {
+  const { nombre, datos } = req.body
+  const nom = String(nombre || '').trim()
+  if (!nom) return res.status(400).json({ error: 'El nombre del costeo es obligatorio' })
+  const r = db
+    .prepare('INSERT INTO costeos (nombre, datos, actualizado) VALUES (?, ?, ?)')
+    .run(nom, JSON.stringify(datos || {}), new Date().toISOString())
+  res.json(costeoSalida(db.prepare('SELECT * FROM costeos WHERE id = ?').get(r.lastInsertRowid)))
+})
+
+app.put('/api/costeos/:id', permisoRequired('costos', 'editar'), (req, res) => {
+  const { nombre, datos } = req.body
+  const nom = String(nombre || '').trim()
+  if (!nom) return res.status(400).json({ error: 'El nombre del costeo es obligatorio' })
+  db.prepare('UPDATE costeos SET nombre = ?, datos = ?, actualizado = ? WHERE id = ?')
+    .run(nom, JSON.stringify(datos || {}), new Date().toISOString(), req.params.id)
+  res.json(costeoSalida(db.prepare('SELECT * FROM costeos WHERE id = ?').get(req.params.id)))
+})
+
+app.delete('/api/costeos/:id', permisoRequired('costos', 'eliminar'), (req, res) => {
+  db.prepare('DELETE FROM costeos WHERE id = ?').run(req.params.id)
+  res.json({ ok: true })
 })
 
 // ============ Servir frontend compilado (producción / acceso LAN) ============
