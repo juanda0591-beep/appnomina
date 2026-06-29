@@ -250,6 +250,27 @@ input[type="file"] {
 .stat-label { font-size: 13px; color: var(--muted); font-weight: 600; }
 .stat-value { font-size: 22px; font-weight: 700; }
 
+/* ---------- Dashboard ---------- */
+.dash-grid {
+  display: grid; gap: 14px; margin-bottom: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+.dash-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+  padding: 18px; display: flex; flex-direction: column; gap: 6px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.05);
+}
+.dash-label { font-size: 13px; color: var(--muted); font-weight: 600; }
+.dash-value { font-size: 26px; font-weight: 700; line-height: 1.1; }
+.dash-sub { font-size: 12px; color: var(--muted); }
+.dash-card.ingreso { background: #f0fdf4; border-color: #bbf7d0; }
+.dash-card.ingreso .dash-value { color: #15803d; }
+.dash-card.gasto { background: #fef2f2; border-color: #fecaca; }
+.dash-card.gasto .dash-value { color: #b91c1c; }
+.dash-card.saldo { background: var(--primary); border-color: var(--primary); }
+.dash-card.saldo .dash-label, .dash-card.saldo .dash-value { color: #fff; }
+.dash-card.mini .dash-value { font-size: 22px; }
+
 /* Tablet */
 @media (max-width: 900px) {
   .content { padding: 20px; }

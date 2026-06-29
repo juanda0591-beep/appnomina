@@ -7,7 +7,7 @@ const DataContext = createContext(null)
 const API = '/api'
 
 async function http(path, options = {}) {
-  const token = localStorage.getItem('nomina_token')
+  const token = sessionStorage.getItem('nomina_token')
   const res = await fetch(API + path, {
     ...options,
     headers: {
@@ -18,8 +18,8 @@ async function http(path, options = {}) {
   })
   if (res.status === 401) {
     // sesión expirada o inválida → volver al login
-    localStorage.removeItem('nomina_token')
-    localStorage.removeItem('nomina_user')
+    sessionStorage.removeItem('nomina_token')
+    sessionStorage.removeItem('nomina_user')
     window.location.reload()
     throw new Error('Sesión expirada')
   }
@@ -142,6 +142,17 @@ export function DataProvider({ children }) {
   const getReporte = (desde, hasta) =>
     http(`/reportes?desde=${desde}&hasta=${hasta}`)
 
+  // ---------- DASHBOARD ----------
+  const getDashboard = () => http('/dashboard')
+
+  // ---------- USUARIOS (solo admin) ----------
+  const getUsuarios = () => http('/usuarios')
+  const addUsuario = (username, password, rol) =>
+    http('/usuarios', { method: 'POST', body: JSON.stringify({ username, password, rol }) })
+  const deleteUsuario = (id) => http(`/usuarios/${id}`, { method: 'DELETE' })
+  const resetUsuarioPassword = (id, nueva) =>
+    http(`/usuarios/${id}/password`, { method: 'POST', body: JSON.stringify({ nueva }) })
+
   // Helpers de consulta (sobre estado en memoria)
   const getEmpleado = (id) => empleados.find((e) => String(e.id) === String(id))
   const getProducto = (id) => productos.find((p) => String(p.id) === String(id))
@@ -174,6 +185,11 @@ export function DataProvider({ children }) {
     getBalance,
     getMovimientos,
     getReporte,
+    getDashboard,
+    getUsuarios,
+    addUsuario,
+    deleteUsuario,
+    resetUsuarioPassword,
     getEmpleado,
     getProducto,
     prestamosDeEmpleado,

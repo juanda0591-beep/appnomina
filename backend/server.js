@@ -4,7 +4,17 @@ import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { existsSync } from 'fs'
 import db from './db.js'
-import { authRequired, login, cambiarPassword, seedUsuario } from './auth.js'
+import {
+  authRequired,
+  adminRequired,
+  login,
+  cambiarPassword,
+  seedUsuario,
+  listarUsuarios,
+  crearUsuario,
+  eliminarUsuario,
+  resetPassword,
+} from './auth.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -81,6 +91,68 @@ app.post('/api/cambiar-password', (req, res) => {
   const result = cambiarPassword(req.usuario, actual, nueva)
   if (!result.ok) return res.status(400).json({ error: result.error })
   res.json({ ok: true })
+})
+
+// ============ USUARIOS (solo admin) ============
+app.get('/api/usuarios', adminRequired, (req, res) => {
+  res.json(listarUsuarios())
+})
+
+app.post('/api/usuarios', adminRequired, (req, res) => {
+  const { username, password, rol } = req.body
+  const result = crearUsuario(username, password, rol)
+  if (!result.ok) return res.status(400).json({ error: result.error })
+  res.json(result.usuario)
+})
+
+app.post('/api/usuarios/:id/password', adminRequired, (req, res) => {
+  const result = resetPassword(Number(req.params.id), req.body.nueva)
+  if (!result.ok) return res.status(400).json({ error: result.error })
+  res.json({ ok: true })
+})
+
+app.delete('/api/usuarios/:id', adminRequired, (req, res) => {
+  const result = eliminarUsuario(Number(req.params.id), req.usuario)
+  if (!result.ok) return res.status(400).json({ error: result.error })
+  res.json({ ok: true })
+})
+
+// ============ DASHBOARD ============
+app.get('/api/dashboard', (req, res) => {
+  const ingresos = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'ingreso'").get().t
+  const gastos = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'gasto'").get().t
+  const totalEmpleados = db.prepare('SELECT COUNT(*) AS n FROM empleados').get().n
+  const totalProductos = db.prepare('SELECT COUNT(*) AS n FROM productos').get().n
+  const saldoPrestamos = db.prepare('SELECT COALESCE(SUM(saldo), 0) AS t FROM prestamos').get().t
+  const prestamosActivos = db.prepare('SELECT COUNT(*) AS n FROM prestamos WHERE saldo > 0').get().n
+
+  // Mes actual (YYYY-MM)
+  const mes = new Date().toISOString().slice(0, 7)
+  const nominaMes = db
+    .prepare("SELECT COALESCE(SUM(total), 0) AS t, COUNT(*) AS n FROM nominas WHERE substr(fecha, 1, 7) = ?")
+    .get(mes)
+
+  // Últimas nóminas con nombre de empleado
+  const ultimasNominas = db
+    .prepare(
+      `SELECT n.id, n.fecha, n.total, e.nombre AS empleado
+       FROM nominas n LEFT JOIN empleados e ON e.id = n.empleado_id
+       ORDER BY n.fecha DESC, n.id DESC LIMIT 5`
+    )
+    .all()
+
+  res.json({
+    ingresos,
+    gastos,
+    balance: ingresos - gastos,
+    totalEmpleados,
+    totalProductos,
+    saldoPrestamos,
+    prestamosActivos,
+    nominaMesTotal: nominaMes.t,
+    nominaMesCantidad: nominaMes.n,
+    ultimasNominas,
+  })
 })
 
 // ---------- Helpers para armar objetos anidados ----------

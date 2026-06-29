@@ -98,7 +98,8 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
     salt TEXT NOT NULL,
-    hash TEXT NOT NULL
+    hash TEXT NOT NULL,
+    rol TEXT NOT NULL DEFAULT 'usuario'
   );
 
   CREATE TABLE IF NOT EXISTS app_secret (
@@ -111,6 +112,15 @@ db.exec(`
 const colsNominas = db.prepare("PRAGMA table_info(nominas)").all()
 if (!colsNominas.some((c) => c.name === 'comentario')) {
   db.exec('ALTER TABLE nominas ADD COLUMN comentario TEXT')
+}
+
+// Columna de rol en usuarios (admin | usuario). El primer usuario existente
+// se marca como admin para que nunca quede el sistema sin administrador.
+const colsUsuarios = db.prepare("PRAGMA table_info(usuarios)").all()
+if (!colsUsuarios.some((c) => c.name === 'rol')) {
+  db.exec("ALTER TABLE usuarios ADD COLUMN rol TEXT NOT NULL DEFAULT 'usuario'")
+  const primero = db.prepare('SELECT id FROM usuarios ORDER BY id ASC LIMIT 1').get()
+  if (primero) db.prepare("UPDATE usuarios SET rol = 'admin' WHERE id = ?").run(primero.id)
 }
 
 // Garantiza que exista la fila única de configuración de empresa

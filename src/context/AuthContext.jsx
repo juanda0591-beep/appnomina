@@ -3,8 +3,11 @@ import { createContext, useContext, useState } from 'react'
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
-  const [token, setToken] = useState(() => localStorage.getItem('nomina_token'))
-  const [usuario, setUsuario] = useState(() => localStorage.getItem('nomina_user'))
+  // Usamos sessionStorage (no localStorage): la sesión se borra automáticamente
+  // al cerrar la pestaña/ventana del navegador, obligando a iniciar sesión otra vez.
+  const [token, setToken] = useState(() => sessionStorage.getItem('nomina_token'))
+  const [usuario, setUsuario] = useState(() => sessionStorage.getItem('nomina_user'))
+  const [rol, setRol] = useState(() => sessionStorage.getItem('nomina_rol') || 'usuario')
 
   const login = async (username, password) => {
     const res = await fetch('/api/login', {
@@ -17,17 +20,21 @@ export function AuthProvider({ children }) {
       throw new Error(data.error || 'No se pudo iniciar sesión')
     }
     const data = await res.json()
-    localStorage.setItem('nomina_token', data.token)
-    localStorage.setItem('nomina_user', data.username)
+    sessionStorage.setItem('nomina_token', data.token)
+    sessionStorage.setItem('nomina_user', data.username)
+    sessionStorage.setItem('nomina_rol', data.rol || 'usuario')
     setToken(data.token)
     setUsuario(data.username)
+    setRol(data.rol || 'usuario')
   }
 
   const logout = () => {
-    localStorage.removeItem('nomina_token')
-    localStorage.removeItem('nomina_user')
+    sessionStorage.removeItem('nomina_token')
+    sessionStorage.removeItem('nomina_user')
+    sessionStorage.removeItem('nomina_rol')
     setToken(null)
     setUsuario(null)
+    setRol('usuario')
   }
 
   const cambiarPassword = async (actual, nueva) => {
@@ -35,7 +42,7 @@ export function AuthProvider({ children }) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('nomina_token')}`,
+        Authorization: `Bearer ${sessionStorage.getItem('nomina_token')}`,
       },
       body: JSON.stringify({ actual, nueva }),
     })
@@ -46,7 +53,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ token, usuario, login, logout, cambiarPassword }}>
+    <AuthContext.Provider value={{ token, usuario, rol, login, logout, cambiarPassword }}>
       {children}
     </AuthContext.Provider>
   )
