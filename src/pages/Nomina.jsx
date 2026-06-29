@@ -13,6 +13,8 @@ export default function Nomina() {
   const [fecha, setFecha] = useState(hoy)
   const [items, setItems] = useState([nuevoItem()])
   const [descuentos, setDescuentos] = useState({}) // { prestamoId: monto }
+  const [extraMonto, setExtraMonto] = useState('')
+  const [extraDetalle, setExtraDetalle] = useState('')
   const [comentario, setComentario] = useState('')
 
   const prestamos = empleadoId ? prestamosDeEmpleado(empleadoId) : []
@@ -60,7 +62,9 @@ export default function Nomina() {
     }, 0)
   }, [descuentos, prestamos])
 
-  const total = subtotal - totalDescuentos
+  const extra = Math.max(0, Number(extraMonto) || 0)
+
+  const total = subtotal - totalDescuentos + extra
 
   const setDescuento = (prestamoId, monto, saldo) => {
     const val = Math.max(0, Math.min(Number(monto) || 0, saldo))
@@ -71,6 +75,8 @@ export default function Nomina() {
     setEmpleadoId('')
     setItems([nuevoItem()])
     setDescuentos({})
+    setExtraMonto('')
+    setExtraDetalle('')
     setComentario('')
     setFecha(hoy)
   }
@@ -117,6 +123,8 @@ export default function Nomina() {
       items: itemsValidos,
       descuentos: descuentosArr,
       prestamosEmpleado,
+      extra,
+      extraDetalle: extra > 0 ? extraDetalle.trim() : '',
       subtotal: itemsValidos.reduce((s, i) => s + i.subtotal, 0),
       totalDescuentos: descuentosArr.reduce((s, d) => s + d.monto, 0),
     }
@@ -139,7 +147,7 @@ export default function Nomina() {
   const handlePagar = async () => {
     const payload = construirPayload()
     if (!validar(payload)) return
-    const total = payload.subtotal - payload.totalDescuentos
+    const total = payload.subtotal - payload.totalDescuentos + payload.extra
     setGuardando(true)
     try {
       await addNomina({ ...payload, empleado: undefined, total }) // no guardamos copia del empleado
@@ -156,7 +164,7 @@ export default function Nomina() {
   const handleVistaPrevia = () => {
     const payload = construirPayload()
     if (!validar(payload)) return
-    generarPdfNomina({ ...payload, empresa, total: payload.subtotal - payload.totalDescuentos })
+    generarPdfNomina({ ...payload, empresa, total: payload.subtotal - payload.totalDescuentos + payload.extra })
   }
 
   return (
@@ -301,6 +309,38 @@ export default function Nomina() {
         )}
       </div>
 
+      {/* Pago extra (opcional) */}
+      <div className="card">
+        <h3>Pago extra (opcional)</h3>
+        <div className="row">
+          <div style={{ flex: 1 }}>
+            <label className="small">Valor</label>
+            <input
+              type="number"
+              min="0"
+              step="any"
+              value={extraMonto}
+              onChange={(e) => setExtraMonto(e.target.value)}
+              placeholder="0"
+            />
+          </div>
+          <div style={{ flex: 2 }}>
+            <label className="small">Detalle del pago extra</label>
+            <input
+              type="text"
+              value={extraDetalle}
+              onChange={(e) => setExtraDetalle(e.target.value)}
+              placeholder="Ej: bonificación, horas extra…"
+            />
+          </div>
+        </div>
+        {extra > 0 && (
+          <div className="totals-row" style={{ marginTop: 12 }}>
+            <span>Pago extra: <strong>+{formatCOP(extra)}</strong></span>
+          </div>
+        )}
+      </div>
+
       {/* Comentario / observaciones */}
       <div className="card">
         <h3>Comentario (opcional)</h3>
@@ -317,6 +357,9 @@ export default function Nomina() {
       <div className="card resumen">
         <div className="resumen-line"><span>Subtotal trabajos</span><span>{formatCOP(subtotal)}</span></div>
         <div className="resumen-line"><span>Descuentos préstamos</span><span className="danger-text">-{formatCOP(totalDescuentos)}</span></div>
+        {extra > 0 && (
+          <div className="resumen-line"><span>Pago extra{extraDetalle.trim() ? ` (${extraDetalle.trim()})` : ''}</span><span>+{formatCOP(extra)}</span></div>
+        )}
         <div className="resumen-line total"><span>TOTAL A PAGAR</span><span>{formatCOP(total)}</span></div>
 
         <div className="form-actions">
