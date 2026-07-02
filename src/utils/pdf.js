@@ -71,7 +71,7 @@ function drawEncabezadoEmpresa(doc, empresa, marginX) {
 }
 
 // Genera y descarga el PDF del pago de nómina
-export function generarPdfNomina({ empresa, empleado, fecha, items, descuentos, prestamosEmpleado, subtotal, totalDescuentos, extra, extraDetalle, total, comentario }) {
+export function generarPdfNomina({ empresa, empleado, fecha, items, descuentos, prestamosEmpleado, subtotal, totalDescuentos, extra, extraDetalle, total, comentario, fotos }) {
   const doc = new jsPDF()
   const marginX = 14
 
@@ -202,6 +202,9 @@ export function generarPdfNomina({ empresa, empleado, fecha, items, descuentos, 
     y += 6 + lineas.length * 5
   }
 
+  // Registro fotográfico de las tareas (opcional)
+  y = dibujarRegistroFotografico(doc, marginX, y, fotos)
+
   // Sello de PAGADO (junto al total)
   dibujarSelloPagado(doc, marginX)
 
@@ -321,6 +324,84 @@ export function generarPdfMovimientos({ empresa, desde, hasta, movimientos, ingr
   pieDePagina(doc, empresa, marginX)
 
   doc.save(`reporte_movimientos_${desde}_a_${hasta}.pdf`)
+}
+
+// Dibuja el registro fotográfico de las tareas: cada foto con su fecha y su nota.
+// `fotos` es un array de { imagen (dataURL), fecha, descripcion }. Devuelve la nueva Y.
+function dibujarRegistroFotografico(doc, marginX, y, fotos) {
+  if (!fotos || fotos.length === 0) return y
+
+  const pageW = doc.internal.pageSize.getWidth()
+  const pageH = doc.internal.pageSize.getHeight()
+  const fotoW = 55            // ancho de cada foto
+  const maxFotoH = 45         // alto máximo de cada foto
+  const gap = 10              // espacio entre columnas
+  const colX = [marginX, marginX + fotoW + gap] // dos columnas
+
+  // Título de la sección
+  y += 4
+  doc.setFont(undefined, 'bold')
+  doc.setFontSize(12)
+  doc.setTextColor(15, 23, 42)
+  doc.text('Registro fotográfico', marginX, y)
+  doc.setFont(undefined, 'normal')
+  y += 6
+
+  let col = 0
+  let filaTopY = y
+  let maxAltoFila = 0
+
+  for (const f of fotos) {
+    if (!f.imagen) continue
+    let imgW = fotoW
+    let imgH = maxFotoH
+    try {
+      const props = doc.getImageProperties(f.imagen)
+      imgH = Math.min(maxFotoH, (props.height * fotoW) / props.width)
+    } catch {
+      continue // imagen inválida → se omite
+    }
+
+    // Nota + fecha ocupan unas líneas debajo de la imagen
+    const nota = f.descripcion ? f.descripcion.trim() : ''
+    const fechaTxt = f.fecha ? formatFecha(f.fecha) : ''
+    const textoLineas = doc.splitTextToSize(
+      [fechaTxt, nota].filter(Boolean).join(' — ') || 'Sin nota',
+      fotoW
+    )
+    const altoCelda = imgH + 3 + textoLineas.length * 4 + 6
+
+    // Salto de página si no cabe la fila
+    if (filaTopY + altoCelda > pageH - 40) {
+      doc.addPage()
+      filaTopY = 20
+      y = 20
+      col = 0
+      maxAltoFila = 0
+    }
+
+    const x = colX[col]
+    const fmt = String(f.imagen).startsWith('data:image/png') ? 'PNG' : 'JPEG'
+    doc.addImage(f.imagen, fmt, x, filaTopY, imgW, imgH)
+
+    doc.setFontSize(8)
+    doc.setTextColor(90)
+    doc.text(textoLineas, x, filaTopY + imgH + 4)
+
+    maxAltoFila = Math.max(maxAltoFila, altoCelda)
+    col++
+    if (col >= 2) {
+      col = 0
+      filaTopY += maxAltoFila
+      maxAltoFila = 0
+    }
+  }
+
+  // Si quedó una foto sola en la fila, avanzar igual
+  if (col === 1) filaTopY += maxAltoFila
+
+  doc.setTextColor(0)
+  return filaTopY + 4
 }
 
 // Dibuja un sello inclinado de "PAGADO" en la esquina superior derecha del comprobante.

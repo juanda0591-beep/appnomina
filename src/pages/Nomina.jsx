@@ -6,7 +6,7 @@ import { generarPdfNomina } from '../utils/pdf.js'
 const nuevoItem = () => ({ key: Math.random().toString(36).slice(2), productoId: '', procesoId: '', cantidad: '' })
 
 export default function Nomina() {
-  const { empleados, productos, empresa, prestamosDeEmpleado, getEmpleado, getProducto, addNomina } = useData()
+  const { empleados, productos, empresa, prestamosDeEmpleado, getEmpleado, getProducto, addNomina, tareasTerminadasDeEmpleado, getTareaFotos } = useData()
 
   const hoy = new Date().toISOString().slice(0, 10)
   const [empleadoId, setEmpleadoId] = useState('')
@@ -16,6 +16,9 @@ export default function Nomina() {
   const [extraMonto, setExtraMonto] = useState('')
   const [extraDetalle, setExtraDetalle] = useState('')
   const [comentario, setComentario] = useState('')
+  const [tareaIds, setTareaIds] = useState([]) // tareas terminadas incluidas en este pago
+  const [modalTareas, setModalTareas] = useState(null) // tareas candidatas a cargar, o null
+  const [fotosTareas, setFotosTareas] = useState([]) // fotos (con imagen) de las tareas cargadas, para el PDF
 
   const prestamos = empleadoId ? prestamosDeEmpleado(empleadoId) : []
 
@@ -34,6 +37,52 @@ export default function Nomina() {
   const addItemRow = () => setItems((its) => [...its, nuevoItem()])
   const removeItemRow = (key) =>
     setItems((its) => (its.length === 1 ? its : its.filter((it) => it.key !== key)))
+
+  // Al elegir un empleado: si tiene tareas terminadas sin pagar, ofrecer cargarlas
+  const handleEmpleadoChange = (id) => {
+    setEmpleadoId(id)
+    setDescuentos({})
+    setTareaIds([])
+    setFotosTareas([])
+    const terminadas = id ? tareasTerminadasDeEmpleado(id) : []
+    if (terminadas.length > 0) setModalTareas(terminadas)
+    else setModalTareas(null)
+  }
+
+  // Convierte una tarea terminada en una fila de item (buscando el producto/proceso vigente)
+  const tareaAItem = (t) => {
+    const producto = getProducto(t.productoId)
+    const proceso = producto?.procesos.find((p) => String(p.id) === String(t.procesoId))
+    return {
+      key: Math.random().toString(36).slice(2),
+      // si el producto/proceso siguen existiendo, se enlazan; si no, quedan vacíos
+      productoId: producto ? String(t.productoId) : '',
+      procesoId: producto && proceso ? String(t.procesoId) : '',
+      cantidad: String(t.cantidad),
+    }
+  }
+
+  // Confirma el modal: carga las tareas terminadas como filas de trabajo
+  const confirmarCargarTareas = async () => {
+    if (!modalTareas) return
+    const filas = modalTareas.map(tareaAItem)
+    // reemplaza las filas vacías iniciales; si ya hay trabajos, los conserva
+    setItems((its) => {
+      const conDatos = its.filter((it) => it.productoId || it.procesoId || it.cantidad)
+      return [...conDatos, ...filas]
+    })
+    setTareaIds(modalTareas.map((t) => t.id))
+
+    // Trae las fotos (con imagen) de todas las tareas cargadas, para incluirlas en el PDF
+    try {
+      const listas = await Promise.all(modalTareas.map((t) => getTareaFotos(t.id, true)))
+      setFotosTareas(listas.flat())
+    } catch {
+      setFotosTareas([]) // si fallan las fotos, el pago sigue sin ellas
+    }
+
+    setModalTareas(null)
+  }
 
   // Calcula cada línea con su valor
   const lineas = useMemo(() => {
@@ -79,6 +128,9 @@ export default function Nomina() {
     setExtraDetalle('')
     setComentario('')
     setFecha(hoy)
+    setTareaIds([])
+    setModalTareas(null)
+    setFotosTareas([])
   }
 
   const construirPayload = () => {
@@ -120,6 +172,8 @@ export default function Nomina() {
       empleadoId,
       fecha,
       comentario,
+      tareaIds,
+      fotos: fotosTareas,
       items: itemsValidos,
       descuentos: descuentosArr,
       prestamosEmpleado,
@@ -150,7 +204,7 @@ export default function Nomina() {
     const total = payload.subtotal - payload.totalDescuentos + payload.extra
     setGuardando(true)
     try {
-      await addNomina({ ...payload, empleado: undefined, total }) // no guardamos copia del empleado
+      await addNomina({ ...payload, empleado: undefined, fotos: undefined, total }) // no enviamos copia del empleado ni las fotos (solo van al PDF)
       generarPdfNomina({ ...payload, empresa, total })
       alert('✅ Pago registrado y PDF generado')
       resetForm()
@@ -177,10 +231,7 @@ export default function Nomina() {
             <label>Empleado</label>
             <select
               value={empleadoId}
-              onChange={(e) => {
-                setEmpleadoId(e.target.value)
-                setDescuentos({})
-              }}
+              onChange={(e) => handleEmpleadoChange(e.target.value)}
             >
               <option value="">— Seleccionar —</option>
               {empleados.map((emp) => (
@@ -373,6 +424,45 @@ export default function Nomina() {
           los préstamos. "Solo ver PDF" genera el documento sin guardar nada.
         </p>
       </div>
+
+      {/* Modal: tareas terminadas del empleado */}
+      {modalTareas && (
+        <>
+          <div className="overlay" onClick={() => setModalTareas(null)} />
+          <div className="modal">
+            <h3>Tareas terminadas de {getEmpleado(empleadoId)?.nombre || 'este empleado'}</h3>
+            <p className="muted">¿Desea agregar estos productos para pago de nómina?</p>
+            <div className="table-wrap">
+              <table className="table compact">
+                <thead>
+                  <tr>
+                    <th>Producto</th>
+                    <th>Proceso</th>
+                    <th className="num">Cantidad</th>
+                    <th className="num">Pago x und</th>
+                    <th className="num">Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {modalTareas.map((t) => (
+                    <tr key={t.id}>
+                      <td>{t.productoNombre}</td>
+                      <td>{t.procesoNombre}</td>
+                      <td className="num">{t.cantidad}</td>
+                      <td className="num">{formatCOP(t.pago)}</td>
+                      <td className="num">{formatCOP(t.pago * t.cantidad)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="form-actions">
+              <button className="btn-primary" onClick={confirmarCargarTareas}>✓ Confirmar</button>
+              <button className="btn-secondary" onClick={() => setModalTareas(null)}>Cancelar</button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

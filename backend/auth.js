@@ -164,7 +164,9 @@ export function authRequired(req, res, next) {
   if (req.path === '/api/login') return next()
 
   const header = req.headers.authorization || ''
-  const token = header.startsWith('Bearer ') ? header.slice(7) : null
+  // El token llega por header (peticiones normales) o por query (?token=…),
+  // usado para servir imágenes/archivos directamente en <img src> / enlaces.
+  const token = header.startsWith('Bearer ') ? header.slice(7) : (req.query?.token || null)
   const data = verifyToken(token)
   if (!data) return res.status(401).json({ error: 'No autorizado' })
   req.usuario = data.u

@@ -172,6 +172,61 @@ button:disabled { opacity: .6; cursor: not-allowed; }
 .chip.warn { background: #fef3c7; color: #b45309; }
 .chip.ok { background: #dcfce7; color: #15803d; }
 
+/* ---------- Gestión de Nómina: barra de progreso ---------- */
+.progress {
+  width: 100%; height: 22px; background: #e2e8f0;
+  border-radius: 20px; overflow: hidden; position: relative;
+}
+.progress-fill {
+  height: 100%; border-radius: 20px; min-width: 26px;
+  display: flex; align-items: center; justify-content: flex-end;
+  transition: width .25s ease;
+}
+.progress-fill.bajo { background: var(--danger); }
+.progress-fill.medio { background: #f59e0b; }
+.progress-fill.alto { background: #16a34a; }
+.progress-label { color: #fff; font-size: 11px; font-weight: 700; padding-right: 8px; }
+
+/* Gestión de Nómina: tarjeta de tarea */
+.tarea-item {
+  padding: 14px 0; border-bottom: 1px solid var(--border);
+}
+.tarea-item:last-child { border-bottom: none; }
+.tarea-head {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 6px;
+}
+.historial-box {
+  margin-top: 10px; padding: 10px 12px;
+  background: #f8fafc; border: 1px solid var(--border); border-radius: 8px;
+}
+
+/* Gestión de Nómina: registro fotográfico */
+.foto-upload { display: inline-block; text-align: center; }
+.fotos-grid {
+  display: grid; gap: 12px; margin-top: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+}
+.foto-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 4px;
+}
+.foto-card img {
+  width: 100%; height: 110px; object-fit: cover;
+  border-radius: 6px; border: 1px solid var(--border); background: #f1f5f9;
+}
+.foto-desc { font-weight: 600; }
+.foto-card .btn-icon { align-self: flex-start; padding: 2px 6px; }
+
+/* ---------- Modal centrado ---------- */
+.modal {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  z-index: 50; background: var(--card); border-radius: 14px;
+  padding: 22px; width: min(680px, 92vw); max-height: 88vh; overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0,0,0,.3);
+}
+.modal h3 { margin-top: 0; }
+
 /* Control de dinero: pestañas */
 .tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
 .tab {

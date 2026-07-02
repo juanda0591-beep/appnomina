@@ -371,7 +371,7 @@ app.get('/api/nominas', permisoRequired('historial', 'ver'), (req, res) => {
 })
 
 app.post('/api/nominas', permisoRequired('nomina', 'crear'), (req, res) => {
-  const { empleadoId, fecha, items = [], descuentos = [], subtotal, totalDescuentos, total, comentario } = req.body
+  const { empleadoId, fecha, items = [], descuentos = [], subtotal, totalDescuentos, total, comentario, tareaIds = [] } = req.body
   const tx = db.transaction(() => {
     const r = db
       .prepare('INSERT INTO nominas (empleado_id, fecha, subtotal, total_descuentos, total, comentario) VALUES (?, ?, ?, ?, ?, ?)')
@@ -392,6 +392,15 @@ app.post('/api/nominas', permisoRequired('nomina', 'crear'), (req, res) => {
     for (const d of descuentos) {
       insDesc.run(nid, d.prestamoId, d.monto, d.descripcion || 'Préstamo')
       if (d.prestamoId) updPrestamo.run(d.monto, d.prestamoId)
+    }
+
+    // Marca como pagadas las tareas terminadas incluidas en este pago
+    if (Array.isArray(tareaIds) && tareaIds.length > 0) {
+      const marcarPagada = db.prepare(
+        "UPDATE tareas SET estado = 'pagada', nomina_id = ?, actualizado = ? WHERE id = ? AND estado = 'terminada'"
+      )
+      const ahora = new Date().toISOString()
+      for (const tid of tareaIds) marcarPagada.run(nid, ahora, tid)
     }
 
     // El pago de nómina sale de caja → gasto automático (por el neto pagado)
@@ -419,11 +428,211 @@ app.delete('/api/nominas/:id', permisoRequired('historial', 'eliminar'), (req, r
       if (descuento.prestamo_id) revertirPrestamo.run(Number(descuento.monto) || 0, descuento.prestamo_id)
     }
 
+    // Devuelve a 'terminada' las tareas que se habían pagado con esta nómina
+    db.prepare("UPDATE tareas SET estado = 'terminada', nomina_id = NULL WHERE nomina_id = ?").run(req.params.id)
+
     db.prepare('DELETE FROM nominas WHERE id = ?').run(req.params.id)
     db.prepare("DELETE FROM movimientos WHERE origen = 'nomina' AND ref_id = ?").run(req.params.id)
   })
 
   tx()
+  res.json({ ok: true })
+})
+
+// ============ TAREAS (Gestión de Nómina) ============
+function tareaSalida(t) {
+  return {
+    id: t.id,
+    empleadoId: t.empleado_id,
+    productoId: t.producto_id,
+    procesoId: t.proceso_id,
+    productoNombre: t.producto_nombre || '',
+    procesoNombre: t.proceso_nombre || '',
+    pago: t.pago,
+    cantidad: t.cantidad,
+    progreso: t.progreso,
+    estado: t.estado,
+    comentario: t.comentario || '',
+    nominaId: t.nomina_id,
+    creado: t.creado,
+    actualizado: t.actualizado,
+  }
+}
+
+// Registra un cambio en el historial de auditoría de una tarea
+const insertTareaHistorial = db.prepare(
+  `INSERT INTO tarea_historial (tarea_id, usuario, progreso_anterior, progreso_nuevo, comentario, fecha)
+   VALUES (?, ?, ?, ?, ?, ?)`
+)
+
+app.get('/api/tareas', permisoAnyRequired([
+  ['gestion-nomina', 'ver'],
+  ['nomina', 'ver'],
+]), (req, res) => {
+  const { empleadoId, estado } = req.query
+  const cond = []
+  const params = []
+  if (empleadoId) { cond.push('empleado_id = ?'); params.push(empleadoId) }
+  if (estado) { cond.push('estado = ?'); params.push(estado) }
+  const where = cond.length ? ` WHERE ${cond.join(' AND ')}` : ''
+  const rows = db.prepare(`SELECT * FROM tareas${where} ORDER BY creado DESC, id DESC`).all(...params)
+  res.json(rows.map(tareaSalida))
+})
+
+app.post('/api/tareas', permisoRequired('gestion-nomina', 'crear'), (req, res) => {
+  const { empleadoId, productoId, procesoId, cantidad, comentario } = req.body
+  if (!empleadoId) return res.status(400).json({ error: 'Selecciona un empleado' })
+
+  const producto = productoId ? db.prepare('SELECT * FROM productos WHERE id = ?').get(productoId) : null
+  const proceso = procesoId ? db.prepare('SELECT * FROM procesos WHERE id = ?').get(procesoId) : null
+  const ahora = new Date().toISOString()
+
+  const r = db.prepare(
+    `INSERT INTO tareas (empleado_id, producto_id, proceso_id, producto_nombre, proceso_nombre, pago, cantidad, progreso, estado, comentario, creado, actualizado)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'pendiente', ?, ?, ?)`
+  ).run(
+    empleadoId,
+    productoId || null,
+    procesoId || null,
+    producto?.nombre || '',
+    proceso?.nombre || '',
+    Number(proceso?.pago) || 0,
+    Number(cantidad) || 0,
+    comentario || '',
+    ahora,
+    ahora,
+  )
+  res.json(tareaSalida(db.prepare('SELECT * FROM tareas WHERE id = ?').get(r.lastInsertRowid)))
+})
+
+app.put('/api/tareas/:id', permisoRequired('gestion-nomina', 'editar'), (req, res) => {
+  const tarea = db.prepare('SELECT * FROM tareas WHERE id = ?').get(req.params.id)
+  if (!tarea) return res.status(404).json({ error: 'Tarea no encontrada' })
+  if (tarea.estado === 'pagada') {
+    return res.status(400).json({ error: 'La tarea ya fue pagada; no se puede modificar.' })
+  }
+
+  const { progreso, comentario, estado } = req.body
+  const nuevoProgreso = progreso == null ? tarea.progreso : Math.max(0, Math.min(100, Math.round(Number(progreso) || 0)))
+  const nuevoComentario = comentario == null ? tarea.comentario : String(comentario)
+
+  // Deriva el estado automático a partir del progreso, salvo que se fije explícitamente
+  let nuevoEstado = estado || tarea.estado
+  if (!estado && tarea.estado !== 'terminada') {
+    if (nuevoProgreso >= 100) nuevoEstado = 'terminada'
+    else if (nuevoProgreso > 0) nuevoEstado = 'en_progreso'
+    else nuevoEstado = 'pendiente'
+  }
+
+  const ahora = new Date().toISOString()
+  const tx = db.transaction(() => {
+    db.prepare('UPDATE tareas SET progreso = ?, comentario = ?, estado = ?, actualizado = ? WHERE id = ?')
+      .run(nuevoProgreso, nuevoComentario, nuevoEstado, ahora, tarea.id)
+
+    const cambioProgreso = nuevoProgreso !== tarea.progreso
+    const cambioComentario = nuevoComentario !== (tarea.comentario || '')
+    if (cambioProgreso || cambioComentario) {
+      insertTareaHistorial.run(
+        tarea.id,
+        req.usuario || '',
+        tarea.progreso,
+        nuevoProgreso,
+        cambioComentario ? nuevoComentario : null,
+        ahora,
+      )
+    }
+  })
+  tx()
+  res.json(tareaSalida(db.prepare('SELECT * FROM tareas WHERE id = ?').get(tarea.id)))
+})
+
+app.post('/api/tareas/:id/terminar', permisoRequired('gestion-nomina', 'editar'), (req, res) => {
+  const tarea = db.prepare('SELECT * FROM tareas WHERE id = ?').get(req.params.id)
+  if (!tarea) return res.status(404).json({ error: 'Tarea no encontrada' })
+  if (tarea.estado === 'pagada') {
+    return res.status(400).json({ error: 'La tarea ya fue pagada; no se puede modificar.' })
+  }
+
+  const ahora = new Date().toISOString()
+  const tx = db.transaction(() => {
+    db.prepare("UPDATE tareas SET progreso = 100, estado = 'terminada', actualizado = ? WHERE id = ?")
+      .run(ahora, tarea.id)
+    insertTareaHistorial.run(tarea.id, req.usuario || '', tarea.progreso, 100, null, ahora)
+  })
+  tx()
+  res.json(tareaSalida(db.prepare('SELECT * FROM tareas WHERE id = ?').get(tarea.id)))
+})
+
+app.delete('/api/tareas/:id', permisoRequired('gestion-nomina', 'eliminar'), (req, res) => {
+  const tarea = db.prepare('SELECT estado FROM tareas WHERE id = ?').get(req.params.id)
+  if (!tarea) return res.status(404).json({ error: 'Tarea no encontrada' })
+  if (tarea.estado === 'pagada') {
+    return res.status(400).json({ error: 'La tarea ya fue pagada; no se puede eliminar.' })
+  }
+  db.prepare('DELETE FROM tareas WHERE id = ?').run(req.params.id)
+  res.json({ ok: true })
+})
+
+app.get('/api/tareas/:id/historial', permisoRequired('gestion-nomina', 'ver'), (req, res) => {
+  const rows = db.prepare('SELECT * FROM tarea_historial WHERE tarea_id = ? ORDER BY fecha DESC, id DESC').all(req.params.id)
+  res.json(rows.map((h) => ({
+    id: h.id,
+    usuario: h.usuario || '',
+    progresoAnterior: h.progreso_anterior,
+    progresoNuevo: h.progreso_nuevo,
+    comentario: h.comentario || '',
+    fecha: h.fecha,
+  })))
+})
+
+// --- Registro fotográfico de una tarea ---
+// Lista las fotos SIN la imagen (solo metadatos), para no cargar base64 pesados
+app.get('/api/tareas/:id/fotos', permisoAnyRequired([
+  ['gestion-nomina', 'ver'],
+  ['nomina', 'ver'],
+]), (req, res) => {
+  // ?full=1 incluye la imagen (base64) para incrustarla en el PDF; por defecto
+  // solo se devuelven metadatos para no cargar imágenes pesadas en la galería.
+  const full = req.query.full === '1'
+  const cols = full ? 'id, descripcion, usuario, fecha, imagen, imagen_tipo' : 'id, descripcion, usuario, fecha'
+  const rows = db.prepare(`SELECT ${cols} FROM tarea_fotos WHERE tarea_id = ? ORDER BY fecha DESC, id DESC`).all(req.params.id)
+  res.json(rows.map((f) => ({
+    id: f.id,
+    descripcion: f.descripcion || '',
+    usuario: f.usuario || '',
+    fecha: f.fecha,
+    ...(full ? { imagen: f.imagen, imagenTipo: f.imagen_tipo || '' } : {}),
+  })))
+})
+
+// Sirve la imagen de una foto (binario), igual que el comprobante de movimientos
+app.get('/api/tareas/fotos/:fotoId', permisoAnyRequired([
+  ['gestion-nomina', 'ver'],
+  ['nomina', 'ver'],
+]), (req, res) => {
+  const f = db.prepare('SELECT imagen, imagen_tipo FROM tarea_fotos WHERE id = ?').get(req.params.fotoId)
+  if (!f || !f.imagen) return res.status(404).json({ error: 'Sin imagen' })
+  const match = /^data:(.+?);base64,(.+)$/s.exec(f.imagen)
+  if (!match) return res.status(400).json({ error: 'Imagen inválida' })
+  const buffer = Buffer.from(match[2], 'base64')
+  res.setHeader('Content-Type', f.imagen_tipo || match[1])
+  res.send(buffer)
+})
+
+app.post('/api/tareas/:id/fotos', permisoRequired('gestion-nomina', 'editar'), (req, res) => {
+  const tarea = db.prepare('SELECT id FROM tareas WHERE id = ?').get(req.params.id)
+  if (!tarea) return res.status(404).json({ error: 'Tarea no encontrada' })
+  const { imagen, imagenTipo, descripcion } = req.body
+  if (!imagen) return res.status(400).json({ error: 'Falta la imagen' })
+  const r = db.prepare(
+    'INSERT INTO tarea_fotos (tarea_id, imagen, imagen_tipo, descripcion, usuario, fecha) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(tarea.id, imagen, imagenTipo || null, descripcion || '', req.usuario || '', new Date().toISOString())
+  const f = db.prepare('SELECT id, descripcion, usuario, fecha FROM tarea_fotos WHERE id = ?').get(r.lastInsertRowid)
+  res.json({ id: f.id, descripcion: f.descripcion || '', usuario: f.usuario || '', fecha: f.fecha })
+})
+
+app.delete('/api/tareas/fotos/:fotoId', permisoRequired('gestion-nomina', 'editar'), (req, res) => {
+  db.prepare('DELETE FROM tarea_fotos WHERE id = ?').run(req.params.fotoId)
   res.json({ ok: true })
 })
 

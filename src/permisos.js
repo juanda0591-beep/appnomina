@@ -10,6 +10,7 @@
 export const PAGINAS = [
   { id: 'inicio', label: '🏠 Inicio', to: '/inicio', acciones: ['ver'] },
   { id: 'nomina', label: '🧾 Pago de Nómina', to: '/nomina', acciones: ['ver', 'crear'] },
+  { id: 'gestion-nomina', label: '📋 Gestión de Nómina', to: '/gestion-nomina', acciones: ['ver', 'crear', 'editar', 'eliminar'] },
   { id: 'productos', label: '📦 Productos', to: '/productos', acciones: ['ver', 'crear', 'editar', 'eliminar'] },
   { id: 'empleados', label: '👷 Empleados', to: '/empleados', acciones: ['ver', 'crear', 'editar', 'eliminar'] },
   { id: 'prestamos', label: '💵 Préstamos', to: '/prestamos', acciones: ['ver', 'crear', 'eliminar'] },

@@ -38,6 +38,7 @@ export function DataProvider({ children }) {
   const [nominas, setNominas] = useState([])
   const [movimientos, setMovimientos] = useState([])
   const [empresa, setEmpresa] = useState(null)
+  const [tareas, setTareas] = useState([])
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState(null)
 
@@ -58,10 +59,10 @@ export function DataProvider({ children }) {
   const recargar = async () => {
     setCargando(true)
     try {
-      const [prod, emp, pres, nom, mov, empr] = await Promise.all([
+      const [prod, emp, pres, nom, mov, empr, tar] = await Promise.all([
         cargarSiPuede(puedeLeer(['productos', 'ver'], ['nomina', 'ver']), '/productos', []),
         cargarSiPuede(
-          puedeLeer(['empleados', 'ver'], ['nomina', 'ver'], ['prestamos', 'ver'], ['historial', 'ver'], ['reportes', 'ver']),
+          puedeLeer(['empleados', 'ver'], ['nomina', 'ver'], ['prestamos', 'ver'], ['historial', 'ver'], ['reportes', 'ver'], ['gestion-nomina', 'ver']),
           '/empleados',
           []
         ),
@@ -73,6 +74,7 @@ export function DataProvider({ children }) {
         cargarSiPuede(puedeLeer(['historial', 'ver']), '/nominas', []),
         cargarSiPuede(puedeLeer(['control-dinero', 'ver']), '/movimientos', []),
         cargarSiPuede(puedeLeer(['empresa', 'ver'], ['nomina', 'ver'], ['historial', 'ver']), '/empresa', null),
+        cargarSiPuede(puedeLeer(['gestion-nomina', 'ver'], ['nomina', 'ver']), '/tareas', []),
       ])
 
       setProductos(prod)
@@ -81,6 +83,7 @@ export function DataProvider({ children }) {
       setNominas(nom)
       setMovimientos(mov)
       setEmpresa(empr)
+      setTareas(tar)
       setError(null)
     } catch (e) {
       setError(e.message)
@@ -188,11 +191,39 @@ export function DataProvider({ children }) {
     http(`/costeos/${id}`, { method: 'PUT', body: JSON.stringify({ nombre, datos }) })
   const deleteCosteo = (id) => http(`/costeos/${id}`, { method: 'DELETE' })
 
+  // ---------- TAREAS (Gestión de Nómina) ----------
+  const addTarea = async (tarea) => {
+    const creada = await http('/tareas', { method: 'POST', body: JSON.stringify(tarea) })
+    await recargar()
+    return creada
+  }
+  const updateTarea = async (id, datos) => {
+    const actualizada = await http(`/tareas/${id}`, { method: 'PUT', body: JSON.stringify(datos) })
+    await recargar()
+    return actualizada
+  }
+  const terminarTarea = async (id) => {
+    await http(`/tareas/${id}/terminar`, { method: 'POST' })
+    await recargar()
+  }
+  const deleteTarea = async (id) => {
+    await http(`/tareas/${id}`, { method: 'DELETE' })
+    await recargar()
+  }
+  const getTareaHistorial = (id) => http(`/tareas/${id}/historial`)
+  const getTareaFotos = (id, full = false) => http(`/tareas/${id}/fotos${full ? '?full=1' : ''}`)
+  const addTareaFoto = (id, foto) =>
+    http(`/tareas/${id}/fotos`, { method: 'POST', body: JSON.stringify(foto) })
+  const deleteTareaFoto = (fotoId) =>
+    http(`/tareas/fotos/${fotoId}`, { method: 'DELETE' })
+
   // Helpers de consulta (sobre estado en memoria)
   const getEmpleado = (id) => empleados.find((e) => String(e.id) === String(id))
   const getProducto = (id) => productos.find((p) => String(p.id) === String(id))
   const prestamosDeEmpleado = (empleadoId) =>
     prestamos.filter((p) => String(p.empleado_id) === String(empleadoId) && p.saldo > 0)
+  const tareasTerminadasDeEmpleado = (empleadoId) =>
+    tareas.filter((t) => String(t.empleadoId) === String(empleadoId) && t.estado === 'terminada')
 
   const value = {
     productos,
@@ -201,6 +232,7 @@ export function DataProvider({ children }) {
     nominas,
     movimientos,
     empresa,
+    tareas,
     cargando,
     error,
     recargar,
@@ -230,9 +262,18 @@ export function DataProvider({ children }) {
     addCosteo,
     updateCosteo,
     deleteCosteo,
+    addTarea,
+    updateTarea,
+    terminarTarea,
+    deleteTarea,
+    getTareaHistorial,
+    getTareaFotos,
+    addTareaFoto,
+    deleteTareaFoto,
     getEmpleado,
     getProducto,
     prestamosDeEmpleado,
+    tareasTerminadasDeEmpleado,
   }
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>

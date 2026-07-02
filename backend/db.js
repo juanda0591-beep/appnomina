@@ -110,6 +110,46 @@ db.exec(`
     actualizado TEXT
   );
 
+  CREATE TABLE IF NOT EXISTS tareas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    empleado_id INTEGER NOT NULL,
+    producto_id INTEGER,
+    proceso_id INTEGER,
+    producto_nombre TEXT,
+    proceso_nombre TEXT,
+    pago REAL NOT NULL DEFAULT 0,
+    cantidad REAL NOT NULL DEFAULT 0,
+    progreso INTEGER NOT NULL DEFAULT 0,
+    estado TEXT NOT NULL DEFAULT 'pendiente',   -- pendiente|en_progreso|terminada|pagada
+    comentario TEXT,
+    nomina_id INTEGER,
+    creado TEXT,
+    actualizado TEXT,
+    FOREIGN KEY (empleado_id) REFERENCES empleados(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS tarea_historial (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tarea_id INTEGER NOT NULL,
+    usuario TEXT,
+    progreso_anterior INTEGER,
+    progreso_nuevo INTEGER,
+    comentario TEXT,
+    fecha TEXT,
+    FOREIGN KEY (tarea_id) REFERENCES tareas(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS tarea_fotos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tarea_id INTEGER NOT NULL,
+    imagen TEXT NOT NULL,        -- dataURL base64 (JPG/PNG)
+    imagen_tipo TEXT,            -- mime de la imagen
+    descripcion TEXT,            -- nota: qué falta / componente faltante
+    usuario TEXT,
+    fecha TEXT,
+    FOREIGN KEY (tarea_id) REFERENCES tareas(id) ON DELETE CASCADE
+  );
+
   CREATE TABLE IF NOT EXISTS app_secret (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     secret TEXT NOT NULL

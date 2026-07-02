@@ -5,6 +5,7 @@ import Productos from './pages/Productos.jsx'
 import Empleados from './pages/Empleados.jsx'
 import Prestamos from './pages/Prestamos.jsx'
 import Nomina from './pages/Nomina.jsx'
+import GestionNomina from './pages/GestionNomina.jsx'
 import ControlDinero from './pages/ControlDinero.jsx'
 import Historial from './pages/Historial.jsx'
 import Reportes from './pages/Reportes.jsx'
@@ -20,6 +21,7 @@ import { useAuth } from './context/AuthContext.jsx'
 const links = [
   { to: '/inicio', label: '🏠 Inicio', pagina: 'inicio' },
   { to: '/nomina', label: '🧾 Pago de Nómina', pagina: 'nomina' },
+  { to: '/gestion-nomina', label: '📋 Gestión de Nómina', pagina: 'gestion-nomina' },
   { to: '/productos', label: '📦 Productos', pagina: 'productos' },
   { to: '/empleados', label: '👷 Empleados', pagina: 'empleados' },
   { to: '/prestamos', label: '💵 Préstamos', pagina: 'prestamos' },
@@ -95,6 +97,7 @@ export default function App() {
           <Route path="/" element={<Navigate to={rutaInicio} replace />} />
           <Route path="/inicio" element={protegida('inicio', <Dashboard />)} />
           <Route path="/nomina" element={protegida('nomina', <Nomina />)} />
+          <Route path="/gestion-nomina" element={protegida('gestion-nomina', <GestionNomina />)} />
           <Route path="/productos" element={protegida('productos', <Productos />)} />
           <Route path="/empleados" element={protegida('empleados', <Empleados />)} />
           <Route path="/prestamos" element={protegida('prestamos', <Prestamos />)} />
