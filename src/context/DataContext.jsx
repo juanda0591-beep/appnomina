@@ -41,7 +41,7 @@ export function DataProvider({ children }) {
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState(null)
 
-      const { puede } = useAuth()
+  const { puede } = useAuth()
 
   const puedeLeer = (...reglas) => reglas.some(([pagina, accion = 'ver']) => puede(pagina, accion))
 
@@ -55,7 +55,7 @@ export function DataProvider({ children }) {
     }
   }
 
-     const recargar = async () => {
+  const recargar = async () => {
     setCargando(true)
     try {
       const [prod, emp, pres, nom, mov, empr] = await Promise.all([
@@ -194,7 +194,7 @@ export function DataProvider({ children }) {
   const prestamosDeEmpleado = (empleadoId) =>
     prestamos.filter((p) => String(p.empleado_id) === String(empleadoId) && p.saldo > 0)
 
-   const value = {
+  const value = {
     productos,
     empleados,
     prestamos,

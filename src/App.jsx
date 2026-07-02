@@ -50,10 +50,10 @@ export default function App() {
     if (l.solo === 'todos') return true
     return puede(l.pagina, 'ver')
   })
-    const rutaInicio = visibles[0]?.to || '/cuenta'
+  const rutaInicio = visibles[0]?.to || '/cuenta'
 
   // Envuelve una página: si el usuario no puede verla, redirige al inicio.
-    const protegida = (pagina, elemento) =>
+  const protegida = (pagina, elemento) =>
     puede(pagina, 'ver') ? elemento : <Navigate to={rutaInicio} replace />
 
   return (
@@ -103,7 +103,7 @@ export default function App() {
           <Route path="/reportes" element={protegida('reportes', <Reportes />)} />
           <Route path="/costos" element={protegida('costos', <Costos />)} />
           <Route path="/empresa" element={protegida('empresa', <Empresa />)} />
-                    <Route path="/usuarios" element={esAdmin ? <Usuarios /> : <Navigate to={rutaInicio} replace />} />
+          <Route path="/usuarios" element={esAdmin ? <Usuarios /> : <Navigate to={rutaInicio} replace />} />
           <Route path="/cuenta" element={<Cuenta />} />
         </Routes>
       </main>

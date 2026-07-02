@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { existsSync } from 'fs'
 import db from './db.js'
-import  {
+import {
   authRequired,
   adminRequired,
   permisoRequired,
@@ -439,12 +439,13 @@ app.get('/api/movimientos', permisoRequired('control-dinero', 'ver'), (req, res)
   res.json(rows.map(movimientoSalida))
 })
 
-/// Balance global: total ingresos, gastos y saldo actual
+// Balance global: total ingresos, gastos y saldo actual
 app.get('/api/movimientos/balance', permisoRequired('control-dinero', 'ver'), (req, res) => {
   const ingresos = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'ingreso'").get().t
   const gastos = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'gasto'").get().t
   res.json({ ingresos, gastos, balance: ingresos - gastos })
 })
+
 // Descarga / vista del comprobante (PDF o imagen) de un movimiento
 app.get('/api/movimientos/:id/comprobante', permisoRequired('control-dinero', 'ver'), (req, res) => {
   const m = db.prepare('SELECT comprobante, comprobante_tipo FROM movimientos WHERE id = ?').get(req.params.id)
