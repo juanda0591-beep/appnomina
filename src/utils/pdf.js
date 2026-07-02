@@ -199,7 +199,14 @@ export function generarPdfNomina({ empresa, empleado, fecha, items, descuentos, 
     doc.setTextColor(90)
     const lineas = doc.splitTextToSize(comentario.trim(), pageW - marginX * 2)
     doc.text(lineas, marginX, y + 6)
+    y += 6 + lineas.length * 5
   }
+
+  // Sello de PAGADO (junto al total)
+  dibujarSelloPagado(doc, marginX)
+
+  // Firmas del representante y del empleado
+  dibujarFirmas(doc, marginX, empleado, empresa)
 
   pieDePagina(doc, empresa, marginX)
 
@@ -314,6 +321,69 @@ export function generarPdfMovimientos({ empresa, desde, hasta, movimientos, ingr
   pieDePagina(doc, empresa, marginX)
 
   doc.save(`reporte_movimientos_${desde}_a_${hasta}.pdf`)
+}
+
+// Dibuja un sello inclinado de "PAGADO" en la esquina superior derecha del comprobante.
+function dibujarSelloPagado(doc, marginX) {
+  const pageW = doc.internal.pageSize.getWidth()
+  const cx = pageW - marginX - 22 // centro del sello
+  const cy = 54
+  const verde = [22, 163, 74]
+
+  doc.saveGraphicsState()
+  // Rotamos alrededor del centro del sello
+  const rad = (-18 * Math.PI) / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
+  doc.setDrawColor(...verde)
+  doc.setTextColor(...verde)
+  doc.setLineWidth(1.6)
+
+  // Marco rectangular con esquinas redondeadas, rotado manualmente
+  const w = 44
+  const h = 16
+  const pts = [
+    [-w / 2, -h / 2],
+    [w / 2, -h / 2],
+    [w / 2, h / 2],
+    [-w / 2, h / 2],
+  ].map(([px, py]) => [cx + px * cos - py * sin, cy + px * sin + py * cos])
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i]
+    const b = pts[(i + 1) % pts.length]
+    doc.line(a[0], a[1], b[0], b[1])
+  }
+
+  doc.setFont(undefined, 'bold')
+  doc.setFontSize(20)
+  doc.text('PAGADO', cx, cy + 2, { align: 'center', angle: 18 })
+  doc.setFont(undefined, 'normal')
+  doc.restoreGraphicsState()
+  doc.setTextColor(0)
+}
+
+// Dibuja las líneas de firma del representante y del empleado en la parte inferior.
+function dibujarFirmas(doc, marginX, empleado, empresa) {
+  const pageW = doc.internal.pageSize.getWidth()
+  const pageH = doc.internal.pageSize.getHeight()
+  const y = pageH - 34 // por encima del pie de página
+  const anchoCol = (pageW - marginX * 2 - 20) / 2
+  const x1 = marginX
+  const x2 = marginX + anchoCol + 20
+
+  doc.setDrawColor(120)
+  doc.setLineWidth(0.4)
+  doc.line(x1, y, x1 + anchoCol, y)
+  doc.line(x2, y, x2 + anchoCol, y)
+
+  doc.setFontSize(9)
+  doc.setTextColor(90)
+  doc.text('Firma del representante', x1, y + 5)
+  if (empresa?.nombre) doc.text(empresa.nombre, x1, y + 10)
+
+  doc.text('Firma del empleado', x2, y + 5)
+  if (empleado?.nombre) doc.text(empleado.nombre, x2, y + 10)
+  doc.setTextColor(0)
 }
 
 function pieDePagina(doc, empresa, marginX) {
