@@ -13,7 +13,7 @@ const formVacio = () => ({ fecha: hoy(), categoria: '', monto: '', descripcion: 
 const ORIGEN_LABEL = { nomina: 'Pago de nómina', prestamo: 'Adelanto' }
 
 export default function ControlDinero() {
-  const { movimientos, addMovimiento, deleteMovimiento, getBalance } = useData()
+    const { movimientos, addMovimiento, deleteMovimiento } = useData()
   const { puede } = useAuth()
   const puedeCrear = puede('control-dinero', 'crear')
   const puedeEliminar = puede('control-dinero', 'eliminar')
@@ -69,7 +69,7 @@ export default function ControlDinero() {
   }
 
   const verComprobante = (id) => {
-    const token = localStorage.getItem('nomina_token')
+        const token = sessionStorage.getItem('nomina_token')
     // Abre el comprobante en una pestaña nueva (el endpoint exige token)
     fetch(`/api/movimientos/${id}/comprobante`, {
       headers: { Authorization: `Bearer ${token}` },

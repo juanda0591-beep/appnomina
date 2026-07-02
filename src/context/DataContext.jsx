@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react'
+import { useAuth } from './AuthContext.jsx'
 
 const DataContext = createContext(null)
 
@@ -40,16 +41,40 @@ export function DataProvider({ children }) {
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState(null)
 
-  const recargar = async () => {
+      const { puede } = useAuth()
+
+  const puedeLeer = (...reglas) => reglas.some(([pagina, accion = 'ver']) => puede(pagina, accion))
+
+  const cargarSiPuede = async (condicion, path, fallback) => {
+    if (!condicion) return fallback
+    try {
+      return await http(path)
+    } catch (e) {
+      if (e.message.startsWith('Error 403')) return fallback
+      throw e
+    }
+  }
+
+     const recargar = async () => {
+    setCargando(true)
     try {
       const [prod, emp, pres, nom, mov, empr] = await Promise.all([
-        http('/productos'),
-        http('/empleados'),
-        http('/prestamos'),
-        http('/nominas'),
-        http('/movimientos'),
-        http('/empresa'),
+        cargarSiPuede(puedeLeer(['productos', 'ver'], ['nomina', 'ver']), '/productos', []),
+        cargarSiPuede(
+          puedeLeer(['empleados', 'ver'], ['nomina', 'ver'], ['prestamos', 'ver'], ['historial', 'ver'], ['reportes', 'ver']),
+          '/empleados',
+          []
+        ),
+        cargarSiPuede(
+          puedeLeer(['prestamos', 'ver'], ['nomina', 'ver'], ['empleados', 'ver'], ['historial', 'ver']),
+          '/prestamos',
+          []
+        ),
+        cargarSiPuede(puedeLeer(['historial', 'ver']), '/nominas', []),
+        cargarSiPuede(puedeLeer(['control-dinero', 'ver']), '/movimientos', []),
+        cargarSiPuede(puedeLeer(['empresa', 'ver'], ['nomina', 'ver'], ['historial', 'ver']), '/empresa', null),
       ])
+
       setProductos(prod)
       setEmpleados(emp)
       setPrestamos(pres)
@@ -169,7 +194,7 @@ export function DataProvider({ children }) {
   const prestamosDeEmpleado = (empleadoId) =>
     prestamos.filter((p) => String(p.empleado_id) === String(empleadoId) && p.saldo > 0)
 
-  const value = {
+   const value = {
     productos,
     empleados,
     prestamos,

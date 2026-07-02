@@ -4,10 +4,11 @@ import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { existsSync } from 'fs'
 import db from './db.js'
-import {
+import  {
   authRequired,
   adminRequired,
   permisoRequired,
+  permisoAnyRequired,
   login,
   cambiarPassword,
   seedUsuario,
@@ -95,6 +96,7 @@ app.post('/api/cambiar-password', (req, res) => {
   res.json({ ok: true })
 })
 
+
 // ============ USUARIOS (solo admin) ============
 app.get('/api/usuarios', adminRequired, (req, res) => {
   res.json(listarUsuarios())
@@ -126,7 +128,7 @@ app.delete('/api/usuarios/:id', adminRequired, (req, res) => {
 })
 
 // ============ DASHBOARD ============
-app.get('/api/dashboard', (req, res) => {
+app.get('/api/dashboard', permisoRequired('inicio', 'ver'), (req, res) => {
   const ingresos = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'ingreso'").get().t
   const gastos = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'gasto'").get().t
   const totalEmpleados = db.prepare('SELECT COUNT(*) AS n FROM empleados').get().n
@@ -204,7 +206,10 @@ function movimientoSalida(m) {
 }
 
 // ============ PRODUCTOS ============
-app.get('/api/productos', (req, res) => {
+app.get('/api/productos', permisoAnyRequired([
+  ['productos', 'ver'],
+  ['nomina', 'ver'],
+]), (req, res) => {
   const productos = db.prepare('SELECT * FROM productos ORDER BY nombre').all()
   res.json(productos.map(productoConProcesos))
 })
@@ -241,7 +246,13 @@ app.delete('/api/productos/:id', permisoRequired('productos', 'eliminar'), (req,
 })
 
 // ============ EMPLEADOS ============
-app.get('/api/empleados', (req, res) => {
+app.get('/api/empleados', permisoAnyRequired([
+  ['empleados', 'ver'],
+  ['nomina', 'ver'],
+  ['prestamos', 'ver'],
+  ['historial', 'ver'],
+  ['reportes', 'ver'],
+]), (req, res) => {
   res.json(db.prepare('SELECT * FROM empleados ORDER BY nombre').all())
 })
 
@@ -261,12 +272,29 @@ app.put('/api/empleados/:id', permisoRequired('empleados', 'editar'), (req, res)
 })
 
 app.delete('/api/empleados/:id', permisoRequired('empleados', 'eliminar'), (req, res) => {
-  db.prepare('DELETE FROM empleados WHERE id = ?').run(req.params.id)
+  const empleadoId = Number(req.params.id)
+  const tx = db.transaction(() => {
+    const prestamosEmpleado = db.prepare('SELECT id FROM prestamos WHERE empleado_id = ?').all(empleadoId)
+    const deleteMovimientoPrestamo = db.prepare("DELETE FROM movimientos WHERE origen = 'prestamo' AND ref_id = ?")
+
+    for (const prestamo of prestamosEmpleado) {
+      deleteMovimientoPrestamo.run(prestamo.id)
+    }
+
+    db.prepare('DELETE FROM empleados WHERE id = ?').run(empleadoId)
+  })
+
+  tx()
   res.json({ ok: true })
 })
 
 // ============ PRESTAMOS ============
-app.get('/api/prestamos', (req, res) => {
+app.get('/api/prestamos', permisoAnyRequired([
+  ['prestamos', 'ver'],
+  ['nomina', 'ver'],
+  ['empleados', 'ver'],
+  ['historial', 'ver'],
+]), (req, res) => {
   res.json(db.prepare('SELECT * FROM prestamos ORDER BY fecha DESC, id DESC').all())
 })
 
@@ -331,7 +359,7 @@ function nominaCompleta(n) {
   }
 }
 
-app.get('/api/nominas', (req, res) => {
+app.get('/api/nominas', permisoRequired('historial', 'ver'), (req, res) => {
   const { desde, hasta } = req.query
   let rows
   if (desde && hasta) {
@@ -384,16 +412,23 @@ app.post('/api/nominas', permisoRequired('nomina', 'crear'), (req, res) => {
 
 app.delete('/api/nominas/:id', permisoRequired('historial', 'eliminar'), (req, res) => {
   const tx = db.transaction(() => {
+    const descuentos = db.prepare('SELECT prestamo_id, monto FROM nomina_descuentos WHERE nomina_id = ?').all(req.params.id)
+    const revertirPrestamo = db.prepare('UPDATE prestamos SET saldo = saldo + ? WHERE id = ?')
+
+    for (const descuento of descuentos) {
+      if (descuento.prestamo_id) revertirPrestamo.run(Number(descuento.monto) || 0, descuento.prestamo_id)
+    }
+
     db.prepare('DELETE FROM nominas WHERE id = ?').run(req.params.id)
-    // borra el gasto automático asociado a esta nómina
     db.prepare("DELETE FROM movimientos WHERE origen = 'nomina' AND ref_id = ?").run(req.params.id)
   })
+
   tx()
   res.json({ ok: true })
 })
 
 // ============ MOVIMIENTOS (Control de dinero) ============
-app.get('/api/movimientos', (req, res) => {
+app.get('/api/movimientos', permisoRequired('control-dinero', 'ver'), (req, res) => {
   const { desde, hasta } = req.query
   let rows
   if (desde && hasta) {
@@ -404,15 +439,14 @@ app.get('/api/movimientos', (req, res) => {
   res.json(rows.map(movimientoSalida))
 })
 
-// Balance global: total ingresos, gastos y saldo actual
-app.get('/api/movimientos/balance', (req, res) => {
+/// Balance global: total ingresos, gastos y saldo actual
+app.get('/api/movimientos/balance', permisoRequired('control-dinero', 'ver'), (req, res) => {
   const ingresos = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'ingreso'").get().t
   const gastos = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'gasto'").get().t
   res.json({ ingresos, gastos, balance: ingresos - gastos })
 })
-
 // Descarga / vista del comprobante (PDF o imagen) de un movimiento
-app.get('/api/movimientos/:id/comprobante', (req, res) => {
+app.get('/api/movimientos/:id/comprobante', permisoRequired('control-dinero', 'ver'), (req, res) => {
   const m = db.prepare('SELECT comprobante, comprobante_tipo FROM movimientos WHERE id = ?').get(req.params.id)
   if (!m || !m.comprobante) return res.status(404).json({ error: 'Sin comprobante' })
   const match = /^data:(.+?);base64,(.+)$/s.exec(m.comprobante)
@@ -451,7 +485,11 @@ app.delete('/api/movimientos/:id', permisoRequired('control-dinero', 'eliminar')
 })
 
 // ============ EMPRESA ============
-app.get('/api/empresa', (req, res) => {
+app.get('/api/empresa', permisoAnyRequired([
+  ['empresa', 'ver'],
+  ['nomina', 'ver'],
+  ['historial', 'ver'],
+]), (req, res) => {
   res.json(db.prepare('SELECT * FROM empresa WHERE id = 1').get())
 })
 
@@ -464,7 +502,7 @@ app.put('/api/empresa', permisoRequired('empresa', 'editar'), (req, res) => {
 })
 
 // ============ REPORTES ============
-app.get('/api/reportes', (req, res) => {
+app.get('/api/reportes', permisoRequired('reportes', 'ver'), (req, res) => {
   const { desde, hasta } = req.query
   if (!desde || !hasta) return res.status(400).json({ error: 'desde y hasta son requeridos' })
 

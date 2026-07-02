@@ -57,6 +57,7 @@ export function permisosVacios() {
 // Si permisos es null/undefined se interpreta como "acceso amplio" (compatibilidad
 // con usuarios creados antes de esta función).
 export function puedeEn(permisos, pagina, accion) {
+  if (pagina === 'inicio' && accion === 'ver') return true
   if (!permisos) return true
   return !!(permisos[pagina] && permisos[pagina][accion])
 }

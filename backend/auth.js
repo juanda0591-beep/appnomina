@@ -184,10 +184,25 @@ export function adminRequired(req, res, next) {
 export function permisoRequired(pagina, accion) {
   return (req, res, next) => {
     if (req.rol === 'admin') return next()
+    if (pagina === 'inicio' && accion === 'ver') return next()
+
     const user = db.prepare('SELECT permisos FROM usuarios WHERE username = ?').get(req.usuario)
     const permisos = parsePermisos(user?.permisos)
-    if (!permisos) return next() // acceso amplio (compatibilidad)
+    if (!permisos) return next()
     if (permisos[pagina] && permisos[pagina][accion]) return next()
+    return res.status(403).json({ error: 'No tienes permiso para realizar esta acción' })
+  }
+}
+export function permisoAnyRequired(reglas) {
+  return (req, res, next) => {
+    if (req.rol === 'admin') return next()
+    const user = db.prepare('SELECT permisos FROM usuarios WHERE username = ?').get(req.usuario)
+    const permisos = parsePermisos(user?.permisos)
+    if (!permisos) return next()
+
+    const permitido = reglas.some(([pagina, accion = 'ver']) => permisos[pagina] && permisos[pagina][accion])
+    if (permitido) return next()
+
     return res.status(403).json({ error: 'No tienes permiso para realizar esta acción' })
   }
 }
