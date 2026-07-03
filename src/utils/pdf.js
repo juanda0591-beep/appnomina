@@ -71,7 +71,7 @@ function drawEncabezadoEmpresa(doc, empresa, marginX) {
 }
 
 // Genera y descarga el PDF del pago de nómina
-export function generarPdfNomina({ empresa, empleado, fecha, items, descuentos, prestamosEmpleado, subtotal, totalDescuentos, extra, extraDetalle, total, comentario, fotos }) {
+export function generarPdfNomina({ empresa, empleado, fecha, items, descuentos, prestamosEmpleado, subtotal, totalDescuentos, extra, extraDetalle, descuentoTrabajo, descuentoTrabajoDetalle, total, comentario, fotos }) {
   const doc = new jsPDF()
   const marginX = 14
 
@@ -178,6 +178,18 @@ export function generarPdfNomina({ empresa, empleado, fecha, items, descuentos, 
       ? `Pago extra (${extraDetalle.trim()}): +${formatCOP(extra)}`
       : `Pago extra: +${formatCOP(extra)}`
     doc.text(etiqueta, marginX, y)
+    y += 8
+  }
+
+  // Descuento por trabajo (opcional)
+  if (descuentoTrabajo > 0) {
+    doc.setFontSize(11)
+    doc.setTextColor(220, 38, 38)
+    const etiquetaDesc = descuentoTrabajoDetalle && descuentoTrabajoDetalle.trim()
+      ? `Descuento por trabajo (${descuentoTrabajoDetalle.trim()}): -${formatCOP(descuentoTrabajo)}`
+      : `Descuento por trabajo: -${formatCOP(descuentoTrabajo)}`
+    doc.text(etiquetaDesc, marginX, y)
+    doc.setTextColor(0)
     y += 8
   }
 
