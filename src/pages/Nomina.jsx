@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { formatCOP } from '../utils/format.js'
 import { generarPdfNomina } from '../utils/pdf.js'
+import { notify, confirmar } from '../utils/notify.js'
 
 const nuevoItem = () => ({ key: Math.random().toString(36).slice(2), productoId: '', procesoId: '', cantidad: '' })
 
@@ -193,11 +194,11 @@ export default function Nomina() {
 
   const validar = (payload) => {
     if (!empleadoId) {
-      alert('Selecciona un empleado')
+      notify.error('Selecciona un empleado')
       return false
     }
     if (payload.items.length === 0) {
-      alert('Agrega al menos un trabajo (producto, proceso y cantidad)')
+      notify.error('Agrega al menos un trabajo (producto, proceso y cantidad)')
       return false
     }
     return true
@@ -209,14 +210,19 @@ export default function Nomina() {
     const payload = construirPayload()
     if (!validar(payload)) return
     const total = payload.subtotal - payload.totalDescuentos + payload.extra - payload.descuentoTrabajo
+    const ok = await confirmar(
+      `Se pagará ${formatCOP(total)} a ${payload.empleado?.nombre || 'el empleado'} y se generará el PDF. ¿Continuar?`,
+      { titulo: 'Confirmar pago de nómina', textoOk: 'Sí, pagar', peligro: false }
+    )
+    if (!ok) return
     setGuardando(true)
     try {
       await addNomina({ ...payload, empleado: undefined, fotos: undefined, total }) // no enviamos copia del empleado ni las fotos (solo van al PDF)
       generarPdfNomina({ ...payload, empresa, total })
-      alert('✅ Pago registrado y PDF generado')
+      notify.ok('Pago registrado y PDF generado')
       resetForm()
     } catch (e) {
-      alert('Error al registrar el pago: ' + e.message)
+      notify.error('Error al registrar el pago: ' + e.message)
     } finally {
       setGuardando(false)
     }

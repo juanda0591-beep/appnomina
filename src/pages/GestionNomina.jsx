@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP } from '../utils/format.js'
+import { notify, confirmar } from '../utils/notify.js'
 
 // Etiquetas y orden de los estados de una tarea
 const ESTADO_LABEL = {
@@ -113,9 +114,9 @@ export default function GestionNomina() {
   }
 
   const handleAsignar = async () => {
-    if (!nuevaEmpleadoId) return alert('Selecciona un empleado')
-    if (!nuevaProductoId || !nuevaProcesoId) return alert('Selecciona producto y proceso')
-    if (!(Number(nuevaCantidad) > 0)) return alert('Indica una cantidad mayor a 0')
+    if (!nuevaEmpleadoId) { notify.error('Selecciona un empleado'); return }
+    if (!nuevaProductoId || !nuevaProcesoId) { notify.error('Selecciona producto y proceso'); return }
+    if (!(Number(nuevaCantidad) > 0)) { notify.error('Indica una cantidad mayor a 0'); return }
     setGuardando(true)
     try {
       await addTarea({
@@ -127,7 +128,7 @@ export default function GestionNomina() {
       })
       resetForm()
     } catch (e) {
-      alert('Error al asignar la tarea: ' + e.message)
+      notify.error('Error al asignar la tarea: ' + e.message)
     } finally {
       setGuardando(false)
     }
@@ -153,25 +154,25 @@ export default function GestionNomina() {
         return next
       })
     } catch (e) {
-      alert('Error al guardar: ' + e.message)
+      notify.error('Error al guardar: ' + e.message)
     }
   }
 
   const handleTerminar = async (t) => {
-    if (!confirm('¿Marcar esta tarea como terminada? Pasará a estar lista para pago de nómina.')) return
+    if (!(await confirmar('¿Marcar esta tarea como terminada? Pasará a estar lista para pago de nómina.', { titulo: 'Terminar tarea', textoOk: 'Sí, terminar', peligro: false }))) return
     try {
       await terminarTarea(t.id)
     } catch (e) {
-      alert('Error: ' + e.message)
+      notify.error('Error: ' + e.message)
     }
   }
 
   const handleEliminar = async (t) => {
-    if (!confirm('¿Eliminar esta tarea?')) return
+    if (!(await confirmar('¿Eliminar esta tarea?'))) return
     try {
       await deleteTarea(t.id)
     } catch (e) {
-      alert('Error: ' + e.message)
+      notify.error('Error: ' + e.message)
     }
   }
 
@@ -185,7 +186,7 @@ export default function GestionNomina() {
       setHistorial(h)
       setHistorialAbierto(t.id)
     } catch (e) {
-      alert('Error al cargar el historial: ' + e.message)
+      notify.error('Error al cargar el historial: ' + e.message)
     }
   }
 
@@ -205,7 +206,7 @@ export default function GestionNomina() {
       setFotoNota('')
       setFotosAbierto(t.id)
     } catch (e) {
-      alert('Error al cargar las fotos: ' + e.message)
+      notify.error('Error al cargar las fotos: ' + e.message)
     }
   }
 
@@ -213,12 +214,12 @@ export default function GestionNomina() {
     const file = e.target.files?.[0]
     if (!file) return
     if (!/image\/(jpeg|jpg|png)/.test(file.type)) {
-      alert('La foto debe ser JPG o PNG')
+      notify.error('La foto debe ser JPG o PNG')
       e.target.value = ''
       return
     }
     if (file.size > 5 * 1024 * 1024) {
-      alert('La foto es muy pesada (máx 5 MB). Usa una imagen más liviana.')
+      notify.error('La foto es muy pesada (máx 5 MB). Usa una imagen más liviana.')
       e.target.value = ''
       return
     }
@@ -235,7 +236,7 @@ export default function GestionNomina() {
         setFotos(f)
         setFotoNota('')
       } catch (err) {
-        alert('Error al subir la foto: ' + err.message)
+        notify.error('Error al subir la foto: ' + err.message)
       } finally {
         setSubiendoFoto(false)
       }
@@ -245,12 +246,12 @@ export default function GestionNomina() {
   }
 
   const eliminarFoto = async (fotoId, tareaId) => {
-    if (!confirm('¿Eliminar esta foto?')) return
+    if (!(await confirmar('¿Eliminar esta foto?'))) return
     try {
       await deleteTareaFoto(fotoId)
       setFotos((fs) => fs.filter((f) => f.id !== fotoId))
     } catch (e) {
-      alert('Error: ' + e.message)
+      notify.error('Error: ' + e.message)
     }
   }
 

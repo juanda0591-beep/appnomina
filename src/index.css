@@ -352,3 +352,25 @@ input[type="file"] {
   .row > input { flex: 1 1 100%; }
   .form-actions button, .quick-ranges button { flex: 1 1 auto; }
 }
+
+/* ---------- SweetAlert2 (diálogos de confirmación) ---------- */
+.swal-nomina {
+  border-radius: 16px !important;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .25) !important;
+}
+.swal-nomina .swal2-title {
+  font-size: 20px;
+  color: var(--text);
+}
+.swal-nomina .swal2-html-container {
+  color: var(--muted);
+  font-size: 15px;
+}
+.swal-nomina .swal2-confirm,
+.swal-nomina .swal2-cancel {
+  border-radius: 10px !important;
+  font-weight: 600;
+  padding: 10px 22px;
+  box-shadow: none !important;
+}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
+import { notify } from '../utils/notify.js'
 
 const vacio = { nombre: '', direccion: '', telefono: '', correo: '', nit: '', logo: '' }
 
@@ -25,11 +26,11 @@ export default function Empresa() {
     const file = e.target.files?.[0]
     if (!file) return
     if (!/image\/(jpeg|jpg|png)/.test(file.type)) {
-      alert('El logo debe ser una imagen JPG o PNG')
+      notify.error('El logo debe ser una imagen JPG o PNG')
       return
     }
     if (file.size > 2 * 1024 * 1024) {
-      alert('El logo es muy pesado (máx 2 MB). Usa una imagen más liviana.')
+      notify.error('El logo es muy pesado (máx 2 MB). Usa una imagen más liviana.')
       return
     }
     const reader = new FileReader()
@@ -44,7 +45,7 @@ export default function Empresa() {
       await updateEmpresa(form)
       setGuardado(true)
     } catch (err) {
-      alert('Error al guardar: ' + err.message)
+      notify.error('Error al guardar: ' + err.message)
     } finally {
       setGuardando(false)
     }

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP } from '../utils/format.js'
+import { notify, confirmar } from '../utils/notify.js'
 
 const emptyEmp = { nombre: '', cedula: '', telefono: '', cargo: '' }
 
@@ -22,7 +23,7 @@ export default function Empleados() {
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!form.nombre.trim()) return alert('Escribe el nombre del empleado')
+    if (!form.nombre.trim()) { notify.error('Escribe el nombre del empleado'); return }
     if (editId) updateEmpleado(editId, form)
     else addEmpleado(form)
     resetForm()
@@ -108,8 +109,8 @@ export default function Empleados() {
                 {puedeEliminar && (
                   <button
                     className="btn-danger"
-                    onClick={() => {
-                      if (confirm(`¿Eliminar a "${emp.nombre}"?`)) deleteEmpleado(emp.id)
+                    onClick={async () => {
+                      if (await confirmar(`¿Eliminar a "${emp.nombre}"?`)) deleteEmpleado(emp.id)
                     }}
                   >
                     Eliminar

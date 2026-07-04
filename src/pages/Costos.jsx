@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP } from '../utils/format.js'
 import { calcularCosteo, costeoVacio } from '../utils/costeo.js'
 import { generarPdfCosteo, descargarCSV } from '../utils/pdf.js'
+import { confirmar } from '../utils/notify.js'
 
 // Colores para las porciones del gráfico de torta (uno por categoría de costo)
 const COLORES = ['#2563eb', '#16a34a', '#f59e0b', '#dc2626']
@@ -146,7 +147,7 @@ export default function Costos() {
   }
 
   const eliminar = async (c) => {
-    if (!confirm(`¿Eliminar el costeo "${c.nombre}"?`)) return
+    if (!(await confirmar(`¿Eliminar el costeo "${c.nombre}"?`))) return
     try {
       await deleteCosteo(c.id)
       if (c.id === id) nuevo()

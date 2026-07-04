@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP } from '../utils/format.js'
+import { notify, confirmar } from '../utils/notify.js'
 
 const emptyProceso = () => ({ nombre: '', pago: '' })
 
@@ -32,9 +33,9 @@ export default function Productos() {
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!nombre.trim()) return alert('Escribe el nombre del producto')
+    if (!nombre.trim()) { notify.error('Escribe el nombre del producto'); return }
     const validos = procesos.filter((p) => p.nombre.trim())
-    if (validos.length === 0) return alert('Agrega al menos un proceso')
+    if (validos.length === 0) { notify.error('Agrega al menos un proceso'); return }
 
     if (editId) {
       updateProducto(editId, nombre, validos)
@@ -148,8 +149,8 @@ export default function Productos() {
                         {puedeEliminar && (
                           <button
                             className="btn-danger"
-                            onClick={() => {
-                              if (confirm(`¿Eliminar "${prod.nombre}"?`)) deleteProducto(prod.id)
+                            onClick={async () => {
+                              if (await confirmar(`¿Eliminar "${prod.nombre}"?`)) deleteProducto(prod.id)
                             }}
                           >
                             Eliminar

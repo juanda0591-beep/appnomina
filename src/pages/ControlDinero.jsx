@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha } from '../utils/format.js'
+import { notify, confirmar } from '../utils/notify.js'
 
 const CATEGORIAS_INGRESO = ['Venta', 'Abono cliente', 'Préstamo recibido', 'Otro ingreso']
 const CATEGORIAS_GASTO = ['Materiales', 'Servicios', 'Arriendo', 'Transporte', 'Nómina', 'Adelanto', 'Otro gasto']
@@ -36,12 +37,12 @@ export default function ControlDinero() {
     const file = e.target.files?.[0]
     if (!file) return
     if (!/(application\/pdf|image\/(jpeg|jpg|png))/.test(file.type)) {
-      alert('El comprobante debe ser PDF, JPG o PNG')
+      notify.error('El comprobante debe ser PDF, JPG o PNG')
       e.target.value = ''
       return
     }
     if (file.size > 5 * 1024 * 1024) {
-      alert('El comprobante es muy pesado (máx 5 MB). Usa un archivo más liviano.')
+      notify.error('El comprobante es muy pesado (máx 5 MB). Usa un archivo más liviano.')
       e.target.value = ''
       return
     }
@@ -55,14 +56,20 @@ export default function ControlDinero() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!(Number(form.monto) > 0)) return alert('Ingresa un monto válido')
+    if (!(Number(form.monto) > 0)) { notify.error('Ingresa un monto válido'); return }
+    const esIngreso = tab === 'ingreso'
+    const ok = await confirmar(
+      `Vas a registrar ${esIngreso ? 'un ingreso' : 'un gasto'} de ${formatCOP(Number(form.monto))}. ¿Confirmar?`,
+      { titulo: esIngreso ? 'Confirmar ingreso' : 'Confirmar gasto', textoOk: 'Sí, registrar', peligro: false }
+    )
+    if (!ok) return
     setGuardando(true)
     try {
       await addMovimiento({ ...form, tipo: tab })
       setForm(formVacio())
-      alert(tab === 'ingreso' ? '✅ Ingreso registrado' : '✅ Gasto registrado')
+      notify.ok(esIngreso ? 'Ingreso registrado' : 'Gasto registrado')
     } catch (err) {
-      alert('Error al guardar: ' + err.message)
+      notify.error('Error al guardar: ' + err.message)
     } finally {
       setGuardando(false)
     }
@@ -76,7 +83,7 @@ export default function ControlDinero() {
     })
       .then((r) => (r.ok ? r.blob() : Promise.reject(new Error('No se pudo abrir'))))
       .then((blob) => window.open(URL.createObjectURL(blob), '_blank'))
-      .catch((err) => alert(err.message))
+      .catch((err) => notify.error(err.message))
   }
 
   // Filtra los movimientos según la pestaña (en balance se muestran todos)
@@ -217,8 +224,8 @@ export default function ControlDinero() {
                           <button
                             className="btn-icon danger"
                             title="Eliminar"
-                            onClick={() => {
-                              if (confirm('¿Eliminar este movimiento?')) deleteMovimiento(m.id)
+                            onClick={async () => {
+                              if (await confirmar('¿Eliminar este movimiento?')) deleteMovimiento(m.id)
                             }}
                           >
                             ✕

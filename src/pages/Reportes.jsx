@@ -3,6 +3,7 @@ import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha } from '../utils/format.js'
 import { generarPdfReporte, generarPdfMovimientos } from '../utils/pdf.js'
+import { notify } from '../utils/notify.js'
 
 function inicioDeMes() {
   const d = new Date()
@@ -22,7 +23,7 @@ export default function Reportes() {
   const [cargando, setCargando] = useState(false)
 
   const consultar = async () => {
-    if (desde > hasta) return alert('La fecha "desde" no puede ser mayor que "hasta"')
+    if (desde > hasta) { notify.error('La fecha "desde" no puede ser mayor que "hasta"'); return }
     setCargando(true)
     try {
       const [r, m] = await Promise.all([getReporte(desde, hasta), getMovimientos(desde, hasta)])
@@ -31,7 +32,7 @@ export default function Reportes() {
       const gastos = m.filter((x) => x.tipo === 'gasto').reduce((s, x) => s + x.monto, 0)
       setMovs({ lista: m, ingresos, gastos, balance: ingresos - gastos })
     } catch (e) {
-      alert('Error al generar el reporte: ' + e.message)
+      notify.error('Error al generar el reporte: ' + e.message)
     } finally {
       setCargando(false)
     }

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha } from '../utils/format.js'
+import { notify, confirmar } from '../utils/notify.js'
 
 export default function Prestamos() {
   const { empleados, prestamos, addPrestamo, deletePrestamo, getEmpleado } = useData()
@@ -15,10 +16,16 @@ export default function Prestamos() {
   const [fecha, setFecha] = useState(hoy)
   const [descripcion, setDescripcion] = useState('')
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!empleadoId) return alert('Selecciona un empleado')
-    if (!(Number(monto) > 0)) return alert('Ingresa un monto válido')
+    if (!empleadoId) { notify.error('Selecciona un empleado'); return }
+    if (!(Number(monto) > 0)) { notify.error('Ingresa un monto válido'); return }
+    const emp = getEmpleado(empleadoId)
+    const ok = await confirmar(
+      `Vas a registrar un préstamo de ${formatCOP(Number(monto))} a ${emp?.nombre || 'el empleado'}. ¿Confirmar?`,
+      { titulo: 'Confirmar préstamo', textoOk: 'Sí, registrar', peligro: false }
+    )
+    if (!ok) return
     addPrestamo({ empleadoId, monto, fecha, descripcion })
     setMonto('')
     setDescripcion('')
@@ -104,8 +111,8 @@ export default function Prestamos() {
                         <button
                           className="btn-icon danger"
                           title="Eliminar"
-                          onClick={() => {
-                            if (confirm('¿Eliminar este préstamo?')) deletePrestamo(p.id)
+                          onClick={async () => {
+                            if (await confirmar('¿Eliminar este préstamo?')) deletePrestamo(p.id)
                           }}
                         >
                           ✕

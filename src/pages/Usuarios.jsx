@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { PAGINAS, ACCION_LABEL, TODAS_ACCIONES, permisosVacios, permisosCompletos } from '../permisos.js'
+import { confirmar } from '../utils/notify.js'
 
 // Normaliza un objeto de permisos (puede venir null o incompleto) a la forma
 // completa del catálogo, para que la matriz de checkboxes siempre tenga valores.
@@ -68,7 +69,7 @@ export default function Usuarios() {
   }
 
   const eliminar = async (u) => {
-    if (!confirm(`¿Eliminar al usuario "${u.username}"? Esta acción no se puede deshacer.`)) return
+    if (!(await confirmar(`¿Eliminar al usuario "${u.username}"? Esta acción no se puede deshacer.`))) return
     setMsg(null)
     try {
       await deleteUsuario(u.id)

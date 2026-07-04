@@ -3,6 +3,7 @@ import { useData } from "../context/DataContext.jsx"
 import { useAuth } from "../context/AuthContext.jsx"
 import { formatCOP, formatFecha } from "../utils/format.js"
 import { generarPdfNomina } from "../utils/pdf.js"
+import { notify, confirmar } from "../utils/notify.js"
 
 export default function Historial() {
   const { nominas, empresa, prestamos, getEmpleado, deleteNomina } = useData()
@@ -82,7 +83,7 @@ export default function Historial() {
     const telefono = emp?.telefono || ""
 
     if (!telefono) {
-      alert("El empleado no tiene número de WhatsApp")
+      notify.error("El empleado no tiene número de WhatsApp")
       return
     }
 
@@ -199,9 +200,9 @@ export default function Historial() {
                 {puedeEliminar && (
                   <button
                     className="btn-danger"
-                    onClick={() => {
+                    onClick={async () => {
                       if (
-                        confirm(
+                        await confirmar(
                           "¿Eliminar este pago? (No se puede revertir)"
                         )
                       )
