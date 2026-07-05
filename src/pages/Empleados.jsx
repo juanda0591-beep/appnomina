@@ -21,12 +21,31 @@ export default function Empleados() {
     setEditId(null)
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     if (!form.nombre.trim()) { notify.error('Escribe el nombre del empleado'); return }
-    if (editId) updateEmpleado(editId, form)
-    else addEmpleado(form)
-    resetForm()
+
+    const editando = Boolean(editId)
+    const ok = await confirmar(
+      editando
+        ? `¿Guardar los cambios de "${form.nombre.trim()}"?`
+        : `¿Agregar a "${form.nombre.trim()}" como empleado?`,
+      { titulo: editando ? 'Guardar empleado' : 'Agregar empleado', textoOk: editando ? 'Sí, guardar' : 'Sí, agregar', peligro: false }
+    )
+    if (!ok) return
+
+    try {
+      if (editando) {
+        await updateEmpleado(editId, form)
+        notify.ok('Empleado actualizado')
+      } else {
+        await addEmpleado(form)
+        notify.ok('Empleado agregado')
+      }
+      resetForm()
+    } catch (err) {
+      notify.error('Error al guardar el empleado: ' + err.message)
+    }
   }
 
   const startEdit = (emp) => {

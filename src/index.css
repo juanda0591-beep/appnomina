@@ -201,6 +201,27 @@ button:disabled { opacity: .6; cursor: not-allowed; }
   background: #f8fafc; border: 1px solid var(--border); border-radius: 8px;
 }
 
+/* Reportes: flujo de etapas de fabricación */
+.etapas-flow {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: stretch;
+}
+.etapa-chip {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 10px 14px; border-radius: 10px;
+  background: #f1f5f9; border: 1px solid var(--border);
+  min-width: 110px; position: relative;
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.etapa-chip:hover { transform: translateY(-2px); box-shadow: 0 4px 10px rgba(15, 23, 42, .08); }
+.etapa-chip .etapa-nombre { color: #64748b; font-weight: 600; }
+.etapa-chip strong { font-size: 1.35rem; color: #0f172a; }
+/* Etapa terminada: se resalta en verde */
+.etapa-chip.terminada {
+  background: #dcfce7; border-color: #86efac;
+}
+.etapa-chip.terminada .etapa-nombre { color: #15803d; }
+.etapa-chip.terminada strong { color: #15803d; }
+
 /* Gestión de Nómina: registro fotográfico */
 .foto-upload { display: inline-block; text-align: center; }
 .fotos-grid {

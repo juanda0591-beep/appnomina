@@ -74,7 +74,7 @@ export function DataProvider({ children }) {
         cargarSiPuede(puedeLeer(['historial', 'ver']), '/nominas', []),
         cargarSiPuede(puedeLeer(['control-dinero', 'ver']), '/movimientos', []),
         cargarSiPuede(puedeLeer(['empresa', 'ver'], ['nomina', 'ver'], ['historial', 'ver']), '/empresa', null),
-        cargarSiPuede(puedeLeer(['gestion-nomina', 'ver'], ['nomina', 'ver']), '/tareas', []),
+        cargarSiPuede(puedeLeer(['gestion-nomina', 'ver'], ['nomina', 'ver'], ['reportes', 'ver']), '/tareas', []),
       ])
 
       setProductos(prod)

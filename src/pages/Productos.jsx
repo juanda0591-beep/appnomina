@@ -31,18 +31,33 @@ export default function Productos() {
   const removeProcesoRow = (i) =>
     setProcesos((ps) => (ps.length === 1 ? ps : ps.filter((_, idx) => idx !== i)))
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     if (!nombre.trim()) { notify.error('Escribe el nombre del producto'); return }
     const validos = procesos.filter((p) => p.nombre.trim())
     if (validos.length === 0) { notify.error('Agrega al menos un proceso'); return }
 
-    if (editId) {
-      updateProducto(editId, nombre, validos)
-    } else {
-      addProducto(nombre, validos)
+    const editando = Boolean(editId)
+    const ok = await confirmar(
+      editando
+        ? `¿Guardar los cambios de "${nombre.trim()}"?`
+        : `¿Crear el producto "${nombre.trim()}" con ${validos.length} proceso(s)?`,
+      { titulo: editando ? 'Guardar producto' : 'Crear producto', textoOk: editando ? 'Sí, guardar' : 'Sí, crear', peligro: false }
+    )
+    if (!ok) return
+
+    try {
+      if (editando) {
+        await updateProducto(editId, nombre, validos)
+        notify.ok('Producto actualizado')
+      } else {
+        await addProducto(nombre, validos)
+        notify.ok('Producto creado')
+      }
+      resetForm()
+    } catch (err) {
+      notify.error('Error al guardar el producto: ' + err.message)
     }
-    resetForm()
   }
 
   const startEdit = (prod) => {

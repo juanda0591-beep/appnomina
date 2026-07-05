@@ -338,6 +338,92 @@ export function generarPdfMovimientos({ empresa, desde, hasta, movimientos, ingr
   doc.save(`reporte_movimientos_${desde}_a_${hasta}.pdf`)
 }
 
+// Genera el PDF del reporte de fabricación (etapas de producción por producto).
+// `productos` es el array ya calculado en la página de Reportes.
+export function generarPdfFabricacion({ empresa, desde, hasta, productos }) {
+  const doc = new jsPDF()
+  const marginX = 14
+  const pageH = doc.internal.pageSize.getHeight()
+
+  let y = drawEncabezadoEmpresa(doc, empresa, marginX)
+
+  doc.setFontSize(16)
+  doc.setTextColor(15, 23, 42)
+  doc.text('Reporte de Fabricación', marginX, y)
+  y += 8
+
+  doc.setFontSize(11)
+  doc.setTextColor(90)
+  doc.text(`Periodo: ${formatFecha(desde)} — ${formatFecha(hasta)}`, marginX, y)
+  y += 6
+  doc.setFontSize(9)
+  doc.setTextColor(120)
+  doc.text('Cada proceso es una etapa (corte → ensamble). Un producto está completo al llegar a la última etapa.', marginX, y)
+  y += 8
+
+  for (const p of productos) {
+    // Salto de página si no cabe el encabezado del producto
+    if (y > pageH - 50) { doc.addPage(); y = 20 }
+
+    const completo = p.totalEtapas > 0 && p.etapasConProduccion === p.totalEtapas
+
+    doc.setFontSize(13)
+    doc.setFont(undefined, 'bold')
+    doc.setTextColor(15, 23, 42)
+    doc.text(p.nombre, marginX, y)
+    // Estado a la derecha del nombre
+    doc.setFontSize(10)
+    doc.setTextColor(...(completo ? [22, 163, 74] : [180, 83, 9]))
+    doc.text(completo ? '✓ Completo' : 'En proceso', doc.internal.pageSize.getWidth() - marginX, y, { align: 'right' })
+    doc.setFont(undefined, 'normal')
+    y += 6
+
+    doc.setFontSize(10)
+    doc.setTextColor(90)
+    doc.text(
+      `Iniciados: ${p.iniciados}   ·   Completos: ${p.completos}   ·   En proceso: ${p.enProceso}   ·   Etapas: ${p.etapasConProduccion}/${p.totalEtapas}`,
+      marginX, y
+    )
+    y += 4
+
+    // Tabla: etapas con sus unidades (fila) y detalle por fecha
+    const cabecera = ['Fecha', ...p.etapas.map((e) => e.nombre)]
+    const filaTotales = ['TOTAL', ...p.etapas.map((e) => String(e.unidades))]
+    const filasFecha = p.porFecha.map((f) => [
+      formatFecha(f.fecha),
+      ...f.celdas.map((c) => (c ? String(c) : '—')),
+    ])
+
+    // Índices de columnas de etapas terminadas (para pintarlas de verde)
+    const verdeCols = p.etapas.map((e, i) => (e.verde ? i + 1 : -1)).filter((i) => i >= 0)
+
+    autoTable(doc, {
+      startY: y + 2,
+      head: [cabecera],
+      body: filasFecha,
+      foot: [filaTotales],
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [37, 99, 235] },
+      footStyles: { fillColor: [226, 232, 240], textColor: 0, fontStyle: 'bold' },
+      columnStyles: Object.fromEntries(
+        p.etapas.map((_, i) => [i + 1, { halign: 'right' }])
+      ),
+      didParseCell: (data) => {
+        if (data.column.index > 0) data.cell.styles.halign = 'right'
+        // Resalta en verde las columnas de etapas terminadas
+        if (verdeCols.includes(data.column.index)) {
+          if (data.section === 'head') data.cell.styles.fillColor = [22, 163, 74]
+          else data.cell.styles.textColor = [21, 128, 61]
+        }
+      },
+    })
+    y = doc.lastAutoTable.finalY + 10
+  }
+
+  pieDePagina(doc, empresa, marginX)
+  doc.save(`reporte_fabricacion_${desde}_a_${hasta}.pdf`)
+}
+
 // Dibuja el registro fotográfico de las tareas: cada foto con su fecha y su nota.
 // `fotos` es un array de { imagen (dataURL), fecha, descripcion }. Devuelve la nueva Y.
 function dibujarRegistroFotografico(doc, marginX, y, fotos) {
