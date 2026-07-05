@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha } from '../utils/format.js'
+import { GraficoBarras, GraficoDona, COLOR } from '../components/Grafico.jsx'
 
 export default function Dashboard() {
   const { getDashboard } = useData()
@@ -41,11 +42,11 @@ export default function Dashboard() {
       {/* Tarjetas principales de dinero */}
       <div className="dash-grid">
         <div className="dash-card ingreso">
-          <span className="dash-label">Ingresos totales</span>
+          <span className="dash-label">Ingresos de hoy</span>
           <strong className="dash-value">{formatCOP(data.ingresos)}</strong>
         </div>
         <div className="dash-card gasto">
-          <span className="dash-label">Gastos totales</span>
+          <span className="dash-label">Gastos de hoy</span>
           <strong className="dash-value">{formatCOP(data.gastos)}</strong>
         </div>
         <div className={`dash-card ${data.balance >= 0 ? 'saldo' : 'gasto'}`}>
@@ -73,6 +74,32 @@ export default function Dashboard() {
         <div className="dash-card mini">
           <span className="dash-label">Productos</span>
           <strong className="dash-value">{data.totalProductos}</strong>
+        </div>
+      </div>
+
+      {/* Gráficas */}
+      <div className="cards-grid">
+        <div className="card">
+          <h3>💵 Ingresos vs Gastos de hoy</h3>
+          <GraficoDona
+            moneda
+            data={[
+              { name: 'Ingresos', value: data.ingresos, color: COLOR.verde },
+              { name: 'Gastos', value: data.gastos, color: COLOR.danger },
+            ]}
+          />
+        </div>
+        <div className="card">
+          <h3>🧾 Últimos pagos por empleado</h3>
+          <GraficoBarras
+            moneda
+            indice="empleado"
+            series={[{ name: 'total', label: 'Total pagado', color: COLOR.primary }]}
+            data={data.ultimasNominas.map((n) => ({
+              empleado: n.empleado || '— (eliminado)',
+              total: n.total,
+            }))}
+          />
         </div>
       </div>
 

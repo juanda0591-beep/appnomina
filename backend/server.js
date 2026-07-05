@@ -129,8 +129,15 @@ app.delete('/api/usuarios/:id', adminRequired, (req, res) => {
 
 // ============ DASHBOARD ============
 app.get('/api/dashboard', permisoRequired('inicio', 'ver'), (req, res) => {
-  const ingresos = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'ingreso'").get().t
-  const gastos = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'gasto'").get().t
+  // Ingresos/gastos SOLO del día de hoy. El saldo en caja es global.
+  const hoy = new Date().toISOString().slice(0, 10)
+  const ingresos = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'ingreso' AND substr(fecha, 1, 10) = ?").get(hoy).t
+  const gastos = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'gasto' AND substr(fecha, 1, 10) = ?").get(hoy).t
+
+  // Saldo global en caja (todos los movimientos, no solo hoy)
+  const ingresosGlobal = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'ingreso'").get().t
+  const gastosGlobal = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'gasto'").get().t
+
   const totalEmpleados = db.prepare('SELECT COUNT(*) AS n FROM empleados').get().n
   const totalProductos = db.prepare('SELECT COUNT(*) AS n FROM productos').get().n
   const saldoPrestamos = db.prepare('SELECT COALESCE(SUM(saldo), 0) AS t FROM prestamos').get().t
@@ -154,7 +161,7 @@ app.get('/api/dashboard', permisoRequired('inicio', 'ver'), (req, res) => {
   res.json({
     ingresos,
     gastos,
-    balance: ingresos - gastos,
+    balance: ingresosGlobal - gastosGlobal, // saldo en caja siempre global
     totalEmpleados,
     totalProductos,
     saldoPrestamos,

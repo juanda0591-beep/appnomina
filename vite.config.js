@@ -53,6 +53,20 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    // Separa las librerías pesadas en su propio chunk: cambian poco, así el
+    // navegador las cachea entre despliegues y la app propia carga aparte.
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          charts: ['@mantine/charts', 'recharts'],
+          mantine: ['@mantine/core', '@mantine/hooks'],
+          pdf: ['jspdf', 'jspdf-autotable'],
+        },
+      },
+    },
+    chunkSizeWarningLimit: 900,
+  },
   server: {
     port: 5173,
     open: true,
