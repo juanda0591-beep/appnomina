@@ -2,10 +2,12 @@ import { useState } from 'react'
 import { NavLink, Route, Routes, useLocation, Navigate } from 'react-router-dom'
 import Dashboard from './pages/Dashboard.jsx'
 import Productos from './pages/Productos.jsx'
+import Materiales from './pages/Materiales.jsx'
 import Empleados from './pages/Empleados.jsx'
 import Prestamos from './pages/Prestamos.jsx'
 import Nomina from './pages/Nomina.jsx'
 import GestionNomina from './pages/GestionNomina.jsx'
+import GestionProduccion from './pages/GestionProduccion.jsx'
 import ControlDinero from './pages/ControlDinero.jsx'
 import Historial from './pages/Historial.jsx'
 import Reportes from './pages/Reportes.jsx'
@@ -23,6 +25,14 @@ const links = [
   { to: '/nomina', label: '🧾 Pago de Nómina', pagina: 'nomina' },
   { to: '/gestion-nomina', label: '📋 Gestión de Nómina', pagina: 'gestion-nomina' },
   { to: '/productos', label: '📦 Productos', pagina: 'productos' },
+  {
+    group: 'fabricacion',
+    label: '🏭 Fabricación',
+    items: [
+      { to: '/materiales', label: '🧱 Materiales', pagina: 'materiales' },
+      { to: '/gestion-produccion', label: '🏭 Producción', pagina: 'gestion-produccion' },
+    ],
+  },
   { to: '/empleados', label: '👷 Empleados', pagina: 'empleados' },
   { to: '/prestamos', label: '💵 Préstamos', pagina: 'prestamos' },
   { to: '/control-dinero', label: '💰 Control de Dinero', pagina: 'control-dinero' },
@@ -45,14 +55,35 @@ export default function App() {
 
   const esAdmin = rol === 'admin'
 
-  // Filtra el menú: 'admin' solo para administradores; 'todos' siempre visible;
-  // el resto según el permiso de ver la página.
-  const visibles = links.filter((l) => {
+  const puedeVer = (l) => {
     if (l.solo === 'admin') return esAdmin
     if (l.solo === 'todos') return true
     return puede(l.pagina, 'ver')
+  }
+
+  // Filtra el menú: enlaces sueltos por su propia regla; grupos se muestran si
+  // al menos uno de sus items es visible, y solo esos items visibles se listan.
+  const visibles = links
+    .map((l) => {
+      if (!l.group) return puedeVer(l) ? l : null
+      const itemsVisibles = l.items.filter(puedeVer)
+      return itemsVisibles.length > 0 ? { ...l, items: itemsVisibles } : null
+    })
+    .filter(Boolean)
+
+  const primeraRuta = (l) => (l.group ? l.items[0]?.to : l.to)
+  const rutaInicio = primeraRuta(visibles[0]) || '/cuenta'
+
+  // Grupos abiertos/cerrados en el menú. Un grupo nace abierto si la ruta
+  // actual pertenece a él, para que no se oculte lo que se está viendo.
+  const [gruposAbiertos, setGruposAbiertos] = useState(() => {
+    const abiertos = {}
+    for (const l of links) {
+      if (l.group) abiertos[l.group] = l.items.some((it) => it.to === location.pathname)
+    }
+    return abiertos
   })
-  const rutaInicio = visibles[0]?.to || '/cuenta'
+  const toggleGrupo = (group) => setGruposAbiertos((g) => ({ ...g, [group]: !g[group] }))
 
   // Envuelve una página: si el usuario no puede verla, redirige al inicio.
   const protegida = (pagina, elemento) =>
@@ -73,11 +104,33 @@ export default function App() {
       <aside className={`sidebar ${menuOpen ? 'open' : ''}`}>
         <h1 className="logo">💰 Nómina</h1>
         <nav>
-          {visibles.map((l) => (
-            <NavLink key={l.to} to={l.to} className="navlink" onClick={closeMenu}>
-              {l.label}
-            </NavLink>
-          ))}
+          {visibles.map((l) =>
+            l.group ? (
+              <div key={l.group}>
+                <button
+                  type="button"
+                  className="nav-group-header"
+                  onClick={() => toggleGrupo(l.group)}
+                >
+                  <span>{l.label}</span>
+                  <span>{gruposAbiertos[l.group] ? '▾' : '▸'}</span>
+                </button>
+                {gruposAbiertos[l.group] && (
+                  <div className="nav-group-items">
+                    {l.items.map((it) => (
+                      <NavLink key={it.to} to={it.to} className="navlink" onClick={closeMenu}>
+                        {it.label}
+                      </NavLink>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <NavLink key={l.to} to={l.to} className="navlink" onClick={closeMenu}>
+                {l.label}
+              </NavLink>
+            )
+          )}
         </nav>
         <div className="sidebar-footer">
           <span className="sidebar-user">👤 {usuario}</span>
@@ -99,6 +152,8 @@ export default function App() {
           <Route path="/nomina" element={protegida('nomina', <Nomina />)} />
           <Route path="/gestion-nomina" element={protegida('gestion-nomina', <GestionNomina />)} />
           <Route path="/productos" element={protegida('productos', <Productos />)} />
+          <Route path="/materiales" element={protegida('materiales', <Materiales />)} />
+          <Route path="/gestion-produccion" element={protegida('gestion-produccion', <GestionProduccion />)} />
           <Route path="/empleados" element={protegida('empleados', <Empleados />)} />
           <Route path="/prestamos" element={protegida('prestamos', <Prestamos />)} />
           <Route path="/control-dinero" element={protegida('control-dinero', <ControlDinero />)} />

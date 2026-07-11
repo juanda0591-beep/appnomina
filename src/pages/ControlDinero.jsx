@@ -21,6 +21,7 @@ export default function ControlDinero() {
 
   const [tab, setTab] = useState('balance') // 'ingreso' | 'gasto' | 'balance'
   const [form, setForm] = useState(formVacio())
+  const [formAbierto, setFormAbierto] = useState(false)
   const [guardando, setGuardando] = useState(false)
   const [balance, setBalance] = useState({ ingresos: 0, gastos: 0, balance: 0 })
 
@@ -54,6 +55,11 @@ export default function ControlDinero() {
     reader.readAsDataURL(file)
   }
 
+  const resetForm = () => {
+    setForm(formVacio())
+    setFormAbierto(false)
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!(Number(form.monto) > 0)) { notify.error('Ingresa un monto válido'); return }
@@ -66,7 +72,7 @@ export default function ControlDinero() {
     setGuardando(true)
     try {
       await addMovimiento({ ...form, tipo: tab })
-      setForm(formVacio())
+      resetForm()
       notify.ok(esIngreso ? 'Ingreso registrado' : 'Gasto registrado')
     } catch (err) {
       notify.error('Error al guardar: ' + err.message)
@@ -127,48 +133,13 @@ export default function ControlDinero() {
         </div>
       </div>
 
-      {/* Formulario de ingreso / gasto */}
+      {/* Botón para registrar ingreso / gasto */}
       {tab !== 'balance' && puedeCrear && (
-        <form className="card" onSubmit={handleSubmit}>
-          <h3>{tab === 'ingreso' ? 'Registrar ingreso' : 'Registrar gasto'}</h3>
-          <div className="row">
-            <div style={{ flex: 1 }}>
-              <label>Fecha</label>
-              <input type="date" value={form.fecha} onChange={(e) => setField('fecha', e.target.value)} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label>Categoría</label>
-              <input
-                list="categorias-dinero"
-                value={form.categoria}
-                onChange={(e) => setField('categoria', e.target.value)}
-                placeholder="Selecciona o escribe"
-              />
-              <datalist id="categorias-dinero">
-                {categorias.map((c) => (
-                  <option key={c} value={c} />
-                ))}
-              </datalist>
-            </div>
-            <div style={{ flex: 1 }}>
-              <label>Monto</label>
-              <input type="number" min="0" step="any" value={form.monto} onChange={(e) => setField('monto', e.target.value)} />
-            </div>
-          </div>
-
-          <label>Descripción</label>
-          <input value={form.descripcion} onChange={(e) => setField('descripcion', e.target.value)} placeholder="Detalle del movimiento" />
-
-          <label>Comprobante (PDF, JPG o PNG)</label>
-          <input type="file" accept="application/pdf,image/jpeg,image/png" onChange={onComprobante} />
-          {form.comprobante && <span className="chip">✅ Comprobante adjunto</span>}
-
-          <div className="form-actions">
-            <button type="submit" className="btn-primary" disabled={guardando}>
-              {guardando ? 'Guardando…' : tab === 'ingreso' ? 'Registrar ingreso' : 'Registrar gasto'}
-            </button>
-          </div>
-        </form>
+        <div className="form-actions">
+          <button type="button" className="btn-primary" onClick={() => { setForm(formVacio()); setFormAbierto(true) }}>
+            {tab === 'ingreso' ? '+ Registrar ingreso' : '+ Registrar gasto'}
+          </button>
+        </div>
       )}
 
       {/* Historial de movimientos */}
@@ -244,6 +215,57 @@ export default function ControlDinero() {
           </div>
         )}
       </div>
+
+      {formAbierto && (
+        <>
+          <div className="overlay" onClick={resetForm} />
+          <div className="modal">
+            <h3>{tab === 'ingreso' ? 'Registrar ingreso' : 'Registrar gasto'}</h3>
+            <form onSubmit={handleSubmit}>
+              <div className="row">
+                <div style={{ flex: 1 }}>
+                  <label>Fecha</label>
+                  <input type="date" value={form.fecha} onChange={(e) => setField('fecha', e.target.value)} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label>Categoría</label>
+                  <input
+                    list="categorias-dinero"
+                    value={form.categoria}
+                    onChange={(e) => setField('categoria', e.target.value)}
+                    placeholder="Selecciona o escribe"
+                  />
+                  <datalist id="categorias-dinero">
+                    {categorias.map((c) => (
+                      <option key={c} value={c} />
+                    ))}
+                  </datalist>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label>Monto</label>
+                  <input type="number" min="0" step="any" value={form.monto} onChange={(e) => setField('monto', e.target.value)} />
+                </div>
+              </div>
+
+              <label>Descripción</label>
+              <input value={form.descripcion} onChange={(e) => setField('descripcion', e.target.value)} placeholder="Detalle del movimiento" />
+
+              <label>Comprobante (PDF, JPG o PNG)</label>
+              <input type="file" accept="application/pdf,image/jpeg,image/png" onChange={onComprobante} />
+              {form.comprobante && <span className="chip">✅ Comprobante adjunto</span>}
+
+              <div className="form-actions">
+                <button type="submit" className="btn-primary" disabled={guardando}>
+                  {guardando ? 'Guardando…' : tab === 'ingreso' ? 'Registrar ingreso' : 'Registrar gasto'}
+                </button>
+                <button type="button" className="btn-secondary" onClick={resetForm}>
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </div>
+        </>
+      )}
     </div>
   )
 }

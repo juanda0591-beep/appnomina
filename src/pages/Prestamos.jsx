@@ -11,10 +11,19 @@ export default function Prestamos() {
   const puedeEliminar = puede('prestamos', 'eliminar')
 
   const hoy = new Date().toISOString().slice(0, 10)
+  const [formAbierto, setFormAbierto] = useState(false)
   const [empleadoId, setEmpleadoId] = useState('')
   const [monto, setMonto] = useState('')
   const [fecha, setFecha] = useState(hoy)
   const [descripcion, setDescripcion] = useState('')
+
+  const resetForm = () => {
+    setEmpleadoId('')
+    setMonto('')
+    setFecha(hoy)
+    setDescripcion('')
+    setFormAbierto(false)
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -26,9 +35,8 @@ export default function Prestamos() {
       { titulo: 'Confirmar préstamo', textoOk: 'Sí, registrar', peligro: false }
     )
     if (!ok) return
-    addPrestamo({ empleadoId, monto, fecha, descripcion })
-    setMonto('')
-    setDescripcion('')
+    await addPrestamo({ empleadoId, monto, fecha, descripcion })
+    resetForm()
   }
 
   const totalPrestado = prestamos.reduce((s, p) => s + p.monto, 0)
@@ -43,37 +51,11 @@ export default function Prestamos() {
       </p>
 
       {puedeCrear && (
-      <form className="card" onSubmit={handleSubmit}>
-        <h3>Nuevo préstamo</h3>
-        <div className="row">
-          <div style={{ flex: 2 }}>
-            <label>Empleado</label>
-            <select value={empleadoId} onChange={(e) => setEmpleadoId(e.target.value)}>
-              <option value="">— Seleccionar —</option>
-              {empleados.map((emp) => (
-                <option key={emp.id} value={emp.id}>{emp.nombre}</option>
-              ))}
-            </select>
-          </div>
-          <div style={{ flex: 1 }}>
-            <label>Monto prestado</label>
-            <input type="number" min="0" step="any" value={monto} onChange={(e) => setMonto(e.target.value)} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <label>Fecha</label>
-            <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
-          </div>
-        </div>
-        <label>Descripción (opcional)</label>
-        <input value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Ej: Adelanto quincena" />
-
         <div className="form-actions">
-          <button type="submit" className="btn-primary">Registrar préstamo</button>
+          <button type="button" className="btn-primary" onClick={() => setFormAbierto(true)}>
+            + Nuevo préstamo
+          </button>
         </div>
-        {empleados.length === 0 && (
-          <p className="muted small">Primero agrega empleados en la sección Empleados.</p>
-        )}
-      </form>
       )}
 
       <div className="card">
@@ -127,6 +109,47 @@ export default function Prestamos() {
           </div>
         )}
       </div>
+
+      {formAbierto && (
+        <>
+          <div className="overlay" onClick={resetForm} />
+          <div className="modal">
+            <h3>Nuevo préstamo</h3>
+            <form onSubmit={handleSubmit}>
+              <div className="row">
+                <div style={{ flex: 2 }}>
+                  <label>Empleado</label>
+                  <select value={empleadoId} onChange={(e) => setEmpleadoId(e.target.value)}>
+                    <option value="">— Seleccionar —</option>
+                    {empleados.map((emp) => (
+                      <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label>Monto prestado</label>
+                  <input type="number" min="0" step="any" value={monto} onChange={(e) => setMonto(e.target.value)} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label>Fecha</label>
+                  <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+                </div>
+              </div>
+              <label>Descripción (opcional)</label>
+              <input value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Ej: Adelanto quincena" />
+
+              {empleados.length === 0 && (
+                <p className="muted small">Primero agrega empleados en la sección Empleados.</p>
+              )}
+
+              <div className="form-actions">
+                <button type="submit" className="btn-primary">Registrar préstamo</button>
+                <button type="button" className="btn-secondary" onClick={resetForm}>Cancelar</button>
+              </div>
+            </form>
+          </div>
+        </>
+      )}
     </div>
   )
 }

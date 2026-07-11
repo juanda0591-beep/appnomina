@@ -39,6 +39,10 @@ export function DataProvider({ children }) {
   const [movimientos, setMovimientos] = useState([])
   const [empresa, setEmpresa] = useState(null)
   const [tareas, setTareas] = useState([])
+  const [tareasProduccion, setTareasProduccion] = useState([])
+  const [ordenesProduccion, setOrdenesProduccion] = useState([])
+  const [materiales, setMateriales] = useState([])
+  const [procesosGlobales, setProcesosGlobales] = useState([])
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState(null)
 
@@ -59,10 +63,10 @@ export function DataProvider({ children }) {
   const recargar = async () => {
     setCargando(true)
     try {
-      const [prod, emp, pres, nom, mov, empr, tar] = await Promise.all([
+      const [prod, emp, pres, nom, mov, empr, tar, tarProd, ordProd, mat, procG] = await Promise.all([
         cargarSiPuede(puedeLeer(['productos', 'ver'], ['nomina', 'ver']), '/productos', []),
         cargarSiPuede(
-          puedeLeer(['empleados', 'ver'], ['nomina', 'ver'], ['prestamos', 'ver'], ['historial', 'ver'], ['reportes', 'ver'], ['gestion-nomina', 'ver']),
+          puedeLeer(['empleados', 'ver'], ['nomina', 'ver'], ['prestamos', 'ver'], ['historial', 'ver'], ['reportes', 'ver'], ['gestion-nomina', 'ver'], ['gestion-produccion', 'ver']),
           '/empleados',
           []
         ),
@@ -75,6 +79,10 @@ export function DataProvider({ children }) {
         cargarSiPuede(puedeLeer(['control-dinero', 'ver']), '/movimientos', []),
         cargarSiPuede(puedeLeer(['empresa', 'ver'], ['nomina', 'ver'], ['historial', 'ver']), '/empresa', null),
         cargarSiPuede(puedeLeer(['gestion-nomina', 'ver'], ['nomina', 'ver'], ['reportes', 'ver']), '/tareas', []),
+        cargarSiPuede(puedeLeer(['gestion-produccion', 'ver']), '/tareas-produccion', []),
+        cargarSiPuede(puedeLeer(['gestion-produccion', 'ver']), '/ordenes-produccion', []),
+        cargarSiPuede(puedeLeer(['materiales', 'ver']), '/materiales', []),
+        cargarSiPuede(puedeLeer(['productos', 'ver']), '/procesos-globales', []),
       ])
 
       setProductos(prod)
@@ -84,6 +92,10 @@ export function DataProvider({ children }) {
       setMovimientos(mov)
       setEmpresa(empr)
       setTareas(tar)
+      setTareasProduccion(tarProd)
+      setOrdenesProduccion(ordProd)
+      setMateriales(mat)
+      setProcesosGlobales(procG)
       setError(null)
     } catch (e) {
       setError(e.message)
@@ -217,6 +229,76 @@ export function DataProvider({ children }) {
   const deleteTareaFoto = (fotoId) =>
     http(`/tareas/fotos/${fotoId}`, { method: 'DELETE' })
 
+  // ---------- TAREAS DE PRODUCCIÓN (Gestión de Producción) ----------
+  const addTareaProduccion = async (tarea) => {
+    const creada = await http('/tareas-produccion', { method: 'POST', body: JSON.stringify(tarea) })
+    await recargar()
+    return creada
+  }
+  const updateTareaProduccion = async (id, datos) => {
+    const actualizada = await http(`/tareas-produccion/${id}`, { method: 'PUT', body: JSON.stringify(datos) })
+    await recargar()
+    return actualizada
+  }
+  const terminarTareaProduccion = async (id) => {
+    await http(`/tareas-produccion/${id}/terminar`, { method: 'POST' })
+    await recargar()
+  }
+  const deleteTareaProduccion = async (id) => {
+    await http(`/tareas-produccion/${id}`, { method: 'DELETE' })
+    await recargar()
+  }
+  const getTareaProduccionHistorial = (id) => http(`/tareas-produccion/${id}/historial`)
+
+  // ---------- ÓRDENES DE PRODUCCIÓN ----------
+  const addOrdenProduccion = async (orden) => {
+    const creada = await http('/ordenes-produccion', { method: 'POST', body: JSON.stringify(orden) })
+    await recargar()
+    return creada
+  }
+  const updateOrdenProduccion = async (id, datos) => {
+    const actualizada = await http(`/ordenes-produccion/${id}`, { method: 'PUT', body: JSON.stringify(datos) })
+    await recargar()
+    return actualizada
+  }
+  const terminarOrdenProduccion = async (id) => {
+    await http(`/ordenes-produccion/${id}/terminar`, { method: 'POST' })
+    await recargar()
+  }
+  const deleteOrdenProduccion = async (id) => {
+    await http(`/ordenes-produccion/${id}`, { method: 'DELETE' })
+    await recargar()
+  }
+
+  // ---------- MATERIALES ----------
+  const addMaterial = async (material) => {
+    const creado = await http('/materiales', { method: 'POST', body: JSON.stringify(material) })
+    await recargar()
+    return creado
+  }
+  const updateMaterial = async (id, material) => {
+    const actualizado = await http(`/materiales/${id}`, { method: 'PUT', body: JSON.stringify(material) })
+    await recargar()
+    return actualizado
+  }
+  const deleteMaterial = async (id) => {
+    await http(`/materiales/${id}`, { method: 'DELETE' })
+    await recargar()
+  }
+  const registrarEntradaMaterial = async (id, entrada) => {
+    const actualizado = await http(`/materiales/${id}/entrada`, { method: 'POST', body: JSON.stringify(entrada) })
+    await recargar()
+    return actualizado
+  }
+  const getMaterialMovimientos = (id) => http(`/materiales/${id}/movimientos`)
+
+  // ---------- PROCESOS GLOBALES ----------
+  const addProcesoGlobal = async (nombre) => {
+    const creado = await http('/procesos-globales', { method: 'POST', body: JSON.stringify({ nombre }) })
+    await recargar()
+    return creado
+  }
+
   // Helpers de consulta (sobre estado en memoria)
   const getEmpleado = (id) => empleados.find((e) => String(e.id) === String(id))
   const getProducto = (id) => productos.find((p) => String(p.id) === String(id))
@@ -233,6 +315,10 @@ export function DataProvider({ children }) {
     movimientos,
     empresa,
     tareas,
+    tareasProduccion,
+    ordenesProduccion,
+    materiales,
+    procesosGlobales,
     cargando,
     error,
     recargar,
@@ -270,6 +356,21 @@ export function DataProvider({ children }) {
     getTareaFotos,
     addTareaFoto,
     deleteTareaFoto,
+    addTareaProduccion,
+    updateTareaProduccion,
+    terminarTareaProduccion,
+    deleteTareaProduccion,
+    getTareaProduccionHistorial,
+    addOrdenProduccion,
+    updateOrdenProduccion,
+    terminarOrdenProduccion,
+    deleteOrdenProduccion,
+    addMaterial,
+    updateMaterial,
+    deleteMaterial,
+    registrarEntradaMaterial,
+    getMaterialMovimientos,
+    addProcesoGlobal,
     getEmpleado,
     getProducto,
     prestamosDeEmpleado,

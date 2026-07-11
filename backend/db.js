@@ -154,7 +154,90 @@ db.exec(`
     id INTEGER PRIMARY KEY CHECK (id = 1),
     secret TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS materiales (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL,
+    unidad TEXT NOT NULL,
+    stock REAL NOT NULL DEFAULT 0,
+    costo_unitario REAL NOT NULL DEFAULT 0,
+    stock_minimo REAL NOT NULL DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS material_movimientos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    material_id INTEGER NOT NULL,
+    tipo TEXT NOT NULL,              -- 'entrada' | 'ajuste' | 'salida'
+    cantidad REAL NOT NULL DEFAULT 0,
+    costo_unitario REAL NOT NULL DEFAULT 0,
+    fecha TEXT NOT NULL,
+    descripcion TEXT,
+    tarea_produccion_id INTEGER,
+    FOREIGN KEY (material_id) REFERENCES materiales(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS procesos_globales (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL UNIQUE
+  );
+
+  CREATE TABLE IF NOT EXISTS proceso_materiales (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proceso_id INTEGER NOT NULL,
+    material_id INTEGER NOT NULL,
+    cantidad REAL NOT NULL DEFAULT 0,
+    FOREIGN KEY (proceso_id) REFERENCES procesos(id) ON DELETE CASCADE,
+    FOREIGN KEY (material_id) REFERENCES materiales(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS tareas_produccion (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    empleado_id INTEGER NOT NULL,
+    producto_id INTEGER,
+    proceso_id INTEGER,
+    producto_nombre TEXT,
+    proceso_nombre TEXT,
+    cantidad REAL NOT NULL DEFAULT 0,
+    progreso INTEGER NOT NULL DEFAULT 0,
+    estado TEXT NOT NULL DEFAULT 'pendiente',   -- pendiente|en_progreso|terminada
+    comentario TEXT,
+    creado TEXT,
+    actualizado TEXT,
+    FOREIGN KEY (empleado_id) REFERENCES empleados(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS tarea_produccion_historial (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tarea_id INTEGER NOT NULL,
+    usuario TEXT,
+    progreso_anterior INTEGER,
+    progreso_nuevo INTEGER,
+    comentario TEXT,
+    fecha TEXT,
+    FOREIGN KEY (tarea_id) REFERENCES tareas_produccion(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS ordenes_produccion (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    producto_id INTEGER,
+    producto_nombre TEXT,
+    cantidad REAL NOT NULL DEFAULT 0,
+    estado TEXT NOT NULL DEFAULT 'pendiente',   -- pendiente|en_progreso|terminada
+    comentario TEXT,
+    creado TEXT,
+    actualizado TEXT
+  );
 `)
+
+// Cataloga los nombres de proceso que ya existían por producto (texto libre)
+// para que aparezcan de una vez en el desplegable global de procesos.
+{
+  const nombresExistentes = db.prepare('SELECT DISTINCT nombre FROM procesos').all()
+  const insertGlobal = db.prepare('INSERT OR IGNORE INTO procesos_globales (nombre) VALUES (?)')
+  for (const { nombre } of nombresExistentes) {
+    if (nombre && nombre.trim()) insertGlobal.run(nombre.trim())
+  }
+}
 
 // Migraciones suaves para bases de datos creadas antes de agregar columnas nuevas
 const colsNominas = db.prepare("PRAGMA table_info(nominas)").all()
@@ -176,6 +259,28 @@ if (!colsUsuarios.some((c) => c.name === 'rol')) {
 // como "todo permitido" para no romper el comportamiento previo.
 if (!colsUsuarios.some((c) => c.name === 'permisos')) {
   db.exec('ALTER TABLE usuarios ADD COLUMN permisos TEXT')
+}
+
+// Columna de stock mínimo en materiales (alerta de reabastecimiento)
+const colsMateriales = db.prepare("PRAGMA table_info(materiales)").all()
+if (!colsMateriales.some((c) => c.name === 'stock_minimo')) {
+  db.exec('ALTER TABLE materiales ADD COLUMN stock_minimo REAL NOT NULL DEFAULT 0')
+}
+
+// Columna de orden de producción en tareas_produccion (agrupa tareas del mismo
+// lote a través de sus distintos procesos). Nullable: las tareas creadas antes
+// de esta migración quedan sin orden asignada.
+const colsTareasProd = db.prepare("PRAGMA table_info(tareas_produccion)").all()
+if (!colsTareasProd.some((c) => c.name === 'orden_produccion_id')) {
+  db.exec('ALTER TABLE tareas_produccion ADD COLUMN orden_produccion_id INTEGER')
+}
+
+// Columna que liga cada movimiento de stock con la tarea de producción que lo
+// generó, para poder mostrar "qué materiales consumió este proceso" en el
+// seguimiento de una orden.
+const colsMovimientos = db.prepare("PRAGMA table_info(material_movimientos)").all()
+if (!colsMovimientos.some((c) => c.name === 'tarea_produccion_id')) {
+  db.exec('ALTER TABLE material_movimientos ADD COLUMN tarea_produccion_id INTEGER')
 }
 
 // Garantiza que exista la fila única de configuración de empresa

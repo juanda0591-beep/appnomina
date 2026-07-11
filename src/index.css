@@ -100,6 +100,30 @@ body {
 .navlink:hover { background: #1e293b; color: #fff; }
 .navlink.active { background: var(--primary); color: #fff; }
 
+.nav-group-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: transparent;
+  color: #cbd5e1;
+  border: none;
+  text-decoration: none;
+  padding: 12px 14px;
+  border-radius: 8px;
+  font-size: 15px;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.nav-group-header:hover { background: #1e293b; color: #fff; }
+.nav-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 16px;
+  margin-top: 2px;
+}
+
 /* ---------- Contenido ---------- */
 .content { flex: 1; padding: 28px 32px; max-width: 1100px; width: 100%; }
 h2 { margin-top: 0; }
@@ -151,6 +175,7 @@ button:disabled { opacity: .6; cursor: not-allowed; }
 .btn-danger:hover:not(:disabled) { background: #fecaca; }
 .btn-icon { background: transparent; color: var(--muted); padding: 6px 10px; font-size: 14px; }
 .btn-icon.danger:hover { color: var(--danger); background: #fee2e2; }
+.btn-sm { padding: 6px 10px; font-size: 13px; }
 
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
@@ -171,6 +196,18 @@ button:disabled { opacity: .6; cursor: not-allowed; }
 }
 .chip.warn { background: #fef3c7; color: #b45309; }
 .chip.ok { background: #dcfce7; color: #15803d; }
+.chip-clicable { cursor: pointer; user-select: none; }
+.chip-clicable:hover { background: #dbeafe; }
+
+/* ---------- Productos: bloque de proceso + receta de materiales ---------- */
+.proceso-block {
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px; margin-bottom: 10px;
+}
+.receta-materiales {
+  margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border);
+  display: flex; flex-direction: column; gap: 6px;
+}
 
 /* ---------- Gestión de Nómina: barra de progreso ---------- */
 .progress {
@@ -278,6 +315,10 @@ button:disabled { opacity: .6; cursor: not-allowed; }
 .table.compact th, .table.compact td { padding: 6px 8px; font-size: 13px; }
 .table td input, .table td select { padding: 8px; font-size: 15px; }
 .table tr.paid { color: #16a34a; }
+.table tr.fila-alerta { background: #fef2f2; }
+.table tr.fila-alerta td { color: var(--danger); font-weight: 600; }
+.table .texto-salida { color: var(--danger); font-weight: 600; }
+.table .texto-entrada { color: #16a34a; font-weight: 600; }
 .table tfoot td { border-top: 2px solid var(--border); }
 
 .totals-row { display: flex; gap: 24px; flex-wrap: wrap; font-size: 15px; }

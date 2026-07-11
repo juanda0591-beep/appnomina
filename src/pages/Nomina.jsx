@@ -52,15 +52,20 @@ export default function Nomina() {
     else setModalTareas(null)
   }
 
-  // Convierte una tarea terminada en una fila de item (buscando el producto/proceso vigente)
+  // Convierte una tarea terminada en una fila de item (buscando el producto/proceso vigente).
+  // Se busca el proceso por NOMBRE, no por id: al editar un producto en Productos, el backend
+  // borra y reinserta todos sus procesos (reemplazo completo), así que el id cambia aunque el
+  // proceso siga siendo "el mismo" para el usuario. El nombre es lo estable.
   const tareaAItem = (t) => {
     const producto = getProducto(t.productoId)
-    const proceso = producto?.procesos.find((p) => String(p.id) === String(t.procesoId))
+    const proceso = producto?.procesos.find(
+      (p) => p.nombre.toLowerCase() === (t.procesoNombre || '').toLowerCase()
+    )
     return {
       key: Math.random().toString(36).slice(2),
       // si el producto/proceso siguen existiendo, se enlazan; si no, quedan vacíos
       productoId: producto ? String(t.productoId) : '',
-      procesoId: producto && proceso ? String(t.procesoId) : '',
+      procesoId: producto && proceso ? String(proceso.id) : '',
       cantidad: String(t.cantidad),
     }
   }

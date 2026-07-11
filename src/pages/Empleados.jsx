@@ -13,12 +13,14 @@ export default function Empleados() {
   const puedeEditar = puede('empleados', 'editar')
   const puedeEliminar = puede('empleados', 'eliminar')
   const [form, setForm] = useState(emptyEmp)
+  const [formAbierto, setFormAbierto] = useState(false)
   const [editId, setEditId] = useState(null)
 
   const setField = (field, val) => setForm((f) => ({ ...f, [field]: val }))
   const resetForm = () => {
     setForm(emptyEmp)
     setEditId(null)
+    setFormAbierto(false)
   }
 
   const handleSubmit = async (e) => {
@@ -56,48 +58,23 @@ export default function Empleados() {
       telefono: emp.telefono || '',
       cargo: emp.cargo || '',
     })
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    setFormAbierto(true)
   }
 
   return (
     <div>
       <h2>👷 Empleados</h2>
 
-      {(puedeCrear || (editId && puedeEditar)) && (
-      <form className="card" onSubmit={handleSubmit}>
-        <h3>{editId ? 'Editar empleado' : 'Nuevo empleado'}</h3>
-        <div className="row">
-          <div style={{ flex: 2 }}>
-            <label>Nombre completo</label>
-            <input value={form.nombre} onChange={(e) => setField('nombre', e.target.value)} placeholder="Ej: Juan Pérez" />
-          </div>
-          <div style={{ flex: 1 }}>
-            <label>Cédula</label>
-            <input value={form.cedula} onChange={(e) => setField('cedula', e.target.value)} placeholder="C.C." />
-          </div>
-        </div>
-        <div className="row">
-          <div style={{ flex: 1 }}>
-            <label>Teléfono</label>
-            <input value={form.telefono} onChange={(e) => setField('telefono', e.target.value)} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <label>Cargo</label>
-            <input value={form.cargo} onChange={(e) => setField('cargo', e.target.value)} placeholder="Ej: Ebanista" />
-          </div>
-        </div>
-
+      {puedeCrear && (
         <div className="form-actions">
-          <button type="submit" className="btn-primary">
-            {editId ? 'Guardar cambios' : 'Agregar empleado'}
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => { setForm(emptyEmp); setEditId(null); setFormAbierto(true) }}
+          >
+            + Nuevo empleado
           </button>
-          {editId && (
-            <button type="button" className="btn-secondary" onClick={resetForm}>
-              Cancelar
-            </button>
-          )}
         </div>
-      </form>
       )}
 
       <div className="card">
@@ -140,6 +117,46 @@ export default function Empleados() {
           )
         })}
       </div>
+
+      {formAbierto && (
+        <>
+          <div className="overlay" onClick={resetForm} />
+          <div className="modal">
+            <h3>{editId ? 'Editar empleado' : 'Nuevo empleado'}</h3>
+            <form onSubmit={handleSubmit}>
+              <div className="row">
+                <div style={{ flex: 2 }}>
+                  <label>Nombre completo</label>
+                  <input value={form.nombre} onChange={(e) => setField('nombre', e.target.value)} placeholder="Ej: Juan Pérez" />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label>Cédula</label>
+                  <input value={form.cedula} onChange={(e) => setField('cedula', e.target.value)} placeholder="C.C." />
+                </div>
+              </div>
+              <div className="row">
+                <div style={{ flex: 1 }}>
+                  <label>Teléfono</label>
+                  <input value={form.telefono} onChange={(e) => setField('telefono', e.target.value)} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label>Cargo</label>
+                  <input value={form.cargo} onChange={(e) => setField('cargo', e.target.value)} placeholder="Ej: Ebanista" />
+                </div>
+              </div>
+
+              <div className="form-actions">
+                <button type="submit" className="btn-primary">
+                  {editId ? 'Guardar cambios' : 'Agregar empleado'}
+                </button>
+                <button type="button" className="btn-secondary" onClick={resetForm}>
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </div>
+        </>
+      )}
     </div>
   )
 }

@@ -44,6 +44,7 @@ export default function GestionNomina() {
   const puedeEliminar = puede('gestion-nomina', 'eliminar')
 
   // --- Formulario de asignación ---
+  const [formAbierto, setFormAbierto] = useState(false)
   const [nuevaEmpleadoId, setNuevaEmpleadoId] = useState('')
   const [nuevaProductoId, setNuevaProductoId] = useState('')
   const [nuevaProcesoId, setNuevaProcesoId] = useState('')
@@ -111,6 +112,7 @@ export default function GestionNomina() {
     setNuevaProcesoId('')
     setNuevaCantidad('')
     setNuevaComentario('')
+    setFormAbierto(false)
   }
 
   const handleAsignar = async () => {
@@ -265,71 +267,10 @@ export default function GestionNomina() {
 
       {/* Asignar tarea */}
       {puedeCrear && (
-        <div className="card">
-          <h3>Asignar tarea</h3>
-          <div className="row">
-            <div style={{ flex: 2 }}>
-              <label>Empleado</label>
-              <select value={nuevaEmpleadoId} onChange={(e) => setNuevaEmpleadoId(e.target.value)}>
-                <option value="">— Seleccionar —</option>
-                {empleados.map((emp) => (
-                  <option key={emp.id} value={emp.id}>
-                    {emp.nombre}{emp.cargo ? ` (${emp.cargo})` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div style={{ flex: 2 }}>
-              <label>Producto</label>
-              <select
-                value={nuevaProductoId}
-                onChange={(e) => { setNuevaProductoId(e.target.value); setNuevaProcesoId('') }}
-              >
-                <option value="">— Producto —</option>
-                {productos.map((p) => (
-                  <option key={p.id} value={p.id}>{p.nombre}</option>
-                ))}
-              </select>
-            </div>
-            <div style={{ flex: 2 }}>
-              <label>Proceso</label>
-              <select
-                value={nuevaProcesoId}
-                disabled={!productoSel}
-                onChange={(e) => setNuevaProcesoId(e.target.value)}
-              >
-                <option value="">— Proceso —</option>
-                {productoSel?.procesos.map((p) => (
-                  <option key={p.id} value={p.id}>{p.nombre} ({formatCOP(p.pago)})</option>
-                ))}
-              </select>
-            </div>
-            <div style={{ flex: 1 }}>
-              <label>Cantidad</label>
-              <input
-                type="number" min="0" step="any" placeholder="0"
-                value={nuevaCantidad}
-                onChange={(e) => setNuevaCantidad(e.target.value)}
-              />
-            </div>
-          </div>
-          <div style={{ marginTop: 10 }}>
-            <label>Comentario (opcional)</label>
-            <input
-              type="text" placeholder="Ej: entrega para el viernes"
-              value={nuevaComentario}
-              onChange={(e) => setNuevaComentario(e.target.value)}
-              style={{ width: '100%' }}
-            />
-          </div>
-          {(empleados.length === 0 || productos.length === 0) && (
-            <p className="muted small">Necesitas empleados y productos creados para asignar tareas.</p>
-          )}
-          <div className="form-actions">
-            <button className="btn-primary" onClick={handleAsignar} disabled={guardando}>
-              {guardando ? 'Guardando…' : '+ Asignar tarea'}
-            </button>
-          </div>
+        <div className="form-actions">
+          <button type="button" className="btn-primary" onClick={() => setFormAbierto(true)}>
+            + Asignar tarea
+          </button>
         </div>
       )}
 
@@ -548,6 +489,81 @@ export default function GestionNomina() {
             </table>
           </div>
         </div>
+      )}
+
+      {formAbierto && (
+        <>
+          <div className="overlay" onClick={resetForm} />
+          <div className="modal">
+            <h3>Asignar tarea</h3>
+            <div className="row">
+              <div style={{ flex: 2 }}>
+                <label>Empleado</label>
+                <select value={nuevaEmpleadoId} onChange={(e) => setNuevaEmpleadoId(e.target.value)}>
+                  <option value="">— Seleccionar —</option>
+                  {empleados.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.nombre}{emp.cargo ? ` (${emp.cargo})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ flex: 2 }}>
+                <label>Producto</label>
+                <select
+                  value={nuevaProductoId}
+                  onChange={(e) => { setNuevaProductoId(e.target.value); setNuevaProcesoId('') }}
+                >
+                  <option value="">— Producto —</option>
+                  {productos.map((p) => (
+                    <option key={p.id} value={p.id}>{p.nombre}</option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ flex: 2 }}>
+                <label>Proceso</label>
+                <select
+                  value={nuevaProcesoId}
+                  disabled={!productoSel}
+                  onChange={(e) => setNuevaProcesoId(e.target.value)}
+                >
+                  <option value="">— Proceso —</option>
+                  {productoSel?.procesos.map((p) => (
+                    <option key={p.id} value={p.id}>{p.nombre} ({formatCOP(p.pago)})</option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label>Cantidad</label>
+                <input
+                  type="number" min="0" step="any" placeholder="0"
+                  value={nuevaCantidad}
+                  onChange={(e) => setNuevaCantidad(e.target.value)}
+                />
+              </div>
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <label>Comentario (opcional)</label>
+              <input
+                type="text" placeholder="Ej: entrega para el viernes"
+                value={nuevaComentario}
+                onChange={(e) => setNuevaComentario(e.target.value)}
+                style={{ width: '100%' }}
+              />
+            </div>
+            {(empleados.length === 0 || productos.length === 0) && (
+              <p className="muted small">Necesitas empleados y productos creados para asignar tareas.</p>
+            )}
+            <div className="form-actions">
+              <button className="btn-primary" onClick={handleAsignar} disabled={guardando}>
+                {guardando ? 'Guardando…' : 'Asignar tarea'}
+              </button>
+              <button type="button" className="btn-secondary" onClick={resetForm}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   )
