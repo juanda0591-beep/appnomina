@@ -31,6 +31,26 @@ export const notify = {
   info: (msg) => toast(msg, toastBase),
 }
 
+// Pide un texto corto al usuario (ej: número de WhatsApp) -> devuelve el valor o null si cancela
+export async function preguntarTexto(mensaje, { titulo = 'Ingresa un valor', placeholder = '', valorInicial = '', textoOk = 'Continuar' } = {}) {
+  const r = await Swal.fire({
+    title: titulo,
+    text: mensaje,
+    input: 'text',
+    inputPlaceholder: placeholder,
+    inputValue: valorInicial,
+    showCancelButton: true,
+    confirmButtonText: textoOk,
+    cancelButtonText: 'Cancelar',
+    confirmButtonColor: '#2563eb',
+    cancelButtonColor: '#64748b',
+    reverseButtons: true,
+    customClass: { popup: 'swal-nomina' },
+    inputValidator: (value) => (!value || !value.trim() ? 'Este campo es obligatorio' : undefined),
+  })
+  return r.isConfirmed ? r.value.trim() : null
+}
+
 // Confirmación asíncrona -> devuelve true/false
 export async function confirmar(
   mensaje,

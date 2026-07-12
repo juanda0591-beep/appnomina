@@ -457,6 +457,70 @@ app.delete('/api/empleados/:id', permisoRequired('empleados', 'eliminar'), (req,
   res.json({ ok: true })
 })
 
+// ============ HERRAMIENTAS ENTREGADAS ============
+// Registro de herramientas que se le entregan a cada empleado. Reutiliza el
+// permiso de 'empleados' (ver/crear/editar/eliminar) porque vive dentro de esa
+// página, igual criterio que procesos-globales reusa el permiso de productos.
+function herramientaSalida(h) {
+  return {
+    id: h.id,
+    empleadoId: h.empleado_id,
+    herramienta: h.herramienta,
+    cantidad: h.cantidad,
+    fechaEntrega: h.fecha_entrega,
+    estado: h.estado,
+    comentario: h.comentario || '',
+    creado: h.creado,
+  }
+}
+
+app.get('/api/empleados/:id/herramientas', permisoAnyRequired([
+  ['empleados', 'ver'],
+  ['nomina', 'ver'],
+]), (req, res) => {
+  const filas = db
+    .prepare('SELECT * FROM herramientas_entregas WHERE empleado_id = ? ORDER BY fecha_entrega DESC, id DESC')
+    .all(req.params.id)
+  res.json(filas.map(herramientaSalida))
+})
+
+app.post('/api/empleados/:id/herramientas', permisoRequired('empleados', 'crear'), (req, res) => {
+  const empleadoId = Number(req.params.id)
+  const { herramienta, cantidad, fechaEntrega, estado, comentario } = req.body
+  if (!herramienta || !herramienta.trim()) return res.status(400).json({ error: 'La herramienta es obligatoria' })
+  if (!fechaEntrega) return res.status(400).json({ error: 'La fecha de entrega es obligatoria' })
+  const cant = Number(cantidad) || 0
+  if (cant <= 0) return res.status(400).json({ error: 'La cantidad debe ser mayor a 0' })
+
+  const r = db
+    .prepare(
+      `INSERT INTO herramientas_entregas (empleado_id, herramienta, cantidad, fecha_entrega, estado, comentario, creado)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(empleadoId, herramienta.trim(), cant, fechaEntrega, estado || 'buen_estado', (comentario || '').trim(), new Date().toISOString())
+  res.json(herramientaSalida(db.prepare('SELECT * FROM herramientas_entregas WHERE id = ?').get(r.lastInsertRowid)))
+})
+
+app.put('/api/herramientas/:id', permisoRequired('empleados', 'editar'), (req, res) => {
+  const { herramienta, cantidad, fechaEntrega, estado, comentario } = req.body
+  if (!herramienta || !herramienta.trim()) return res.status(400).json({ error: 'La herramienta es obligatoria' })
+  if (!fechaEntrega) return res.status(400).json({ error: 'La fecha de entrega es obligatoria' })
+  const cant = Number(cantidad) || 0
+  if (cant <= 0) return res.status(400).json({ error: 'La cantidad debe ser mayor a 0' })
+
+  db.prepare(
+    `UPDATE herramientas_entregas
+     SET herramienta = ?, cantidad = ?, fecha_entrega = ?, estado = ?, comentario = ?
+     WHERE id = ?`
+  ).run(herramienta.trim(), cant, fechaEntrega, estado || 'buen_estado', (comentario || '').trim(), req.params.id)
+  res.json(herramientaSalida(db.prepare('SELECT * FROM herramientas_entregas WHERE id = ?').get(req.params.id)))
+})
+
+app.delete('/api/herramientas/:id', permisoRequired('empleados', 'eliminar'), (req, res) => {
+  db.prepare('DELETE FROM herramientas_entregas WHERE id = ?').run(req.params.id)
+  res.json({ ok: true })
+})
+
 // ============ PRESTAMOS ============
 app.get('/api/prestamos', permisoAnyRequired([
   ['prestamos', 'ver'],
@@ -1180,6 +1244,54 @@ app.get('/api/reportes', permisoRequired('reportes', 'ver'), (req, res) => {
   }))
 
   res.json({ desde, hasta, totalBruto, totalDescuentos, totalPagado, cantidad: nominas.length, porEmpleado, nominas })
+})
+
+// Reporte de materiales: entradas/salidas del periodo y stock disponible actual
+// por material, con el detalle de movimientos que lo compone.
+app.get('/api/reportes/materiales', permisoAnyRequired([
+  ['reportes', 'ver'],
+  ['materiales', 'ver'],
+]), (req, res) => {
+  const { desde, hasta } = req.query
+  if (!desde || !hasta) return res.status(400).json({ error: 'desde y hasta son requeridos' })
+
+  const materiales = db.prepare('SELECT * FROM materiales ORDER BY nombre').all()
+  const movStmt = db.prepare(
+    `SELECT * FROM material_movimientos
+     WHERE material_id = ? AND date(fecha) BETWEEN date(?) AND date(?)
+     ORDER BY fecha ASC, id ASC`
+  )
+
+  const porMaterial = materiales.map((mat) => {
+    const movimientos = movStmt.all(mat.id, desde, hasta)
+    const entradas = movimientos.filter((m) => m.tipo === 'entrada').reduce((s, m) => s + m.cantidad, 0)
+    const salidas = movimientos.filter((m) => m.tipo === 'salida').reduce((s, m) => s + m.cantidad, 0)
+    return {
+      materialId: mat.id,
+      nombre: mat.nombre,
+      unidad: mat.unidad,
+      stockActual: mat.stock,
+      stockMinimo: mat.stock_minimo,
+      costoUnitario: mat.costo_unitario,
+      entradas,
+      salidas,
+      neto: entradas - salidas,
+      movimientos: movimientos.map((m) => ({
+        id: m.id,
+        tipo: m.tipo,
+        cantidad: m.cantidad,
+        costoUnitario: m.costo_unitario,
+        fecha: m.fecha,
+        descripcion: m.descripcion || '',
+      })),
+    }
+  })
+
+  const totalEntradas = porMaterial.reduce((s, m) => s + m.entradas, 0)
+  const totalSalidas = porMaterial.reduce((s, m) => s + m.salidas, 0)
+  const stockBajoCount = porMaterial.filter((m) => m.stockActual <= m.stockMinimo).length
+
+  res.json({ desde, hasta, materiales: porMaterial, totalEntradas, totalSalidas, stockBajoCount })
 })
 
 // ============ COSTEOS (Costos de productos) ============

@@ -424,6 +424,102 @@ export function generarPdfFabricacion({ empresa, desde, hasta, productos }) {
   doc.save(`reporte_fabricacion_${desde}_a_${hasta}.pdf`)
 }
 
+// Genera el PDF del reporte detallado de materiales (entradas, salidas y stock disponible).
+// `materiales` viene de GET /api/reportes/materiales: [{ nombre, unidad, stockActual,
+// stockMinimo, entradas, salidas, neto, movimientos: [...] }]
+export function generarPdfReporteMateriales({ empresa, desde, hasta, materiales, totalEntradas, totalSalidas, stockBajoCount, incluirMovimientos = true }) {
+  const doc = new jsPDF()
+  const marginX = 14
+  const pageH = doc.internal.pageSize.getHeight()
+
+  let y = drawEncabezadoEmpresa(doc, empresa, marginX)
+
+  doc.setFontSize(16)
+  doc.setTextColor(15, 23, 42)
+  doc.text('Reporte de Materiales', marginX, y)
+  y += 8
+
+  doc.setFontSize(11)
+  doc.setTextColor(90)
+  doc.text(`Periodo: ${formatFecha(desde)} — ${formatFecha(hasta)}`, marginX, y)
+  y += 6
+  doc.text(`Materiales: ${materiales.length}   ·   Entradas: ${totalEntradas}   ·   Salidas: ${totalSalidas}   ·   Stock bajo: ${stockBajoCount}`, marginX, y)
+  y += 8
+
+  // Resumen: una fila por material (entradas, salidas, neto, stock actual)
+  autoTable(doc, {
+    startY: y,
+    head: [['Material', 'Unidad', 'Entradas', 'Salidas', 'Neto', 'Stock actual', 'Stock mínimo']],
+    body: materiales.map((m) => [
+      m.nombre,
+      m.unidad,
+      String(m.entradas),
+      String(m.salidas),
+      String(m.neto),
+      String(m.stockActual),
+      String(m.stockMinimo),
+    ]),
+    foot: [[
+      'TOTALES', '', String(totalEntradas), String(totalSalidas),
+      String(totalEntradas - totalSalidas), '', '',
+    ]],
+    styles: { fontSize: 9 },
+    headStyles: { fillColor: [37, 99, 235] },
+    footStyles: { fillColor: [226, 232, 240], textColor: 0, fontStyle: 'bold' },
+    columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' } },
+    didParseCell: (data) => {
+      if ([2, 3, 4, 5, 6].includes(data.column.index)) data.cell.styles.halign = 'right'
+      // Resalta en rojo el stock actual cuando está en o bajo el mínimo
+      if (data.section === 'body' && data.column.index === 5) {
+        const m = materiales[data.row.index]
+        if (m && m.stockActual <= m.stockMinimo) data.cell.styles.textColor = [220, 38, 38]
+      }
+    },
+  })
+  y = doc.lastAutoTable.finalY + 10
+
+  // Detalle de movimientos por material (opcional, una tabla por material con producción)
+  if (incluirMovimientos) {
+    for (const m of materiales) {
+      if (m.movimientos.length === 0) continue
+      if (y > pageH - 40) { doc.addPage(); y = 20 }
+
+      doc.setFontSize(11)
+      doc.setFont(undefined, 'bold')
+      doc.setTextColor(15, 23, 42)
+      doc.text(`${m.nombre} (${m.unidad})`, marginX, y)
+      doc.setFont(undefined, 'normal')
+      y += 5
+
+      autoTable(doc, {
+        startY: y,
+        head: [['Fecha', 'Tipo', 'Cantidad', 'Costo unitario', 'Descripción']],
+        body: m.movimientos.map((mv) => [
+          formatFecha(mv.fecha),
+          mv.tipo === 'entrada' ? 'Entrada' : mv.tipo === 'salida' ? 'Salida' : mv.tipo,
+          (mv.tipo === 'salida' ? '-' : '+') + mv.cantidad,
+          formatCOP(mv.costoUnitario),
+          mv.descripcion || '—',
+        ]),
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [100, 116, 139] },
+        columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' } },
+        didParseCell: (data) => {
+          if ([2, 3].includes(data.column.index)) data.cell.styles.halign = 'right'
+          if (data.section === 'body') {
+            const tipo = m.movimientos[data.row.index]?.tipo
+            if (data.column.index === 2) data.cell.styles.textColor = tipo === 'salida' ? [220, 38, 38] : [22, 163, 74]
+          }
+        },
+      })
+      y = doc.lastAutoTable.finalY + 8
+    }
+  }
+
+  pieDePagina(doc, empresa, marginX)
+  doc.save(`reporte_materiales_${desde}_a_${hasta}.pdf`)
+}
+
 // Dibuja el registro fotográfico de las tareas: cada foto con su fecha y su nota.
 // `fotos` es un array de { imagen (dataURL), fecha, descripcion }. Devuelve la nueva Y.
 function dibujarRegistroFotografico(doc, marginX, y, fotos) {

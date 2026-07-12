@@ -29,6 +29,7 @@ export default function Usuarios() {
   const [password, setPassword] = useState('')
   const [rol, setRol] = useState('usuario')
   const [guardando, setGuardando] = useState(false)
+  const [formAbierto, setFormAbierto] = useState(false)
 
   // edición de permisos: { [userId]: objetoPermisos }
   const [editPerm, setEditPerm] = useState(null) // usuario en edición
@@ -49,6 +50,11 @@ export default function Usuarios() {
     recargar()
   }, [])
 
+  const resetForm = () => {
+    setUsername(''); setPassword(''); setRol('usuario')
+    setFormAbierto(false)
+  }
+
   const crear = async (e) => {
     e.preventDefault()
     setMsg(null)
@@ -59,7 +65,7 @@ export default function Usuarios() {
       const permisos = rol === 'admin' ? null : permisosVacios()
       await addUsuario(username, password, rol, permisos)
       setMsg({ tipo: 'ok', texto: '✅ Usuario creado' })
-      setUsername(''); setPassword(''); setRol('usuario')
+      resetForm()
       await recargar()
     } catch (e) {
       setMsg({ tipo: 'error', texto: e.message })
@@ -144,35 +150,11 @@ export default function Usuarios() {
         <div className={`banner ${msg.tipo === 'error' ? 'error' : ''}`}>{msg.texto}</div>
       )}
 
-      <form className="card" onSubmit={crear}>
-        <h3>Crear usuario</h3>
-        <div className="row">
-          <div style={{ flex: 1 }}>
-            <label>Nombre de usuario</label>
-            <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
-          </div>
-          <div style={{ flex: 1 }}>
-            <label>Contraseña</label>
-            <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off" />
-          </div>
-          <div style={{ flex: 1 }}>
-            <label>Rol</label>
-            <select value={rol} onChange={(e) => setRol(e.target.value)}>
-              <option value="usuario">Usuario</option>
-              <option value="admin">Administrador</option>
-            </select>
-          </div>
-        </div>
-        <p className="muted small">
-          El administrador tiene acceso total. Un usuario nuevo solo podrá ver el inicio;
-          luego le concedes permisos con el botón "Permisos".
-        </p>
-        <div className="form-actions">
-          <button type="submit" className="btn-primary" disabled={guardando}>
-            {guardando ? 'Creando…' : 'Crear usuario'}
-          </button>
-        </div>
-      </form>
+      <div className="form-actions">
+        <button type="button" className="btn-primary" onClick={() => setFormAbierto(true)}>
+          + Nuevo usuario
+        </button>
+      </div>
 
       <div className="card">
         <h3>Usuarios registrados</h3>
@@ -208,56 +190,99 @@ export default function Usuarios() {
         )}
       </div>
 
+      {formAbierto && (
+        <>
+          <div className="overlay" onClick={resetForm} />
+          <div className="modal">
+            <h3>Crear usuario</h3>
+            <form onSubmit={crear}>
+              <div className="row">
+                <div style={{ flex: 1 }}>
+                  <label>Nombre de usuario</label>
+                  <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label>Contraseña</label>
+                  <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off" />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label>Rol</label>
+                  <select value={rol} onChange={(e) => setRol(e.target.value)}>
+                    <option value="usuario">Usuario</option>
+                    <option value="admin">Administrador</option>
+                  </select>
+                </div>
+              </div>
+              <p className="muted small">
+                El administrador tiene acceso total. Un usuario nuevo solo podrá ver el inicio;
+                luego le concedes permisos con el botón "Permisos".
+              </p>
+              <div className="form-actions">
+                <button type="submit" className="btn-primary" disabled={guardando}>
+                  {guardando ? 'Creando…' : 'Crear usuario'}
+                </button>
+                <button type="button" className="btn-secondary" onClick={resetForm}>
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </div>
+        </>
+      )}
+
       {/* Editor de permisos (matriz de checkboxes) */}
       {editPerm && permDraft && (
-        <div className="card">
-          <div className="card-head">
-            <h3>Permisos de {editPerm.username}</h3>
-            <button className="btn-secondary" onClick={cerrarPermisos}>Cerrar</button>
-          </div>
-          <div className="quick-ranges" style={{ marginBottom: 12 }}>
-            <button className="btn-secondary" onClick={() => marcarTodo(true)}>Marcar todo</button>
-            <button className="btn-secondary" onClick={() => marcarTodo(false)}>Quitar todo</button>
-          </div>
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Página</th>
-                  {TODAS_ACCIONES.map((a) => (
-                    <th key={a} className="num">{ACCION_LABEL[a]}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {PAGINAS.map((pag) => (
-                  <tr key={pag.id}>
-                    <td>{pag.label}</td>
+        <>
+          <div className="overlay" onClick={cerrarPermisos} />
+          <div className="modal modal-lg">
+            <div className="card-head">
+              <h3>Permisos de {editPerm.username}</h3>
+              <button className="btn-secondary" onClick={cerrarPermisos}>Cerrar</button>
+            </div>
+            <div className="quick-ranges" style={{ marginBottom: 12 }}>
+              <button className="btn-secondary" onClick={() => marcarTodo(true)}>Marcar todo</button>
+              <button className="btn-secondary" onClick={() => marcarTodo(false)}>Quitar todo</button>
+            </div>
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Página</th>
                     {TODAS_ACCIONES.map((a) => (
-                      <td key={a} className="num">
-                        {pag.acciones.includes(a) ? (
-                          <input
-                            type="checkbox"
-                            checked={!!permDraft[pag.id][a]}
-                            onChange={() => togglePerm(pag.id, a)}
-                          />
-                        ) : (
-                          <span className="muted">—</span>
-                        )}
-                      </td>
+                      <th key={a} className="num">{ACCION_LABEL[a]}</th>
                     ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {PAGINAS.map((pag) => (
+                    <tr key={pag.id}>
+                      <td>{pag.label}</td>
+                      {TODAS_ACCIONES.map((a) => (
+                        <td key={a} className="num">
+                          {pag.acciones.includes(a) ? (
+                            <input
+                              type="checkbox"
+                              checked={!!permDraft[pag.id][a]}
+                              onChange={() => togglePerm(pag.id, a)}
+                            />
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="form-actions">
+              <button className="btn-primary" onClick={guardarPermisos} disabled={guardandoPerm}>
+                {guardandoPerm ? 'Guardando…' : 'Guardar permisos'}
+              </button>
+              <button className="btn-secondary" onClick={cerrarPermisos}>Cancelar</button>
+            </div>
           </div>
-          <div className="form-actions">
-            <button className="btn-primary" onClick={guardarPermisos} disabled={guardandoPerm}>
-              {guardandoPerm ? 'Guardando…' : 'Guardar permisos'}
-            </button>
-            <button className="btn-secondary" onClick={cerrarPermisos}>Cancelar</button>
-          </div>
-        </div>
+        </>
       )}
     </div>
   )

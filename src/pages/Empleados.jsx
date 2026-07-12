@@ -1,13 +1,33 @@
 import { useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
-import { formatCOP } from '../utils/format.js'
+import { formatCOP, formatFecha } from '../utils/format.js'
 import { notify, confirmar } from '../utils/notify.js'
 
 const emptyEmp = { nombre: '', cedula: '', telefono: '', cargo: '' }
 
+const hoy = () => new Date().toISOString().slice(0, 10)
+const emptyHerramienta = () => ({ herramienta: '', cantidad: '1', fechaEntrega: hoy(), estado: 'buen_estado', comentario: '' })
+
+// Estados posibles de una herramienta entregada
+const ESTADO_HERRAMIENTA_LABEL = {
+  buen_estado: 'Buen estado',
+  danada: 'Dañada',
+  perdida: 'Perdida',
+  devuelta: 'Devuelta',
+}
+const ESTADO_HERRAMIENTA_CHIP = {
+  buen_estado: 'ok',
+  danada: 'warn',
+  perdida: 'danger',
+  devuelta: '',
+}
+
 export default function Empleados() {
-  const { empleados, addEmpleado, updateEmpleado, deleteEmpleado, prestamosDeEmpleado } = useData()
+  const {
+    empleados, addEmpleado, updateEmpleado, deleteEmpleado, prestamosDeEmpleado,
+    getHerramientasEmpleado, addHerramienta, updateHerramienta, deleteHerramienta,
+  } = useData()
   const { puede } = useAuth()
   const puedeCrear = puede('empleados', 'crear')
   const puedeEditar = puede('empleados', 'editar')
@@ -15,6 +35,14 @@ export default function Empleados() {
   const [form, setForm] = useState(emptyEmp)
   const [formAbierto, setFormAbierto] = useState(false)
   const [editId, setEditId] = useState(null)
+
+  // --- Herramientas entregadas ---
+  const [herramientasEmpleadoId, setHerramientasEmpleadoId] = useState(null) // empleado con el modal abierto
+  const [herramientas, setHerramientas] = useState([])
+  const [herrForm, setHerrForm] = useState(emptyHerramienta())
+  const [herrFormAbierto, setHerrFormAbierto] = useState(false)
+  const [herrEditId, setHerrEditId] = useState(null)
+  const [guardandoHerr, setGuardandoHerr] = useState(false)
 
   const setField = (field, val) => setForm((f) => ({ ...f, [field]: val }))
   const resetForm = () => {
@@ -61,6 +89,81 @@ export default function Empleados() {
     setFormAbierto(true)
   }
 
+  // --- Herramientas entregadas ---
+  const setHerrField = (field, val) => setHerrForm((f) => ({ ...f, [field]: val }))
+  const resetHerrForm = () => {
+    setHerrForm(emptyHerramienta())
+    setHerrEditId(null)
+    setHerrFormAbierto(false)
+  }
+
+  const abrirHerramientas = async (emp) => {
+    try {
+      const h = await getHerramientasEmpleado(emp.id)
+      setHerramientas(h)
+      setHerramientasEmpleadoId(emp.id)
+    } catch (err) {
+      notify.error('Error al cargar las herramientas: ' + err.message)
+    }
+  }
+  const cerrarHerramientas = () => {
+    setHerramientasEmpleadoId(null)
+    setHerramientas([])
+    resetHerrForm()
+  }
+
+  const recargarHerramientas = async () => {
+    const h = await getHerramientasEmpleado(herramientasEmpleadoId)
+    setHerramientas(h)
+  }
+
+  const startEditHerramienta = (h) => {
+    setHerrEditId(h.id)
+    setHerrForm({
+      herramienta: h.herramienta,
+      cantidad: String(h.cantidad),
+      fechaEntrega: h.fechaEntrega ? h.fechaEntrega.slice(0, 10) : hoy(),
+      estado: h.estado,
+      comentario: h.comentario || '',
+    })
+    setHerrFormAbierto(true)
+  }
+
+  const handleSubmitHerramienta = async (e) => {
+    e.preventDefault()
+    if (!herrForm.herramienta.trim()) { notify.error('Escribe el nombre de la herramienta'); return }
+    if (!(Number(herrForm.cantidad) > 0)) { notify.error('Ingresa una cantidad válida'); return }
+
+    setGuardandoHerr(true)
+    try {
+      if (herrEditId) {
+        await updateHerramienta(herrEditId, herrForm)
+        notify.ok('Herramienta actualizada')
+      } else {
+        await addHerramienta(herramientasEmpleadoId, herrForm)
+        notify.ok('Entrega registrada')
+      }
+      await recargarHerramientas()
+      resetHerrForm()
+    } catch (err) {
+      notify.error('Error al guardar: ' + err.message)
+    } finally {
+      setGuardandoHerr(false)
+    }
+  }
+
+  const handleEliminarHerramienta = async (h) => {
+    if (!(await confirmar(`¿Eliminar el registro de "${h.herramienta}"?`))) return
+    try {
+      await deleteHerramienta(h.id)
+      await recargarHerramientas()
+    } catch (err) {
+      notify.error('Error al eliminar: ' + err.message)
+    }
+  }
+
+  const empleadoHerramientas = empleados.find((e) => e.id === herramientasEmpleadoId)
+
   return (
     <div>
       <h2>👷 Empleados</h2>
@@ -99,6 +202,7 @@ export default function Empleados() {
                 )}
               </div>
               <div className="actions">
+                <button className="btn-secondary" onClick={() => abrirHerramientas(emp)}>🔧 Herramientas</button>
                 {puedeEditar && (
                   <button className="btn-secondary" onClick={() => startEdit(emp)}>Editar</button>
                 )}
@@ -150,6 +254,143 @@ export default function Empleados() {
                   {editId ? 'Guardar cambios' : 'Agregar empleado'}
                 </button>
                 <button type="button" className="btn-secondary" onClick={resetForm}>
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </div>
+        </>
+      )}
+
+      {/* Modal: herramientas entregadas al empleado */}
+      {herramientasEmpleadoId && (
+        <>
+          <div className="overlay" onClick={cerrarHerramientas} />
+          <div className="modal">
+            <h3>🔧 Herramientas de {empleadoHerramientas?.nombre || 'empleado'}</h3>
+
+            {puedeCrear && (
+              <div className="form-actions">
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => { setHerrForm(emptyHerramienta()); setHerrEditId(null); setHerrFormAbierto(true) }}
+                >
+                  + Nueva entrega
+                </button>
+              </div>
+            )}
+
+            {herramientas.length === 0 && <p className="muted">Aún no se le han entregado herramientas.</p>}
+            {herramientas.length > 0 && (
+              <div className="table-wrap">
+                <table className="table compact">
+                  <thead>
+                    <tr>
+                      <th>Fecha</th>
+                      <th>Herramienta</th>
+                      <th className="num">Cantidad</th>
+                      <th>Estado</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {herramientas.map((h) => (
+                      <tr key={h.id}>
+                        <td>{formatFecha(h.fechaEntrega)}</td>
+                        <td>
+                          {h.herramienta}
+                          {h.comentario && <div className="muted small">💬 {h.comentario}</div>}
+                        </td>
+                        <td className="num">{h.cantidad}</td>
+                        <td>
+                          <span className={`chip ${ESTADO_HERRAMIENTA_CHIP[h.estado] || ''}`}>
+                            {ESTADO_HERRAMIENTA_LABEL[h.estado] || h.estado}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="actions" style={{ justifyContent: 'flex-end' }}>
+                            {puedeEditar && (
+                              <button className="btn-secondary btn-sm" onClick={() => startEditHerramienta(h)}>
+                                Editar
+                              </button>
+                            )}
+                            {puedeEliminar && (
+                              <button className="btn-danger btn-sm" onClick={() => handleEliminarHerramienta(h)}>
+                                Eliminar
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="form-actions">
+              <button className="btn-secondary" onClick={cerrarHerramientas}>Cerrar</button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Modal: registrar/editar entrega de herramienta */}
+      {herrFormAbierto && (
+        <>
+          <div className="overlay" onClick={resetHerrForm} />
+          <div className="modal">
+            <h3>{herrEditId ? 'Editar entrega' : 'Nueva entrega de herramienta'}</h3>
+            <form onSubmit={handleSubmitHerramienta}>
+              <div className="row">
+                <div style={{ flex: 2 }}>
+                  <label>Herramienta</label>
+                  <input
+                    value={herrForm.herramienta}
+                    onChange={(e) => setHerrField('herramienta', e.target.value)}
+                    placeholder="Ej: Taladro, martillo, caladora"
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label>Cantidad</label>
+                  <input
+                    type="number" min="0" step="any"
+                    value={herrForm.cantidad}
+                    onChange={(e) => setHerrField('cantidad', e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="row">
+                <div style={{ flex: 1 }}>
+                  <label>Fecha de entrega</label>
+                  <input
+                    type="date"
+                    value={herrForm.fechaEntrega}
+                    onChange={(e) => setHerrField('fechaEntrega', e.target.value)}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label>Estado</label>
+                  <select value={herrForm.estado} onChange={(e) => setHerrField('estado', e.target.value)}>
+                    {Object.entries(ESTADO_HERRAMIENTA_LABEL).map(([k, v]) => (
+                      <option key={k} value={k}>{v}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <label>Comentario (opcional)</label>
+              <input
+                value={herrForm.comentario}
+                onChange={(e) => setHerrField('comentario', e.target.value)}
+                placeholder="Ej: se entregó con el mango rayado"
+              />
+
+              <div className="form-actions">
+                <button type="submit" className="btn-primary" disabled={guardandoHerr}>
+                  {guardandoHerr ? 'Guardando…' : herrEditId ? 'Guardar cambios' : 'Registrar entrega'}
+                </button>
+                <button type="button" className="btn-secondary" onClick={resetHerrForm}>
                   Cancelar
                 </button>
               </div>

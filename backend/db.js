@@ -217,6 +217,18 @@ db.exec(`
     FOREIGN KEY (tarea_id) REFERENCES tareas_produccion(id) ON DELETE CASCADE
   );
 
+  CREATE TABLE IF NOT EXISTS herramientas_entregas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    empleado_id INTEGER NOT NULL,
+    herramienta TEXT NOT NULL,
+    cantidad REAL NOT NULL DEFAULT 1,
+    fecha_entrega TEXT NOT NULL,
+    estado TEXT NOT NULL DEFAULT 'buen_estado',   -- buen_estado|danada|perdida|devuelta
+    comentario TEXT,
+    creado TEXT,
+    FOREIGN KEY (empleado_id) REFERENCES empleados(id) ON DELETE CASCADE
+  );
+
   CREATE TABLE IF NOT EXISTS ordenes_produccion (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     producto_id INTEGER,

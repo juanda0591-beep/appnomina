@@ -23,7 +23,15 @@ import { useAuth } from './context/AuthContext.jsx'
 const links = [
   { to: '/inicio', label: '🏠 Inicio', pagina: 'inicio' },
   { to: '/nomina', label: '🧾 Pago de Nómina', pagina: 'nomina' },
-  { to: '/gestion-nomina', label: '📋 Gestión de Nómina', pagina: 'gestion-nomina' },
+  {
+    group: 'gestion-nomina-grupo',
+    label: '📋 Gestión de Nómina',
+    items: [
+      { to: '/gestion-nomina', label: '📋 Gestión de Trabajo', pagina: 'gestion-nomina' },
+      { to: '/empleados', label: '👷 Empleados', pagina: 'empleados' },
+      { to: '/prestamos', label: '💵 Préstamos', pagina: 'prestamos' },
+    ],
+  },
   { to: '/productos', label: '📦 Productos', pagina: 'productos' },
   {
     group: 'fabricacion',
@@ -33,8 +41,6 @@ const links = [
       { to: '/gestion-produccion', label: '🏭 Producción', pagina: 'gestion-produccion' },
     ],
   },
-  { to: '/empleados', label: '👷 Empleados', pagina: 'empleados' },
-  { to: '/prestamos', label: '💵 Préstamos', pagina: 'prestamos' },
   { to: '/control-dinero', label: '💰 Control de Dinero', pagina: 'control-dinero' },
   { to: '/historial', label: '📚 Historial', pagina: 'historial' },
   { to: '/reportes', label: '📊 Reportes', pagina: 'reportes' },

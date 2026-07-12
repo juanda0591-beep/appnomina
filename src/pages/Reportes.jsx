@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha } from '../utils/format.js'
-import { generarPdfReporte, generarPdfMovimientos, generarPdfFabricacion } from '../utils/pdf.js'
-import { notify } from '../utils/notify.js'
+import { generarPdfReporte, generarPdfMovimientos, generarPdfFabricacion, generarPdfReporteMateriales, descargarCSV } from '../utils/pdf.js'
+import { notify, preguntarTexto } from '../utils/notify.js'
 
 function inicioDeMes() {
   const d = new Date()
@@ -11,7 +11,7 @@ function inicioDeMes() {
 }
 
 export default function Reportes() {
-  const { getReporte, getMovimientos, empresa, tareas, productos } = useData()
+  const { getReporte, getReporteMateriales, getMovimientos, empresa, tareas, productos } = useData()
   const { puede } = useAuth()
   const puedeExportar = puede('reportes', 'exportar')
   const hoy = new Date().toISOString().slice(0, 10)
@@ -20,6 +20,8 @@ export default function Reportes() {
   const [hasta, setHasta] = useState(hoy)
   const [reporte, setReporte] = useState(null)
   const [movs, setMovs] = useState(null) // reporte de movimientos del periodo
+  const [repMateriales, setRepMateriales] = useState(null)
+  const [materialAbierto, setMaterialAbierto] = useState(null) // materialId con detalle expandido
   const [cargando, setCargando] = useState(false)
 
   // --- Reporte de fabricación (basado en Gestión de Nómina) ---
@@ -113,16 +115,52 @@ export default function Reportes() {
     if (desde > hasta) { notify.error('La fecha "desde" no puede ser mayor que "hasta"'); return }
     setCargando(true)
     try {
-      const [r, m] = await Promise.all([getReporte(desde, hasta), getMovimientos(desde, hasta)])
+      const [r, m, rm] = await Promise.all([getReporte(desde, hasta), getMovimientos(desde, hasta), getReporteMateriales(desde, hasta)])
       setReporte(r)
       const ingresos = m.filter((x) => x.tipo === 'ingreso').reduce((s, x) => s + x.monto, 0)
       const gastos = m.filter((x) => x.tipo === 'gasto').reduce((s, x) => s + x.monto, 0)
       setMovs({ lista: m, ingresos, gastos, balance: ingresos - gastos })
+      setRepMateriales(rm)
     } catch (e) {
       notify.error('Error al generar el reporte: ' + e.message)
     } finally {
       setCargando(false)
     }
+  }
+
+  // --- Exportaciones del reporte de materiales ---
+  const exportarMaterialesExcel = () => {
+    if (!repMateriales) return
+    const filas = [['Material', 'Unidad', 'Entradas', 'Salidas', 'Neto', 'Stock actual', 'Stock mínimo']]
+    for (const m of repMateriales.materiales) {
+      filas.push([m.nombre, m.unidad, m.entradas, m.salidas, m.neto, m.stockActual, m.stockMinimo])
+    }
+    filas.push(['TOTALES', '', repMateriales.totalEntradas, repMateriales.totalSalidas, repMateriales.totalEntradas - repMateriales.totalSalidas, '', ''])
+    descargarCSV(`reporte_materiales_${desde}_a_${hasta}.csv`, filas)
+  }
+
+  const enviarMaterialesWhatsApp = async () => {
+    if (!repMateriales) return
+    const telefono = await preguntarTexto(
+      'Ingresa el número de WhatsApp de destino (con código de país, sin espacios ni +).',
+      { titulo: 'Enviar por WhatsApp', placeholder: 'Ej: 573001234567', textoOk: 'Enviar' }
+    )
+    if (!telefono) return
+
+    const lineas = repMateriales.materiales
+      .filter((m) => m.entradas > 0 || m.salidas > 0 || m.stockActual <= m.stockMinimo)
+      .map((m) => `• ${m.nombre}: entradas ${m.entradas}, salidas ${m.salidas}, stock ${m.stockActual} ${m.unidad}${m.stockActual <= m.stockMinimo ? ' ⚠️ bajo' : ''}`)
+      .join('\n')
+
+    const mensaje =
+      `*REPORTE DE MATERIALES*\n` +
+      `Periodo: ${formatFecha(desde)} — ${formatFecha(hasta)}\n\n` +
+      `Entradas totales: ${repMateriales.totalEntradas}\n` +
+      `Salidas totales: ${repMateriales.totalSalidas}\n` +
+      `Materiales con stock bajo: ${repMateriales.stockBajoCount}\n\n` +
+      (lineas || 'Sin movimientos en el periodo.')
+
+    window.open(`https://wa.me/${telefono}?text=${encodeURIComponent(mensaje)}`, '_blank')
   }
 
   const rangoRapido = (dias) => {
@@ -268,6 +306,132 @@ export default function Reportes() {
           )
         })}
       </div>
+
+      {/* ===== Materiales: entradas, salidas y stock disponible ===== */}
+      {repMateriales && (
+        <div className="card">
+          <div className="card-head">
+            <h3>🧱 Materiales — entradas, salidas y stock</h3>
+            {repMateriales.materiales.length > 0 && puedeExportar && (
+              <div className="actions">
+                <button
+                  className="btn-secondary"
+                  onClick={() => generarPdfReporteMateriales({ empresa, desde, hasta, ...repMateriales })}
+                >
+                  📄 PDF
+                </button>
+                <button className="btn-secondary" onClick={exportarMaterialesExcel}>
+                  📊 Excel
+                </button>
+                <button className="btn-secondary" onClick={enviarMaterialesWhatsApp}>
+                  📱 WhatsApp
+                </button>
+              </div>
+            )}
+          </div>
+          <p className="muted small">
+            Periodo: {formatFecha(desde)} — {formatFecha(hasta)}. El stock es el disponible actual (no del periodo).
+          </p>
+
+          <div className="cards-grid">
+            <div className="stat-card">
+              <span className="stat-label">Entradas</span>
+              <span className="stat-value">{repMateriales.totalEntradas}</span>
+            </div>
+            <div className="stat-card">
+              <span className="stat-label">Salidas</span>
+              <span className="stat-value danger-text">{repMateriales.totalSalidas}</span>
+            </div>
+            <div className="stat-card highlight">
+              <span className="stat-label">Stock bajo</span>
+              <span className="stat-value">{repMateriales.stockBajoCount}</span>
+            </div>
+          </div>
+
+          {repMateriales.materiales.length === 0 && <p className="muted">No hay materiales registrados.</p>}
+          {repMateriales.materiales.length > 0 && (
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Material</th>
+                    <th>Unidad</th>
+                    <th className="num">Entradas</th>
+                    <th className="num">Salidas</th>
+                    <th className="num">Neto</th>
+                    <th className="num">Stock actual</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {repMateriales.materiales.map((m) => {
+                    const abierto = materialAbierto === m.materialId
+                    const stockBajo = m.stockActual <= m.stockMinimo
+                    return (
+                      <Fragment key={m.materialId}>
+                        <tr className={stockBajo ? 'fila-alerta' : ''}>
+                          <td><strong>{m.nombre}</strong></td>
+                          <td>{m.unidad}</td>
+                          <td className="num texto-entrada">+{m.entradas}</td>
+                          <td className="num texto-salida">-{m.salidas}</td>
+                          <td className="num">{m.neto}</td>
+                          <td className="num">
+                            {m.stockActual}
+                            {stockBajo && <span className="chip warn" style={{ marginLeft: 8 }}>⚠️ Bajo</span>}
+                          </td>
+                          <td className="num">
+                            <button
+                              className="btn-secondary btn-sm"
+                              onClick={() => setMaterialAbierto(abierto ? null : m.materialId)}
+                              disabled={m.movimientos.length === 0}
+                            >
+                              🔎 {abierto ? 'Ocultar' : 'Detalle'}
+                            </button>
+                          </td>
+                        </tr>
+                        {abierto && (
+                          <tr>
+                            <td colSpan={7}>
+                              <div className="table-wrap">
+                                <table className="table compact">
+                                  <thead>
+                                    <tr>
+                                      <th>Fecha</th>
+                                      <th>Tipo</th>
+                                      <th className="num">Cantidad</th>
+                                      <th className="num">Costo unitario</th>
+                                      <th>Descripción</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {m.movimientos.map((mv) => {
+                                      const claseTipo = mv.tipo === 'salida' ? 'texto-salida' : mv.tipo === 'entrada' ? 'texto-entrada' : ''
+                                      const icono = mv.tipo === 'salida' ? '🔻' : mv.tipo === 'entrada' ? '🔺' : ''
+                                      return (
+                                        <tr key={mv.id}>
+                                          <td>{formatFecha(mv.fecha)}</td>
+                                          <td className={claseTipo}>{icono} {mv.tipo}</td>
+                                          <td className={`num ${claseTipo}`}>{mv.tipo === 'salida' ? '-' : '+'}{mv.cantidad}</td>
+                                          <td className="num">{formatCOP(mv.costoUnitario)}</td>
+                                          <td>{mv.descripcion}</td>
+                                        </tr>
+                                      )
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {reporte && (
         <>

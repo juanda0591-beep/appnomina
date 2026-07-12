@@ -136,6 +136,14 @@ export function DataProvider({ children }) {
     await recargar()
   }
 
+  // ---------- HERRAMIENTAS ENTREGADAS ----------
+  const getHerramientasEmpleado = (empleadoId) => http(`/empleados/${empleadoId}/herramientas`)
+  const addHerramienta = (empleadoId, herramienta) =>
+    http(`/empleados/${empleadoId}/herramientas`, { method: 'POST', body: JSON.stringify(herramienta) })
+  const updateHerramienta = (id, herramienta) =>
+    http(`/herramientas/${id}`, { method: 'PUT', body: JSON.stringify(herramienta) })
+  const deleteHerramienta = (id) => http(`/herramientas/${id}`, { method: 'DELETE' })
+
   // ---------- PRESTAMOS ----------
   const addPrestamo = async (prestamo) => {
     await http('/prestamos', { method: 'POST', body: JSON.stringify(prestamo) })
@@ -181,6 +189,8 @@ export function DataProvider({ children }) {
   // ---------- REPORTES ----------
   const getReporte = (desde, hasta) =>
     http(`/reportes?desde=${desde}&hasta=${hasta}`)
+  const getReporteMateriales = (desde, hasta) =>
+    http(`/reportes/materiales?desde=${desde}&hasta=${hasta}`)
 
   // ---------- DASHBOARD ----------
   const getDashboard = () => http('/dashboard')
@@ -329,6 +339,10 @@ export function DataProvider({ children }) {
     addEmpleado,
     updateEmpleado,
     deleteEmpleado,
+    getHerramientasEmpleado,
+    addHerramienta,
+    updateHerramienta,
+    deleteHerramienta,
     addPrestamo,
     deletePrestamo,
     addNomina,
@@ -338,6 +352,7 @@ export function DataProvider({ children }) {
     getBalance,
     getMovimientos,
     getReporte,
+    getReporteMateriales,
     getDashboard,
     getUsuarios,
     addUsuario,

@@ -276,6 +276,8 @@ button:disabled { opacity: .6; cursor: not-allowed; }
 .foto-desc { font-weight: 600; }
 .foto-card .btn-icon { align-self: flex-start; padding: 2px 6px; }
 
+.chip.danger { background: #fee2e2; color: var(--danger); }
+
 /* ---------- Modal centrado ---------- */
 .modal {
   position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
@@ -284,6 +286,7 @@ button:disabled { opacity: .6; cursor: not-allowed; }
   box-shadow: 0 20px 60px rgba(0,0,0,.3);
 }
 .modal h3 { margin-top: 0; }
+.modal.modal-lg { width: min(920px, 94vw); }
 
 /* Control de dinero: pestañas */
 .tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
