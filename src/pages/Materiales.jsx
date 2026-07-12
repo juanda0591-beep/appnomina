@@ -3,6 +3,7 @@ import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha } from '../utils/format.js'
 import { notify, confirmar } from '../utils/notify.js'
+import Vacio from '../components/Vacio.jsx'
 
 // Catálogo fijo de unidades de medida para materiales
 export const UNIDADES = [
@@ -177,7 +178,11 @@ export default function Materiales() {
           style={{ marginBottom: 14 }}
         />
 
-        {materiales.length === 0 && <p className="muted">Aún no hay materiales.</p>}
+        {materiales.length === 0 && (
+          <Vacio icono="🧱" titulo="Aún no hay materiales">
+            Registra el primero para llevar el inventario.
+          </Vacio>
+        )}
         {materiales.length > 0 && materialesFiltrados.length === 0 && (
           <p className="muted">Ningún material coincide con la búsqueda.</p>
         )}

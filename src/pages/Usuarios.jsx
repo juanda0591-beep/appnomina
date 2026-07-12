@@ -3,6 +3,7 @@ import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { PAGINAS, ACCION_LABEL, TODAS_ACCIONES, permisosVacios, permisosCompletos } from '../permisos.js'
 import { confirmar } from '../utils/notify.js'
+import Vacio from '../components/Vacio.jsx'
 
 // Normaliza un objeto de permisos (puede venir null o incompleto) a la forma
 // completa del catálogo, para que la matriz de checkboxes siempre tenga valores.
@@ -161,7 +162,7 @@ export default function Usuarios() {
         {cargando ? (
           <p className="muted">Cargando…</p>
         ) : usuarios.length === 0 ? (
-          <p className="muted">No hay usuarios.</p>
+          <Vacio icono="👥" titulo="No hay usuarios" />
         ) : (
           usuarios.map((u) => (
             <div className="list-item" key={u.id}>

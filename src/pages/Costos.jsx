@@ -5,6 +5,7 @@ import { formatCOP } from '../utils/format.js'
 import { calcularCosteo, costeoVacio } from '../utils/costeo.js'
 import { generarPdfCosteo, descargarCSV } from '../utils/pdf.js'
 import { confirmar } from '../utils/notify.js'
+import Vacio from '../components/Vacio.jsx'
 
 // Colores para las porciones del gráfico de torta (uno por categoría de costo)
 const COLORES = ['#2563eb', '#16a34a', '#f59e0b', '#dc2626']
@@ -214,7 +215,9 @@ export default function Costos() {
         {cargando ? (
           <p className="muted">Cargando…</p>
         ) : lista.length === 0 ? (
-          <p className="muted">Aún no hay costeos guardados.</p>
+          <Vacio icono="💲" titulo="Aún no hay costeos guardados">
+            Calcula y guarda un costeo para verlo aquí.
+          </Vacio>
         ) : (
           lista.map((c) => (
             <div className="list-item" key={c.id}>

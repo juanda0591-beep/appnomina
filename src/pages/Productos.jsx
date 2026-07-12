@@ -3,6 +3,7 @@ import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP } from '../utils/format.js'
 import { notify, confirmar } from '../utils/notify.js'
+import Vacio from '../components/Vacio.jsx'
 
 const NUEVO_PROCESO = '__nuevo__'
 const emptyProceso = () => ({ nombre: '', pago: '', materiales: [] })
@@ -297,7 +298,11 @@ export default function Productos() {
 
       <div className="card">
         <h3>Productos registrados ({productos.length})</h3>
-        {productos.length === 0 && <p className="muted">Aún no hay productos.</p>}
+        {productos.length === 0 && (
+          <Vacio icono="📦" titulo="Aún no hay productos">
+            Crea el primero para empezar a fabricar y cotizar.
+          </Vacio>
+        )}
 
         {productos.length > 0 && (
           <div className="table-wrap">

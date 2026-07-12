@@ -3,6 +3,7 @@ import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha } from '../utils/format.js'
 import { notify, confirmar } from '../utils/notify.js'
+import Vacio from '../components/Vacio.jsx'
 
 const emptyEmp = { nombre: '', cedula: '', telefono: '', cargo: '' }
 
@@ -182,7 +183,11 @@ export default function Empleados() {
 
       <div className="card">
         <h3>Empleados registrados ({empleados.length})</h3>
-        {empleados.length === 0 && <p className="muted">Aún no hay empleados.</p>}
+        {empleados.length === 0 && (
+          <Vacio icono="👷" titulo="Aún no hay empleados">
+            Crea el primero con el botón "+ Nuevo empleado".
+          </Vacio>
+        )}
         {empleados.map((emp) => {
           const prestamos = prestamosDeEmpleado(emp.id)
           const saldoAdelanto = prestamos.reduce((s, p) => s + p.saldo, 0)

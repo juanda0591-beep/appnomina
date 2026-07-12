@@ -3,6 +3,7 @@ import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha } from '../utils/format.js'
 import { notify, confirmar } from '../utils/notify.js'
+import Vacio from '../components/Vacio.jsx'
 
 export default function Prestamos() {
   const { empleados, prestamos, addPrestamo, deletePrestamo, getEmpleado } = useData()
@@ -64,7 +65,11 @@ export default function Prestamos() {
           <span>Total prestado: <strong>{formatCOP(totalPrestado)}</strong></span>
           <span>Saldo pendiente: <strong className="danger-text">{formatCOP(totalSaldo)}</strong></span>
         </div>
-        {prestamos.length === 0 && <p className="muted">Aún no hay préstamos.</p>}
+        {prestamos.length === 0 && (
+          <Vacio icono="💵" titulo="Aún no hay préstamos">
+            Registra un adelanto o préstamo con "+ Nuevo préstamo".
+          </Vacio>
+        )}
         {prestamos.length > 0 && (
           <div className="table-wrap">
           <table className="table">

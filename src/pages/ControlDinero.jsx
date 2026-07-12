@@ -3,6 +3,7 @@ import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha } from '../utils/format.js'
 import { notify, confirmar } from '../utils/notify.js'
+import Vacio from '../components/Vacio.jsx'
 
 const CATEGORIAS_INGRESO = ['Venta', 'Abono cliente', 'Préstamo recibido', 'Otro ingreso']
 const CATEGORIAS_GASTO = ['Materiales', 'Servicios', 'Arriendo', 'Transporte', 'Nómina', 'Adelanto', 'Otro gasto']
@@ -148,7 +149,11 @@ export default function ControlDinero() {
           {tab === 'balance' ? 'Historial de movimientos' : tab === 'ingreso' ? 'Ingresos registrados' : 'Gastos registrados'}{' '}
           ({listaActual.length})
         </h3>
-        {listaActual.length === 0 && <p className="muted">Aún no hay movimientos.</p>}
+        {listaActual.length === 0 && (
+          <Vacio icono="💰" titulo="Aún no hay movimientos">
+            Registra un ingreso o gasto para empezar.
+          </Vacio>
+        )}
         {listaActual.length > 0 && (
           <div className="table-wrap">
             <table className="table">

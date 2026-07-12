@@ -51,13 +51,23 @@ const links = [
 ]
 
 export default function App() {
-  const [menuOpen, setMenuOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false) // cajón deslizante en móvil
+  // Sidebar colapsado en escritorio (se recuerda entre sesiones)
+  const [colapsado, setColapsado] = useState(() => localStorage.getItem('sidebarColapsado') === '1')
   const { cargando, error } = useData()
   const { usuario, rol, puede, logout } = useAuth()
   const location = useLocation()
 
   // cerrar el menú al cambiar de página (móvil)
   const closeMenu = () => setMenuOpen(false)
+
+  const toggleColapsado = () => {
+    setColapsado((c) => {
+      const next = !c
+      localStorage.setItem('sidebarColapsado', next ? '1' : '0')
+      return next
+    })
+  }
 
   const esAdmin = rol === 'admin'
 
@@ -80,23 +90,34 @@ export default function App() {
   const primeraRuta = (l) => (l.group ? l.items[0]?.to : l.to)
   const rutaInicio = primeraRuta(visibles[0]) || '/cuenta'
 
-  // Grupos abiertos/cerrados en el menú. Un grupo nace abierto si la ruta
-  // actual pertenece a él, para que no se oculte lo que se está viendo.
+  // Grupos abiertos/cerrados en el menú. Se recuerda entre sesiones (localStorage);
+  // si no hay preferencia guardada, un grupo nace abierto si la ruta actual pertenece
+  // a él, para que no se oculte lo que se está viendo.
   const [gruposAbiertos, setGruposAbiertos] = useState(() => {
+    let guardado = null
+    try { guardado = JSON.parse(localStorage.getItem('gruposAbiertos') || 'null') } catch { /* ignorar json inválido */ }
     const abiertos = {}
     for (const l of links) {
-      if (l.group) abiertos[l.group] = l.items.some((it) => it.to === location.pathname)
+      if (!l.group) continue
+      abiertos[l.group] = guardado && l.group in guardado
+        ? guardado[l.group]
+        : l.items.some((it) => it.to === location.pathname)
     }
     return abiertos
   })
-  const toggleGrupo = (group) => setGruposAbiertos((g) => ({ ...g, [group]: !g[group] }))
+  const toggleGrupo = (group) =>
+    setGruposAbiertos((g) => {
+      const next = { ...g, [group]: !g[group] }
+      localStorage.setItem('gruposAbiertos', JSON.stringify(next))
+      return next
+    })
 
   // Envuelve una página: si el usuario no puede verla, redirige al inicio.
   const protegida = (pagina, elemento) =>
     puede(pagina, 'ver') ? elemento : <Navigate to={rutaInicio} replace />
 
   return (
-    <div className="app">
+    <div className={`app ${colapsado ? 'sidebar-colapsado' : ''}`}>
       {/* Barra superior solo visible en móvil */}
       <header className="topbar">
         <button className="hamburger" onClick={() => setMenuOpen((o) => !o)} aria-label="Menú">
@@ -107,8 +128,25 @@ export default function App() {
 
       {menuOpen && <div className="overlay" onClick={closeMenu} />}
 
+      {/* Botón flotante para reabrir el menú en escritorio cuando está colapsado */}
+      {colapsado && (
+        <button className="sidebar-reabrir" onClick={toggleColapsado} aria-label="Mostrar menú" title="Mostrar menú">
+          ☰
+        </button>
+      )}
+
       <aside className={`sidebar ${menuOpen ? 'open' : ''}`}>
-        <h1 className="logo">💰 Nómina</h1>
+        <div className="sidebar-top">
+          <h1 className="logo">💰 Nómina</h1>
+          <button
+            className="sidebar-toggle"
+            onClick={toggleColapsado}
+            aria-label="Ocultar menú"
+            title="Ocultar menú"
+          >
+            «
+          </button>
+        </div>
         <nav>
           {visibles.map((l) =>
             l.group ? (

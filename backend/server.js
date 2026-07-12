@@ -131,8 +131,12 @@ app.delete('/api/usuarios/:id', adminRequired, (req, res) => {
 app.get('/api/dashboard', permisoRequired('inicio', 'ver'), (req, res) => {
   // Ingresos/gastos SOLO del día de hoy. El saldo en caja es global.
   const hoy = new Date().toISOString().slice(0, 10)
+  const ayer = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
   const ingresos = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'ingreso' AND substr(fecha, 1, 10) = ?").get(hoy).t
   const gastos = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'gasto' AND substr(fecha, 1, 10) = ?").get(hoy).t
+  // Mismos datos de ayer, para calcular la tendencia (subió/bajó) en el frontend
+  const ingresosAyer = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'ingreso' AND substr(fecha, 1, 10) = ?").get(ayer).t
+  const gastosAyer = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'gasto' AND substr(fecha, 1, 10) = ?").get(ayer).t
 
   // Saldo global en caja (todos los movimientos, no solo hoy)
   const ingresosGlobal = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'ingreso'").get().t
@@ -161,6 +165,8 @@ app.get('/api/dashboard', permisoRequired('inicio', 'ver'), (req, res) => {
   res.json({
     ingresos,
     gastos,
+    ingresosAyer,
+    gastosAyer,
     balance: ingresosGlobal - gastosGlobal, // saldo en caja siempre global
     totalEmpleados,
     totalProductos,
@@ -1006,6 +1012,18 @@ app.post('/api/tareas-produccion', permisoRequired('gestion-produccion', 'crear'
   const proceso = procesoId ? db.prepare('SELECT * FROM procesos WHERE id = ?').get(procesoId) : null
   const orden = ordenProduccionId ? db.prepare('SELECT * FROM ordenes_produccion WHERE id = ?').get(ordenProduccionId) : null
   const ahora = new Date().toISOString()
+
+  // Un mismo proceso no se puede repetir dentro de la misma orden. Se compara por
+  // nombre (no por proceso_id) porque al editar un producto los procesos se borran
+  // y reinsertan con ids nuevos, así que el id no es estable entre ediciones.
+  if (orden && proceso) {
+    const yaExiste = db
+      .prepare('SELECT 1 FROM tareas_produccion WHERE orden_produccion_id = ? AND LOWER(proceso_nombre) = LOWER(?) LIMIT 1')
+      .get(orden.id, proceso.nombre)
+    if (yaExiste) {
+      return res.status(400).json({ error: `El proceso "${proceso.nombre}" ya está en esta orden` })
+    }
+  }
 
   const avisos = []
   const crear = db.transaction(() => {

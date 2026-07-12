@@ -1,8 +1,9 @@
 import { Fragment, useMemo, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
-import { formatCOP } from '../utils/format.js'
+import { formatCOP, formatFecha } from '../utils/format.js'
 import { notify, confirmar } from '../utils/notify.js'
+import Vacio from '../components/Vacio.jsx'
 
 // Etiquetas de estado, compartidas entre órdenes y tareas (mismos valores)
 const ESTADO_LABEL = {
@@ -87,6 +88,15 @@ export default function GestionProduccion() {
   const ordenSel = ordenesProduccion.find((o) => o.id === tareaFormOrdenId)
   const productoDeOrdenSel = productos.find((p) => String(p.id) === String(ordenSel?.productoId))
   const ordenDetalle = ordenesProduccion.find((o) => o.id === ordenDetalleId)
+
+  // Procesos que la orden seleccionada ya tiene (por nombre, en minúsculas), para
+  // no ofrecerlos de nuevo en el select: un proceso no se repite dentro de una orden.
+  const procesosUsados = new Set(
+    (ordenSel?.tareas || []).map((t) => (t.procesoNombre || '').toLowerCase())
+  )
+  const procesosDisponibles = (productoDeOrdenSel?.procesos || []).filter(
+    (p) => !procesosUsados.has((p.nombre || '').toLowerCase())
+  )
 
   const ordenesFiltradas = useMemo(() => {
     return ordenesProduccion.filter((o) => {
@@ -464,7 +474,11 @@ export default function GestionProduccion() {
       {/* Tabla de órdenes */}
       <div className="card">
         <h3>Órdenes de producción ({ordenesFiltradas.length})</h3>
-        {ordenesFiltradas.length === 0 && <p className="muted">No hay órdenes para mostrar.</p>}
+        {ordenesFiltradas.length === 0 && (
+          <Vacio icono="🏭" titulo="No hay órdenes para mostrar">
+            Crea una orden de producción o cambia los filtros.
+          </Vacio>
+        )}
 
         {ordenesFiltradas.length > 0 && (
           <div className="table-wrap">
@@ -472,6 +486,7 @@ export default function GestionProduccion() {
               <thead>
                 <tr>
                   <th>Orden</th>
+                  <th>Inicio</th>
                   <th>Producto</th>
                   <th className="num">Cantidad</th>
                   <th>Proceso actual</th>
@@ -485,6 +500,7 @@ export default function GestionProduccion() {
                   return (
                     <tr key={orden.id}>
                       <td>#{orden.id}</td>
+                      <td className="muted small">{formatFecha(orden.creado)}</td>
                       <td><strong>{orden.productoNombre || '— eliminado'}</strong></td>
                       <td className="num">{orden.cantidad}</td>
                       <td>
@@ -555,7 +571,7 @@ export default function GestionProduccion() {
                 <label>Proceso</label>
                 <select value={taProcesoId} onChange={(e) => setTaProcesoId(e.target.value)}>
                   <option value="">— Proceso —</option>
-                  {productoDeOrdenSel?.procesos.map((p) => (
+                  {procesosDisponibles.map((p) => (
                     <option key={p.id} value={p.id}>{p.nombre}</option>
                   ))}
                 </select>
@@ -572,6 +588,11 @@ export default function GestionProduccion() {
             <p className="muted small">
               La cantidad viene precargada con la de la orden ({ordenSel.cantidad}); ajústala si hubo merma en procesos anteriores.
             </p>
+            {productoDeOrdenSel && procesosDisponibles.length === 0 && (
+              <p className="muted small">
+                ✓ Esta orden ya tiene todos los procesos del producto. No quedan procesos por agregar.
+              </p>
+            )}
             <div style={{ marginTop: 10 }}>
               <label>Comentario (opcional)</label>
               <input
@@ -603,7 +624,7 @@ export default function GestionProduccion() {
           <div className="modal" style={{ width: 'min(820px, 92vw)' }}>
             <h3>Orden #{ordenDetalle.id} — {ordenDetalle.productoNombre}</h3>
             <p className="muted small">
-              Cantidad: {ordenDetalle.cantidad} · Estado: {ESTADO_LABEL[ordenDetalle.estado] || ordenDetalle.estado}
+              Inicio: {formatFecha(ordenDetalle.creado)} · Cantidad: {ordenDetalle.cantidad} · Estado: {ESTADO_LABEL[ordenDetalle.estado] || ordenDetalle.estado}
               {ordenDetalle.comentario && <> · 💬 {ordenDetalle.comentario}</>}
             </p>
 

@@ -1,8 +1,58 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha } from '../utils/format.js'
 import { GraficoBarras, GraficoDona, COLOR } from '../components/Grafico.jsx'
+import Vacio from '../components/Vacio.jsx'
+
+// Anima un número desde 0 hasta `valor` al montar. `formato` da el texto final.
+function useContador(valor, duracion = 900) {
+  const [n, setN] = useState(0)
+  const rafRef = useRef(null)
+  useEffect(() => {
+    const objetivo = Number(valor) || 0
+    const inicio = performance.now()
+    const tick = (ahora) => {
+      const t = Math.min(1, (ahora - inicio) / duracion)
+      // easing suave (easeOutCubic) para que frene al final
+      const eased = 1 - Math.pow(1 - t, 3)
+      setN(objetivo * eased)
+      if (t < 1) rafRef.current = requestAnimationFrame(tick)
+      else setN(objetivo)
+    }
+    rafRef.current = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(rafRef.current)
+  }, [valor, duracion])
+  return n
+}
+
+// Número animado. Si `moneda`, formatea como COP; si no, entero.
+function NumeroAnimado({ valor, moneda = false }) {
+  const n = useContador(valor)
+  return <>{moneda ? formatCOP(Math.round(n)) : Math.round(n).toLocaleString('es-CO')}</>
+}
+
+// Anillo de progreso con CSS puro (conic-gradient). El color cambia según el nivel.
+function Anillo({ porcentaje }) {
+  const pct = Math.max(0, Math.min(100, Math.round(porcentaje)))
+  // verde si se gastó poco, ámbar a la mitad, rojo si se acerca al 100% del ingreso
+  const nivel = pct >= 90 ? 'alto' : pct >= 60 ? 'medio' : 'bajo'
+  return (
+    <div className={`anillo nivel-${nivel}`} style={{ '--pct': `${pct}%` }}>
+      <span className="anillo-num">{pct}%</span>
+    </div>
+  )
+}
+
+// Calcula la variación porcentual de hoy vs ayer para el badge de tendencia.
+function calcTendencia(hoy, ayer) {
+  if (ayer > 0) {
+    const pct = ((hoy - ayer) / ayer) * 100
+    return { dir: pct >= 0 ? 'up' : 'down', texto: `${pct >= 0 ? '+' : ''}${Math.round(pct)}% vs ayer` }
+  }
+  if (hoy > 0) return { dir: 'up', texto: 'Nuevo hoy' }
+  return { dir: 'flat', texto: 'Sin cambios' }
+}
 
 export default function Dashboard() {
   const { getDashboard } = useData()
@@ -34,46 +84,74 @@ export default function Dashboard() {
     )
   }
 
+  const hoyLargo = new Date().toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })
+  // % de los ingresos de hoy que se llevaron los gastos (para el anillo del saldo)
+  const pctGasto = data.ingresos > 0 ? (data.gastos / data.ingresos) * 100 : 0
+  const tendIngresos = calcTendencia(data.ingresos, data.ingresosAyer)
+  const tendGastos = calcTendencia(data.gastos, data.gastosAyer)
+
   return (
     <div>
-      <h2>👋 Hola, {usuario}</h2>
-      <p className="muted">Resumen general del sistema</p>
+      <div className="dash-hero">
+        <div>
+          <h2>👋 Hola, {usuario}</h2>
+          <p className="muted">Resumen general del sistema</p>
+        </div>
+        <span className="dash-fecha">📅 {hoyLargo}</span>
+      </div>
 
       {/* Tarjetas principales de dinero */}
       <div className="dash-grid">
         <div className="dash-card ingreso">
+          <div className="dash-card-head">
+            <span className="dash-icon">💵</span>
+            <span className={`dash-trend ${tendIngresos.dir}`}>{tendIngresos.texto}</span>
+          </div>
           <span className="dash-label">Ingresos de hoy</span>
-          <strong className="dash-value">{formatCOP(data.ingresos)}</strong>
+          <strong className="dash-value"><NumeroAnimado valor={data.ingresos} moneda /></strong>
         </div>
         <div className="dash-card gasto">
+          <div className="dash-card-head">
+            <span className="dash-icon">📉</span>
+            <span className={`dash-trend ${tendGastos.dir}`}>{tendGastos.texto}</span>
+          </div>
           <span className="dash-label">Gastos de hoy</span>
-          <strong className="dash-value">{formatCOP(data.gastos)}</strong>
+          <strong className="dash-value"><NumeroAnimado valor={data.gastos} moneda /></strong>
         </div>
         <div className={`dash-card ${data.balance >= 0 ? 'saldo' : 'gasto'}`}>
-          <span className="dash-label">Saldo en caja</span>
-          <strong className="dash-value">{formatCOP(data.balance)}</strong>
+          <div className="dash-saldo-body">
+            <div>
+              <span className="dash-label">Saldo en caja</span>
+              <strong className="dash-value"><NumeroAnimado valor={data.balance} moneda /></strong>
+            </div>
+            <Anillo porcentaje={pctGasto} />
+          </div>
         </div>
       </div>
 
       {/* Tarjetas secundarias */}
       <div className="dash-grid">
         <div className="dash-card mini">
+          <span className="dash-icon">🧾</span>
           <span className="dash-label">Nómina del mes</span>
-          <strong className="dash-value">{formatCOP(data.nominaMesTotal)}</strong>
+          <strong className="dash-value"><NumeroAnimado valor={data.nominaMesTotal} moneda /></strong>
           <span className="dash-sub">{data.nominaMesCantidad} pago(s)</span>
         </div>
         <div className="dash-card mini">
+          <span className="dash-icon">💵</span>
           <span className="dash-label">Préstamos por cobrar</span>
-          <strong className="dash-value">{formatCOP(data.saldoPrestamos)}</strong>
+          <strong className="dash-value"><NumeroAnimado valor={data.saldoPrestamos} moneda /></strong>
           <span className="dash-sub">{data.prestamosActivos} activo(s)</span>
         </div>
         <div className="dash-card mini">
+          <span className="dash-icon">👷</span>
           <span className="dash-label">Empleados</span>
-          <strong className="dash-value">{data.totalEmpleados}</strong>
+          <strong className="dash-value"><NumeroAnimado valor={data.totalEmpleados} /></strong>
         </div>
         <div className="dash-card mini">
+          <span className="dash-icon">📦</span>
           <span className="dash-label">Productos</span>
-          <strong className="dash-value">{data.totalProductos}</strong>
+          <strong className="dash-value"><NumeroAnimado valor={data.totalProductos} /></strong>
         </div>
       </div>
 
@@ -107,7 +185,9 @@ export default function Dashboard() {
       <div className="card">
         <h3>🧾 Últimos pagos de nómina</h3>
         {data.ultimasNominas.length === 0 ? (
-          <p className="muted">Aún no hay pagos registrados.</p>
+          <Vacio icono="🧾" titulo="Aún no hay pagos registrados">
+            Los pagos de nómina aparecerán aquí.
+          </Vacio>
         ) : (
           <div className="table-wrap">
             <table className="table">

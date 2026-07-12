@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
-import { formatCOP } from '../utils/format.js'
+import { formatCOP, formatFecha } from '../utils/format.js'
 import { notify, confirmar } from '../utils/notify.js'
+import Vacio from '../components/Vacio.jsx'
 
 // Etiquetas y orden de los estados de una tarea
 const ESTADO_LABEL = {
@@ -63,6 +64,7 @@ export default function GestionNomina() {
   const [borradores, setBorradores] = useState({}) // { tareaId: { progreso, comentario } }
   const [historialAbierto, setHistorialAbierto] = useState(null) // tareaId
   const [historial, setHistorial] = useState([])
+  const [tareaExpandidaId, setTareaExpandidaId] = useState(null) // fila abierta en la tabla
 
   // --- Registro fotográfico ---
   const [fotosAbierto, setFotosAbierto] = useState(null) // tareaId
@@ -260,6 +262,143 @@ export default function GestionNomina() {
   // URL autenticada de la imagen: el endpoint exige token, así que se pasa por query
   const urlFoto = (fotoId) => `/api/tareas/fotos/${fotoId}?token=${sessionStorage.getItem('nomina_token')}`
 
+  const toggleTarea = (id) => setTareaExpandidaId((actual) => (actual === id ? null : id))
+
+  // Detalle expandible de una tarea: edición de progreso/comentario, historial y fotos.
+  // Se muestra en la fila que se despliega debajo de cada tarea en la tabla.
+  const renderDetalleTarea = (t) => {
+    const bloqueada = t.estado === 'pagada' || !puedeEditar
+    const progreso = Number(valorProgreso(t))
+    return (
+      <div>
+        <div className="muted small" style={{ marginBottom: 8 }}>
+          Cantidad: {t.cantidad} · Pago x und: {formatCOP(t.pago)} · Subtotal: <strong>{formatCOP(t.pago * t.cantidad)}</strong>
+        </div>
+
+        <BarraProgreso valor={progreso} />
+
+        {!bloqueada && (
+          <div className="row" style={{ marginTop: 10, alignItems: 'center' }}>
+            <div style={{ flex: 2 }}>
+              <label className="small">Progreso: {progreso}%</label>
+              <input
+                type="range" min="0" max="100" step="5"
+                value={progreso}
+                onChange={(e) => setBorrador(t.id, 'progreso', e.target.value)}
+              />
+            </div>
+            <div style={{ flex: 3 }}>
+              <label className="small">Comentario</label>
+              <textarea
+                rows={2}
+                value={valorComentario(t)}
+                onChange={(e) => setBorrador(t.id, 'comentario', e.target.value)}
+                style={{ width: '100%' }}
+              />
+            </div>
+          </div>
+        )}
+
+        {bloqueada && t.comentario && (
+          <p className="muted small" style={{ marginTop: 8 }}>💬 {t.comentario}</p>
+        )}
+
+        <div className="actions" style={{ marginTop: 10 }}>
+          {!bloqueada && (
+            <>
+              <button className="btn-secondary btn-sm" onClick={() => guardarCambios(t)} disabled={!hayBorrador(t)}>
+                💾 Guardar
+              </button>
+              {t.estado !== 'terminada' && (
+                <button className="btn-primary btn-sm" onClick={() => handleTerminar(t)}>✓ Marcar terminada</button>
+              )}
+            </>
+          )}
+          <button className="btn-secondary btn-sm" onClick={() => verHistorial(t)}>
+            🕑 Historial
+          </button>
+          <button className="btn-secondary btn-sm" onClick={() => verFotos(t)}>
+            📷 Fotos
+          </button>
+          {puedeEliminar && t.estado !== 'pagada' && (
+            <button className="btn-danger btn-sm" onClick={() => handleEliminar(t)}>🗑 Eliminar</button>
+          )}
+        </div>
+
+        {historialAbierto === t.id && (
+          <div className="historial-box">
+            {historial.length === 0 && <p className="muted small">Sin cambios registrados.</p>}
+            {historial.map((h) => (
+              <div key={h.id} className="small" style={{ padding: '4px 0', borderBottom: '1px solid var(--border)' }}>
+                <span className="muted">{new Date(h.fecha).toLocaleString('es-CO')}</span>
+                {' · '}<strong>{h.usuario || 'sistema'}</strong>
+                {h.progresoAnterior !== h.progresoNuevo && (
+                  <> · progreso {h.progresoAnterior}% → {h.progresoNuevo}%</>
+                )}
+                {h.comentario && <> · 💬 {h.comentario}</>}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {fotosAbierto === t.id && (
+          <div className="historial-box">
+            <p className="muted small" style={{ marginTop: 0 }}>
+              Registro fotográfico: documenta si la tarea quedó incompleta o faltó algún componente.
+            </p>
+
+            {puedeEditar && (
+              <div className="row" style={{ alignItems: 'flex-end', marginBottom: 10 }}>
+                <div style={{ flex: 3 }}>
+                  <label className="small">Nota de la foto (qué falta / componente faltante)</label>
+                  <input
+                    type="text"
+                    value={fotoNota}
+                    onChange={(e) => setFotoNota(e.target.value)}
+                    placeholder="Ej: falta la manija de la puerta derecha"
+                    style={{ width: '100%' }}
+                  />
+                </div>
+                <div>
+                  <label className="btn-secondary foto-upload">
+                    {subiendoFoto ? 'Subiendo…' : '📷 Agregar foto'}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png"
+                      disabled={subiendoFoto}
+                      onChange={(e) => onSubirFoto(e, t.id)}
+                      hidden
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {fotos.length === 0 && <p className="muted small">Sin fotos registradas.</p>}
+            <div className="fotos-grid">
+              {fotos.map((f) => (
+                <div key={f.id} className="foto-card">
+                  <a href={urlFoto(f.id)} target="_blank" rel="noreferrer">
+                    <img src={urlFoto(f.id)} alt={f.descripcion || 'Foto de la tarea'} />
+                  </a>
+                  {f.descripcion && <div className="small foto-desc">{f.descripcion}</div>}
+                  <div className="muted small">
+                    {new Date(f.fecha).toLocaleString('es-CO')} · {f.usuario || 'sistema'}
+                  </div>
+                  {puedeEditar && (
+                    <button className="btn-icon danger small" onClick={() => eliminarFoto(f.id, t.id)}>
+                      🗑 Quitar
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div>
       <h2>📋 Gestión de Nómina</h2>
@@ -310,150 +449,53 @@ export default function GestionNomina() {
       {/* Lista de tareas */}
       <div className="card">
         <h3>Tareas ({tareasFiltradas.length})</h3>
-        {tareasFiltradas.length === 0 && <p className="muted">No hay tareas para mostrar.</p>}
+        {tareasFiltradas.length === 0 && (
+          <Vacio icono="📋" titulo="No hay tareas para mostrar">
+            Asigna una tarea o cambia los filtros.
+          </Vacio>
+        )}
 
-        {tareasFiltradas.map((t) => {
-          const bloqueada = t.estado === 'pagada' || !puedeEditar
-          const progreso = Number(valorProgreso(t))
-          return (
-            <div className="tarea-item" key={t.id}>
-              <div className="tarea-head">
-                <div>
-                  <strong>{nombreEmpleado(t.empleadoId)}</strong>
-                  <span className="muted"> · {t.productoNombre} — {t.procesoNombre}</span>
-                </div>
-                <span className={`chip ${t.estado === 'terminada' ? 'ok' : t.estado === 'pagada' ? '' : 'warn'}`}>
-                  {ESTADO_LABEL[t.estado] || t.estado}
-                </span>
-              </div>
-
-              <div className="muted small" style={{ marginBottom: 8 }}>
-                Cantidad: {t.cantidad} · Pago x und: {formatCOP(t.pago)} · Subtotal: <strong>{formatCOP(t.pago * t.cantidad)}</strong>
-              </div>
-
-              <BarraProgreso valor={progreso} />
-
-              {!bloqueada && (
-                <div className="row" style={{ marginTop: 10, alignItems: 'center' }}>
-                  <div style={{ flex: 2 }}>
-                    <label className="small">Progreso: {progreso}%</label>
-                    <input
-                      type="range" min="0" max="100" step="5"
-                      value={progreso}
-                      onChange={(e) => setBorrador(t.id, 'progreso', e.target.value)}
-                    />
-                  </div>
-                  <div style={{ flex: 3 }}>
-                    <label className="small">Comentario</label>
-                    <textarea
-                      rows={2}
-                      value={valorComentario(t)}
-                      onChange={(e) => setBorrador(t.id, 'comentario', e.target.value)}
-                      style={{ width: '100%' }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {bloqueada && t.comentario && (
-                <p className="muted small" style={{ marginTop: 8 }}>💬 {t.comentario}</p>
-              )}
-
-              <div className="actions" style={{ marginTop: 10 }}>
-                {!bloqueada && (
-                  <>
-                    <button className="btn-secondary" onClick={() => guardarCambios(t)} disabled={!hayBorrador(t)}>
-                      💾 Guardar
-                    </button>
-                    {t.estado !== 'terminada' && (
-                      <button className="btn-primary" onClick={() => handleTerminar(t)}>✓ Marcar terminada</button>
+        {tareasFiltradas.length > 0 && (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Inicio</th>
+                  <th>Empleado</th>
+                  <th>Producto — Proceso</th>
+                  <th className="num">Cantidad</th>
+                  <th style={{ minWidth: 140 }}>Progreso</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tareasFiltradas.map((t) => (
+                  <Fragment key={t.id}>
+                    <tr className="chip-clicable" onClick={() => toggleTarea(t.id)}>
+                      <td className="muted small">
+                        {tareaExpandidaId === t.id ? '▾' : '▸'} {formatFecha(t.creado)}
+                      </td>
+                      <td><strong>{nombreEmpleado(t.empleadoId)}</strong></td>
+                      <td>{t.productoNombre} — {t.procesoNombre}</td>
+                      <td className="num">{t.cantidad}</td>
+                      <td><BarraProgreso valor={t.progreso} /></td>
+                      <td>
+                        <span className={`chip ${t.estado === 'terminada' ? 'ok' : t.estado === 'pagada' ? '' : 'warn'}`}>
+                          {ESTADO_LABEL[t.estado] || t.estado}
+                        </span>
+                      </td>
+                    </tr>
+                    {tareaExpandidaId === t.id && (
+                      <tr>
+                        <td colSpan={6}>{renderDetalleTarea(t)}</td>
+                      </tr>
                     )}
-                  </>
-                )}
-                <button className="btn-icon" onClick={() => verHistorial(t)}>
-                  🕑 Historial
-                </button>
-                <button className="btn-icon" onClick={() => verFotos(t)}>
-                  📷 Fotos
-                </button>
-                {puedeEliminar && t.estado !== 'pagada' && (
-                  <button className="btn-icon danger" onClick={() => handleEliminar(t)}>🗑 Eliminar</button>
-                )}
-              </div>
-
-              {historialAbierto === t.id && (
-                <div className="historial-box">
-                  {historial.length === 0 && <p className="muted small">Sin cambios registrados.</p>}
-                  {historial.map((h) => (
-                    <div key={h.id} className="small" style={{ padding: '4px 0', borderBottom: '1px solid var(--border)' }}>
-                      <span className="muted">{new Date(h.fecha).toLocaleString('es-CO')}</span>
-                      {' · '}<strong>{h.usuario || 'sistema'}</strong>
-                      {h.progresoAnterior !== h.progresoNuevo && (
-                        <> · progreso {h.progresoAnterior}% → {h.progresoNuevo}%</>
-                      )}
-                      {h.comentario && <> · 💬 {h.comentario}</>}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {fotosAbierto === t.id && (
-                <div className="historial-box">
-                  <p className="muted small" style={{ marginTop: 0 }}>
-                    Registro fotográfico: documenta si la tarea quedó incompleta o faltó algún componente.
-                  </p>
-
-                  {puedeEditar && (
-                    <div className="row" style={{ alignItems: 'flex-end', marginBottom: 10 }}>
-                      <div style={{ flex: 3 }}>
-                        <label className="small">Nota de la foto (qué falta / componente faltante)</label>
-                        <input
-                          type="text"
-                          value={fotoNota}
-                          onChange={(e) => setFotoNota(e.target.value)}
-                          placeholder="Ej: falta la manija de la puerta derecha"
-                          style={{ width: '100%' }}
-                        />
-                      </div>
-                      <div>
-                        <label className="btn-secondary foto-upload">
-                          {subiendoFoto ? 'Subiendo…' : '📷 Agregar foto'}
-                          <input
-                            type="file"
-                            accept="image/jpeg,image/png"
-                            disabled={subiendoFoto}
-                            onChange={(e) => onSubirFoto(e, t.id)}
-                            hidden
-                          />
-                        </label>
-                      </div>
-                    </div>
-                  )}
-
-                  {fotos.length === 0 && <p className="muted small">Sin fotos registradas.</p>}
-                  <div className="fotos-grid">
-                    {fotos.map((f) => (
-                      <div key={f.id} className="foto-card">
-                        <a href={urlFoto(f.id)} target="_blank" rel="noreferrer">
-                          <img src={urlFoto(f.id)} alt={f.descripcion || 'Foto de la tarea'} />
-                        </a>
-                        {f.descripcion && <div className="small foto-desc">{f.descripcion}</div>}
-                        <div className="muted small">
-                          {new Date(f.fecha).toLocaleString('es-CO')} · {f.usuario || 'sistema'}
-                        </div>
-                        {puedeEditar && (
-                          <button className="btn-icon danger small" onClick={() => eliminarFoto(f.id, t.id)}>
-                            🗑 Quitar
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )
-        })}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Resumen por empleado (RRHH) */}
