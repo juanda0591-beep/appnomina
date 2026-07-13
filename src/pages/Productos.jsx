@@ -1,22 +1,35 @@
-import { Fragment, useState } from 'react'
+import { useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
-import { formatCOP } from '../utils/format.js'
+import { formatCOP, formatFecha } from '../utils/format.js'
 import { notify, confirmar } from '../utils/notify.js'
 import Vacio from '../components/Vacio.jsx'
 
 const NUEVO_PROCESO = '__nuevo__'
 const emptyProceso = () => ({ nombre: '', pago: '', materiales: [] })
 const emptyRecetaFila = () => ({ materialId: '', cantidad: '' })
+const hoy = () => new Date().toISOString().slice(0, 10)
+const emptyEntrada = () => ({ cantidad: '', costoUnitario: '', fecha: hoy(), descripcion: '' })
+const TIPO_MOV_LABEL = { entrada: 'Compra', produccion: 'Producción' }
+const emptyDatos = () => ({
+  descripcion: '', valorVenta: '', valorCompra: '', stockApertura: '', stockMinimo: '',
+})
+
+// Un producto tiene stock bajo si su stock actual no supera el mínimo de alerta (>0)
+const stockBajo = (p) => p.stockMinimo > 0 && p.stock <= p.stockMinimo
 
 export default function Productos() {
-  const { productos, procesosGlobales, materiales, addProducto, updateProducto, deleteProducto, addProcesoGlobal } = useData()
+  const {
+    productos, procesosGlobales, materiales, addProducto, updateProducto, deleteProducto, addProcesoGlobal,
+    registrarEntradaProducto, getProductoMovimientos,
+  } = useData()
   const { puede } = useAuth()
   const puedeCrear = puede('productos', 'crear')
   const puedeEditar = puede('productos', 'editar')
   const puedeEliminar = puede('productos', 'eliminar')
 
   const [nombre, setNombre] = useState('')
+  const [datos, setDatos] = useState(emptyDatos())
   const [procesos, setProcesos] = useState([emptyProceso()])
   const [editId, setEditId] = useState(null)
   const [formAbierto, setFormAbierto] = useState(false)
@@ -25,11 +38,70 @@ export default function Productos() {
   const [filaNuevoProceso, setFilaNuevoProceso] = useState(null)
   const [nombreNuevoProceso, setNombreNuevoProceso] = useState('')
 
-  // Chip de proceso expandido en la tabla de productos registrados (id de proceso o null)
-  const [procesoAbierto, setProcesoAbierto] = useState(null)
+  // Producto cuyo detalle se muestra en el modal (id o null)
+  const [detalleId, setDetalleId] = useState(null)
+  const productoDetalle = productos.find((p) => p.id === detalleId)
+
+  // Movimientos (compra/producción) — en su propio modal
+  const [movimientos, setMovimientos] = useState([])
+  const [movimientosProd, setMovimientosProd] = useState(null) // producto cuyos movimientos se ven
+
+  // Entrada de producto comprado
+  const [entradaProd, setEntradaProd] = useState(null) // producto al que se le registra entrada
+  const [entradaForm, setEntradaForm] = useState(emptyEntrada())
+  const [guardandoEntrada, setGuardandoEntrada] = useState(false)
+
+  const setDato = (campo, val) => setDatos((d) => ({ ...d, [campo]: val }))
+  const setEntradaField = (campo, val) => setEntradaForm((f) => ({ ...f, [campo]: val }))
+
+  const abrirDetalle = (prod) => setDetalleId(prod.id)
+
+  const abrirMovimientos = async (prod) => {
+    setMovimientosProd(prod)
+    setMovimientos([])
+    try {
+      setMovimientos(await getProductoMovimientos(prod.id))
+    } catch (err) {
+      notify.error('Error al cargar movimientos: ' + err.message)
+    }
+  }
+  const cerrarMovimientos = () => {
+    setMovimientosProd(null)
+    setMovimientos([])
+  }
+
+  const abrirEntrada = (prod) => {
+    setEntradaProd(prod)
+    setEntradaForm({ ...emptyEntrada(), costoUnitario: prod.valorCompra ? String(prod.valorCompra) : '' })
+  }
+  const cerrarEntrada = () => {
+    setEntradaProd(null)
+    setEntradaForm(emptyEntrada())
+  }
+
+  const handleSubmitEntrada = async (e) => {
+    e.preventDefault()
+    if (!(Number(entradaForm.cantidad) > 0)) { notify.error('Indica una cantidad mayor a 0'); return }
+    setGuardandoEntrada(true)
+    try {
+      await registrarEntradaProducto(entradaProd.id, {
+        cantidad: Number(entradaForm.cantidad),
+        costoUnitario: Number(entradaForm.costoUnitario) || 0,
+        fecha: entradaForm.fecha,
+        descripcion: entradaForm.descripcion,
+      })
+      notify.ok('Entrada registrada')
+      cerrarEntrada()
+    } catch (err) {
+      notify.error('Error al registrar la entrada: ' + err.message)
+    } finally {
+      setGuardandoEntrada(false)
+    }
+  }
 
   const resetForm = () => {
     setNombre('')
+    setDatos(emptyDatos())
     setProcesos([emptyProceso()])
     setEditId(null)
     setFilaNuevoProceso(null)
@@ -121,12 +193,21 @@ export default function Productos() {
     )
     if (!ok) return
 
+    const payload = {
+      nombre: nombre.trim(),
+      procesos: validos,
+      descripcion: datos.descripcion,
+      valorVenta: datos.valorVenta,
+      valorCompra: datos.valorCompra,
+      stockApertura: datos.stockApertura,
+      stockMinimo: datos.stockMinimo,
+    }
     try {
       if (editando) {
-        await updateProducto(editId, nombre, validos)
+        await updateProducto(editId, payload)
         notify.ok('Producto actualizado')
       } else {
-        await addProducto(nombre, validos)
+        await addProducto(payload)
         notify.ok('Producto creado')
       }
       resetForm()
@@ -138,6 +219,13 @@ export default function Productos() {
   const startEdit = (prod) => {
     setEditId(prod.id)
     setNombre(prod.nombre)
+    setDatos({
+      descripcion: prod.descripcion || '',
+      valorVenta: prod.valorVenta ? String(prod.valorVenta) : '',
+      valorCompra: prod.valorCompra ? String(prod.valorCompra) : '',
+      stockApertura: prod.stockApertura ? String(prod.stockApertura) : '',
+      stockMinimo: prod.stockMinimo ? String(prod.stockMinimo) : '',
+    })
     setProcesos(
       prod.procesos.map((p) => ({
         id: p.id,
@@ -150,6 +238,9 @@ export default function Productos() {
     setNombreNuevoProceso('')
     setFormAbierto(true)
   }
+
+  // Valor del stock inicial = stock de apertura × valor de compra (se muestra en vivo)
+  const valorStockInicial = (Number(datos.stockApertura) || 0) * (Number(datos.valorCompra) || 0)
 
   // Opciones del desplegable: catálogo global + (por robustez) el nombre actual
   // de la fila si por algún motivo no está en el catálogo, para no perder el dato.
@@ -187,14 +278,75 @@ export default function Productos() {
       {formAbierto && (puedeCrear || (editId && puedeEditar)) && (
       <>
       <div className="overlay" onClick={resetForm} />
-      <form className="card modal" onSubmit={handleSubmit}>
+      <form className="card modal modal-lg" onSubmit={handleSubmit}>
         <h3>{editId ? 'Editar producto' : 'Nuevo producto'}</h3>
-        <label>Nombre del producto</label>
+        {editId && (
+          <p className="muted small">Código: <strong>{productos.find((p) => p.id === editId)?.codigo || '—'}</strong> (se asigna automáticamente)</p>
+        )}
+
+        <div className="row">
+          <div style={{ flex: 2 }}>
+            <label>Nombre del producto</label>
+            <input
+              value={nombre}
+              onChange={(e) => setNombre(e.target.value)}
+              placeholder="Ej: Armario 3 cuerpos"
+            />
+          </div>
+        </div>
+
+        <label>Descripción</label>
         <input
-          value={nombre}
-          onChange={(e) => setNombre(e.target.value)}
-          placeholder="Ej: Armario 3 cuerpos"
+          value={datos.descripcion}
+          onChange={(e) => setDato('descripcion', e.target.value)}
+          placeholder="Ej: Armario de 3 cuerpos en MDF, puertas corredizas"
         />
+
+        <div className="row">
+          <div style={{ flex: 1 }}>
+            <label>Valor de venta</label>
+            <input
+              type="number" min="0" step="any"
+              value={datos.valorVenta}
+              onChange={(e) => setDato('valorVenta', e.target.value)}
+              placeholder="0"
+            />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label>Valor de compra</label>
+            <input
+              type="number" min="0" step="any"
+              value={datos.valorCompra}
+              onChange={(e) => setDato('valorCompra', e.target.value)}
+              placeholder="0"
+            />
+          </div>
+        </div>
+
+        <div className="row">
+          <div style={{ flex: 1 }}>
+            <label>Stock de apertura</label>
+            <input
+              type="number" min="0" step="any"
+              value={datos.stockApertura}
+              onChange={(e) => setDato('stockApertura', e.target.value)}
+              placeholder="0"
+            />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label>Mínimo de alerta</label>
+            <input
+              type="number" min="0" step="any"
+              value={datos.stockMinimo}
+              onChange={(e) => setDato('stockMinimo', e.target.value)}
+              placeholder="0"
+            />
+          </div>
+        </div>
+        <p className="muted small">
+          Valor del stock inicial (apertura × valor de compra): <strong>{formatCOP(valorStockInicial)}</strong>.
+          {' '}El stock se abastece solo cuando termina una orden de producción de este producto.
+        </p>
 
         <label>Procesos</label>
         {procesos.map((p, i) => (
@@ -309,81 +461,241 @@ export default function Productos() {
             <table className="table">
               <thead>
                 <tr>
+                  <th>Código</th>
                   <th>Producto</th>
-                  <th>Procesos</th>
+                  <th className="num">V. compra</th>
+                  <th className="num">V. venta</th>
+                  <th className="num">Stock</th>
+                  <th className="num">Mínimo</th>
                   <th className="num">Acciones</th>
                 </tr>
               </thead>
               <tbody>
                 {productos.map((prod) => (
-                  <Fragment key={prod.id}>
-                    <tr>
-                      <td>
-                        <strong>{prod.nombre}</strong>
-                      </td>
-                      <td>
-                        <div className="chips">
-                          {prod.procesos.map((p) => (
-                            <span
-                              className="chip chip-clicable"
-                              key={p.id}
-                              onClick={() => setProcesoAbierto((actual) => (actual === p.id ? null : p.id))}
-                            >
-                              {p.nombre}: {formatCOP(p.pago)} {procesoAbierto === p.id ? '▾' : '▸'}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="num">
-                        <div className="actions" style={{ justifyContent: 'flex-end' }}>
-                          {puedeEditar && (
-                            <button className="btn-secondary" onClick={() => startEdit(prod)}>
-                              Editar
-                            </button>
-                          )}
-                          {puedeEliminar && (
-                            <button
-                              className="btn-danger"
-                              onClick={async () => {
-                                if (await confirmar(`¿Eliminar "${prod.nombre}"?`)) deleteProducto(prod.id)
-                              }}
-                            >
-                              Eliminar
-                            </button>
-                          )}
-                          {!puedeEditar && !puedeEliminar && <span className="muted small">—</span>}
-                        </div>
-                      </td>
-                    </tr>
-
-                    {prod.procesos
-                      .filter((p) => p.id === procesoAbierto)
-                      .map((p) => (
-                        <tr key={`receta-${p.id}`}>
-                          <td colSpan={3}>
-                            <strong>Materiales de "{p.nombre}"</strong>
-                            {(!p.materiales || p.materiales.length === 0) && (
-                              <p className="muted small">Sin receta de materiales.</p>
-                            )}
-                            {p.materiales && p.materiales.length > 0 && (
-                              <div className="chips">
-                                {p.materiales.map((m) => (
-                                  <span className="chip" key={m.id}>
-                                    {m.materialNombre}: {m.cantidad} {m.unidad}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                  </Fragment>
+                  <tr
+                    key={prod.id}
+                    className={`chip-clicable ${stockBajo(prod) ? 'fila-alerta' : ''}`}
+                    onClick={() => abrirDetalle(prod)}
+                  >
+                    <td className="muted small">{prod.codigo}</td>
+                    <td>
+                      <strong>{prod.nombre}</strong>
+                      {prod.descripcion && <div className="muted small">{prod.descripcion}</div>}
+                    </td>
+                    <td className="num">{formatCOP(prod.valorCompra)}</td>
+                    <td className="num">{formatCOP(prod.valorVenta)}</td>
+                    <td className="num">
+                      {prod.stock}
+                      {stockBajo(prod) && <span className="chip warn" style={{ marginLeft: 8 }}>⚠️ Bajo</span>}
+                    </td>
+                    <td className="num">{prod.stockMinimo}</td>
+                    <td className="num">
+                      <div className="actions" style={{ justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
+                        <button className="btn-secondary btn-sm" onClick={() => abrirMovimientos(prod)}>
+                          🕑 Movimientos
+                        </button>
+                        {puedeCrear && (
+                          <button className="btn-secondary btn-sm" onClick={() => abrirEntrada(prod)}>
+                            + Entrada
+                          </button>
+                        )}
+                        {puedeEditar && (
+                          <button className="btn-secondary btn-sm" onClick={() => startEdit(prod)}>
+                            Editar
+                          </button>
+                        )}
+                        {puedeEliminar && (
+                          <button
+                            className="btn-danger btn-sm"
+                            onClick={async () => {
+                              if (await confirmar(`¿Eliminar "${prod.nombre}"?`)) deleteProducto(prod.id)
+                            }}
+                          >
+                            Eliminar
+                          </button>
+                        )}
+                        {!puedeCrear && !puedeEditar && !puedeEliminar && <span className="muted small">—</span>}
+                      </div>
+                    </td>
+                  </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
       </div>
+
+      {/* Modal: detalle del producto (stock, procesos y receta) */}
+      {productoDetalle && (
+        <>
+          <div className="overlay" onClick={() => setDetalleId(null)} />
+          <div className="modal">
+            <h3>{productoDetalle.codigo} — {productoDetalle.nombre}</h3>
+            {productoDetalle.descripcion && (
+              <p className="muted small" style={{ marginTop: 0 }}>{productoDetalle.descripcion}</p>
+            )}
+
+            <p className="muted small" style={{ marginTop: 0, marginBottom: 4 }}>
+              <strong>Procesos y materiales</strong>
+            </p>
+            {productoDetalle.procesos.length === 0 && (
+              <p className="muted small">Este producto no tiene procesos.</p>
+            )}
+            {productoDetalle.procesos.length > 0 && (
+              <div className="table-wrap">
+                <table className="table compact">
+                  <thead>
+                    <tr>
+                      <th>Proceso</th>
+                      <th className="num">Mano de obra</th>
+                      <th>Materiales configurados</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {productoDetalle.procesos.map((p) => (
+                      <tr key={p.id}>
+                        <td><strong>{p.nombre}</strong></td>
+                        <td className="num">{formatCOP(p.pago)}</td>
+                        <td>
+                          {(!p.materiales || p.materiales.length === 0) ? (
+                            <span className="muted small">Sin materiales</span>
+                          ) : (
+                            <div className="chips">
+                              {p.materiales.map((m) => (
+                                <span className="chip" key={m.id}>
+                                  {m.materialNombre}: {m.cantidad} {m.unidad}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="form-actions">
+              <button className="btn-secondary" onClick={() => { const p = productoDetalle; setDetalleId(null); abrirMovimientos(p) }}>
+                🕑 Movimientos
+              </button>
+              {puedeCrear && (
+                <button className="btn-secondary" onClick={() => { const p = productoDetalle; setDetalleId(null); abrirEntrada(p) }}>
+                  + Entrada
+                </button>
+              )}
+              {puedeEditar && (
+                <button className="btn-primary" onClick={() => { const p = productoDetalle; setDetalleId(null); startEdit(p) }}>
+                  Editar
+                </button>
+              )}
+              <button className="btn-secondary" onClick={() => setDetalleId(null)}>Cerrar</button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Modal: movimientos de stock del producto (compras y producción) */}
+      {movimientosProd && (
+        <>
+          <div className="overlay" onClick={cerrarMovimientos} />
+          <div className="modal">
+            <h3>Movimientos de "{movimientosProd.nombre}"</h3>
+            <p className="muted small" style={{ marginTop: 0 }}>Entradas por compra y abastecimiento por producción.</p>
+            {movimientos.length === 0 && (
+              <Vacio icono="🕑" titulo="Sin movimientos registrados" />
+            )}
+            {movimientos.length > 0 && (
+              <div className="table-wrap">
+                <table className="table compact">
+                  <thead>
+                    <tr>
+                      <th>Fecha</th>
+                      <th>Tipo</th>
+                      <th className="num">Cantidad</th>
+                      <th>Detalle</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {movimientos.map((m) => (
+                      <tr key={m.id}>
+                        <td>{formatFecha(m.fecha)}</td>
+                        <td>
+                          <span className={`chip ${m.tipo === 'entrada' ? 'ok' : ''}`}>
+                            {TIPO_MOV_LABEL[m.tipo] || m.tipo}
+                          </span>
+                        </td>
+                        <td className={`num ${m.cantidad < 0 ? 'texto-salida' : 'texto-entrada'}`}>
+                          {m.cantidad < 0 ? '' : '+'}{m.cantidad}
+                        </td>
+                        <td className="muted small">{m.descripcion}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="form-actions">
+              <button className="btn-secondary" onClick={cerrarMovimientos}>Cerrar</button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Modal: registrar entrada de producto comprado */}
+      {entradaProd && (
+        <>
+          <div className="overlay" onClick={cerrarEntrada} />
+          <form className="modal" onSubmit={handleSubmitEntrada}>
+            <h3>Entrada de "{entradaProd.nombre}"</h3>
+            <p className="muted small" style={{ marginTop: 0 }}>
+              Para productos que compras en vez de fabricar. Suma al stock actual ({entradaProd.stock}).
+            </p>
+            <div className="row">
+              <div style={{ flex: 1 }}>
+                <label>Cantidad</label>
+                <input
+                  type="number" min="0" step="any" placeholder="0"
+                  value={entradaForm.cantidad}
+                  onChange={(e) => setEntradaField('cantidad', e.target.value)}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label>Valor de compra (unitario)</label>
+                <input
+                  type="number" min="0" step="any" placeholder="0"
+                  value={entradaForm.costoUnitario}
+                  onChange={(e) => setEntradaField('costoUnitario', e.target.value)}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label>Fecha</label>
+                <input
+                  type="date"
+                  value={entradaForm.fecha}
+                  onChange={(e) => setEntradaField('fecha', e.target.value)}
+                />
+              </div>
+            </div>
+            <label>Descripción (opcional)</label>
+            <input
+              value={entradaForm.descripcion}
+              onChange={(e) => setEntradaField('descripcion', e.target.value)}
+              placeholder="Ej: compra a proveedor X"
+            />
+            <p className="muted small">
+              Si dejas el valor de compra en 0, no se cambia el actual. Si pones uno, actualiza el valor de compra del producto.
+            </p>
+            <div className="form-actions">
+              <button type="submit" className="btn-primary" disabled={guardandoEntrada}>
+                {guardandoEntrada ? 'Guardando…' : 'Registrar entrada'}
+              </button>
+              <button type="button" className="btn-secondary" onClick={cerrarEntrada}>Cancelar</button>
+            </div>
+          </form>
+        </>
+      )}
     </div>
   )
 }

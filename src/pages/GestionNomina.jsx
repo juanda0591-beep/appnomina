@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha } from '../utils/format.js'
@@ -64,7 +64,7 @@ export default function GestionNomina() {
   const [borradores, setBorradores] = useState({}) // { tareaId: { progreso, comentario } }
   const [historialAbierto, setHistorialAbierto] = useState(null) // tareaId
   const [historial, setHistorial] = useState([])
-  const [tareaExpandidaId, setTareaExpandidaId] = useState(null) // fila abierta en la tabla
+  const [tareaDetalleId, setTareaDetalleId] = useState(null) // tarea abierta en el modal
 
   // --- Registro fotográfico ---
   const [fotosAbierto, setFotosAbierto] = useState(null) // tareaId
@@ -262,10 +262,16 @@ export default function GestionNomina() {
   // URL autenticada de la imagen: el endpoint exige token, así que se pasa por query
   const urlFoto = (fotoId) => `/api/tareas/fotos/${fotoId}?token=${sessionStorage.getItem('nomina_token')}`
 
-  const toggleTarea = (id) => setTareaExpandidaId((actual) => (actual === id ? null : id))
+  const cerrarDetalleTarea = () => {
+    setTareaDetalleId(null)
+    setHistorialAbierto(null)
+    setFotosAbierto(null)
+  }
 
-  // Detalle expandible de una tarea: edición de progreso/comentario, historial y fotos.
-  // Se muestra en la fila que se despliega debajo de cada tarea en la tabla.
+  const tareaDetalle = tareas.find((t) => t.id === tareaDetalleId)
+
+  // Detalle de una tarea: edición de progreso/comentario, historial y fotos.
+  // Se muestra dentro de un modal al tocar la tarea en la tabla.
   const renderDetalleTarea = (t) => {
     const bloqueada = t.estado === 'pagada' || !puedeEditar
     const progreso = Number(valorProgreso(t))
@@ -470,27 +476,18 @@ export default function GestionNomina() {
               </thead>
               <tbody>
                 {tareasFiltradas.map((t) => (
-                  <Fragment key={t.id}>
-                    <tr className="chip-clicable" onClick={() => toggleTarea(t.id)}>
-                      <td className="muted small">
-                        {tareaExpandidaId === t.id ? '▾' : '▸'} {formatFecha(t.creado)}
-                      </td>
-                      <td><strong>{nombreEmpleado(t.empleadoId)}</strong></td>
-                      <td>{t.productoNombre} — {t.procesoNombre}</td>
-                      <td className="num">{t.cantidad}</td>
-                      <td><BarraProgreso valor={t.progreso} /></td>
-                      <td>
-                        <span className={`chip ${t.estado === 'terminada' ? 'ok' : t.estado === 'pagada' ? '' : 'warn'}`}>
-                          {ESTADO_LABEL[t.estado] || t.estado}
-                        </span>
-                      </td>
-                    </tr>
-                    {tareaExpandidaId === t.id && (
-                      <tr>
-                        <td colSpan={6}>{renderDetalleTarea(t)}</td>
-                      </tr>
-                    )}
-                  </Fragment>
+                  <tr key={t.id} className="chip-clicable" onClick={() => setTareaDetalleId(t.id)}>
+                    <td className="muted small">{formatFecha(t.creado)}</td>
+                    <td><strong>{nombreEmpleado(t.empleadoId)}</strong></td>
+                    <td>{t.productoNombre} — {t.procesoNombre}</td>
+                    <td className="num">{t.cantidad}</td>
+                    <td><BarraProgreso valor={t.progreso} /></td>
+                    <td>
+                      <span className={`chip ${t.estado === 'terminada' ? 'ok' : t.estado === 'pagada' ? '' : 'warn'}`}>
+                        {ESTADO_LABEL[t.estado] || t.estado}
+                      </span>
+                    </td>
+                  </tr>
                 ))}
               </tbody>
             </table>
@@ -603,6 +600,23 @@ export default function GestionNomina() {
               <button type="button" className="btn-secondary" onClick={resetForm}>
                 Cancelar
               </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Modal: detalle de una tarea (progreso, comentario, historial y fotos) */}
+      {tareaDetalle && (
+        <>
+          <div className="overlay" onClick={cerrarDetalleTarea} />
+          <div className="modal modal-lg">
+            <h3>{nombreEmpleado(tareaDetalle.empleadoId)}</h3>
+            <p className="muted small" style={{ marginTop: 0 }}>
+              {tareaDetalle.productoNombre} — {tareaDetalle.procesoNombre} · Inicio: {formatFecha(tareaDetalle.creado)}
+            </p>
+            {renderDetalleTarea(tareaDetalle)}
+            <div className="form-actions">
+              <button className="btn-secondary" onClick={cerrarDetalleTarea}>Cerrar</button>
             </div>
           </div>
         </>

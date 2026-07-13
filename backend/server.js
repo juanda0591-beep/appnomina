@@ -202,7 +202,20 @@ function productoConProcesos(prod) {
     .prepare('SELECT * FROM procesos WHERE producto_id = ?')
     .all(prod.id)
     .map((p) => ({ ...p, materiales: materialesDeProceso(p.id) }))
-  return { ...prod, procesos }
+  return {
+    id: prod.id,
+    nombre: prod.nombre,
+    codigo: prod.codigo || '',
+    descripcion: prod.descripcion || '',
+    valorVenta: prod.valor_venta || 0,
+    valorCompra: prod.valor_compra || 0,
+    stockApertura: prod.stock_apertura || 0,
+    stock: prod.stock || 0,
+    stockMinimo: prod.stock_minimo || 0,
+    // valor del stock inicial = stock de apertura × valor de compra (se calcula, no se guarda)
+    valorStockInicial: (prod.stock_apertura || 0) * (prod.valor_compra || 0),
+    procesos,
+  }
 }
 
 // Inserta las filas de procesos (y su receta de materiales) para un producto,
@@ -267,10 +280,23 @@ app.get('/api/productos', permisoAnyRequired([
 })
 
 app.post('/api/productos', permisoRequired('productos', 'crear'), (req, res) => {
-  const { nombre, procesos = [] } = req.body
+  const {
+    nombre, procesos = [], descripcion = '', valorVenta, valorCompra,
+    stockApertura, stockMinimo,
+  } = req.body
+  const apertura = Number(stockApertura) || 0
   const insert = db.transaction(() => {
-    const r = db.prepare('INSERT INTO productos (nombre) VALUES (?)').run(nombre.trim())
+    const r = db.prepare(
+      `INSERT INTO productos (nombre, descripcion, valor_venta, valor_compra, stock_apertura, stock, stock_minimo)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      nombre.trim(), String(descripcion || ''),
+      Number(valorVenta) || 0, Number(valorCompra) || 0,
+      apertura, apertura, Number(stockMinimo) || 0,
+    )
     const pid = r.lastInsertRowid
+    // Código correlativo automático basado en el id (PRD-0001)
+    db.prepare('UPDATE productos SET codigo = ? WHERE id = ?').run(`PRD-${String(pid).padStart(4, '0')}`, pid)
     insertarProcesosConReceta(pid, procesos)
     return pid
   })
@@ -280,9 +306,26 @@ app.post('/api/productos', permisoRequired('productos', 'crear'), (req, res) => 
 
 app.put('/api/productos/:id', permisoRequired('productos', 'editar'), (req, res) => {
   const { id } = req.params
-  const { nombre, procesos = [] } = req.body
+  const {
+    nombre, procesos = [], descripcion = '', valorVenta, valorCompra,
+    stockApertura, stockMinimo,
+  } = req.body
+  const actual = db.prepare('SELECT * FROM productos WHERE id = ?').get(id)
+  if (!actual) return res.status(404).json({ error: 'Producto no encontrado' })
+  // Al cambiar el stock de apertura, se ajusta el stock actual por la diferencia,
+  // para no perder lo ya abastecido por producción (stock actual = apertura + producido).
+  const aperturaNueva = Number(stockApertura) || 0
+  const diffApertura = aperturaNueva - (actual.stock_apertura || 0)
+  const stockNuevo = (actual.stock || 0) + diffApertura
   const update = db.transaction(() => {
-    db.prepare('UPDATE productos SET nombre = ? WHERE id = ?').run(nombre.trim(), id)
+    db.prepare(
+      `UPDATE productos SET nombre = ?, descripcion = ?, valor_venta = ?, valor_compra = ?,
+       stock_apertura = ?, stock = ?, stock_minimo = ? WHERE id = ?`
+    ).run(
+      nombre.trim(), String(descripcion || ''),
+      Number(valorVenta) || 0, Number(valorCompra) || 0,
+      aperturaNueva, stockNuevo, Number(stockMinimo) || 0, id,
+    )
     db.prepare('DELETE FROM procesos WHERE producto_id = ?').run(id)
     insertarProcesosConReceta(id, procesos)
   })
@@ -293,6 +336,53 @@ app.put('/api/productos/:id', permisoRequired('productos', 'editar'), (req, res)
 app.delete('/api/productos/:id', permisoRequired('productos', 'eliminar'), (req, res) => {
   db.prepare('DELETE FROM productos WHERE id = ?').run(req.params.id)
   res.json({ ok: true })
+})
+
+function movimientoProductoSalida(m) {
+  return {
+    id: m.id,
+    tipo: m.tipo,
+    cantidad: m.cantidad,
+    costoUnitario: m.costo_unitario,
+    fecha: m.fecha,
+    descripcion: m.descripcion || '',
+    ordenProduccionId: m.orden_produccion_id,
+  }
+}
+
+// Entrada manual de producto comprado (no fabricado): suma stock y, si viene, actualiza
+// el valor de compra. Queda registrada como movimiento tipo 'entrada'.
+app.post('/api/productos/:id/entrada', permisoRequired('productos', 'crear'), (req, res) => {
+  const { id } = req.params
+  const { cantidad, costoUnitario, fecha, descripcion } = req.body
+  const cant = Number(cantidad) || 0
+  if (cant <= 0) return res.status(400).json({ error: 'La cantidad debe ser mayor a 0' })
+  const costo = Number(costoUnitario) || 0
+
+  const producto = db.prepare('SELECT * FROM productos WHERE id = ?').get(id)
+  if (!producto) return res.status(404).json({ error: 'Producto no encontrado' })
+
+  const update = db.transaction(() => {
+    db.prepare(
+      `INSERT INTO producto_movimientos (producto_id, tipo, cantidad, costo_unitario, fecha, descripcion)
+       VALUES (?, 'entrada', ?, ?, ?, ?)`
+    ).run(id, cant, costo, fecha || new Date().toISOString(), (descripcion || '').trim())
+    // Suma al stock; si dieron un costo de compra > 0, lo actualiza como valor de compra
+    if (costo > 0) {
+      db.prepare('UPDATE productos SET stock = stock + ?, valor_compra = ? WHERE id = ?').run(cant, costo, id)
+    } else {
+      db.prepare('UPDATE productos SET stock = stock + ? WHERE id = ?').run(cant, id)
+    }
+  })
+  update()
+  res.json(productoConProcesos(db.prepare('SELECT * FROM productos WHERE id = ?').get(id)))
+})
+
+app.get('/api/productos/:id/movimientos', permisoRequired('productos', 'ver'), (req, res) => {
+  const movimientos = db
+    .prepare('SELECT * FROM producto_movimientos WHERE producto_id = ? ORDER BY fecha DESC, id DESC')
+    .all(req.params.id)
+  res.json(movimientos.map(movimientoProductoSalida))
 })
 
 // ============ MATERIALES ============
@@ -899,6 +989,7 @@ function tareaProduccionSalida(t) {
     progreso: t.progreso,
     estado: t.estado,
     comentario: t.comentario || '',
+    motivoMerma: t.motivo_merma || '',
     ordenProduccionId: t.orden_produccion_id,
     creado: t.creado,
     actualizado: t.actualizado,
@@ -924,10 +1015,54 @@ function ordenProduccionSalida(o) {
     cantidad: o.cantidad,
     estado: o.estado,
     comentario: o.comentario || '',
+    stockAbastecido: o.stock_abastecido || 0,
     creado: o.creado,
     actualizado: o.actualizado,
     tareas,
   }
+}
+
+// Cantidad con la que una orden abastece el stock del producto al terminarse:
+// la cantidad del ÚLTIMO proceso (el más reciente por creación), para reflejar
+// la merma entre procesos (ej: cortaron 30 pero ensamblaron 28 → suma 28).
+function cantidadAbastecerOrden(ordenId) {
+  const ultima = db
+    .prepare('SELECT cantidad FROM tareas_produccion WHERE orden_produccion_id = ? ORDER BY creado DESC, id DESC LIMIT 1')
+    .get(ordenId)
+  return ultima ? Number(ultima.cantidad) || 0 : 0
+}
+
+// Suma al stock del producto lo que abastece la orden y lo registra en la orden.
+// Si la orden ya había abastecido, primero revierte lo anterior (idempotente).
+function abastecerStockProducto(orden) {
+  if (!orden.producto_id) return
+  const previo = Number(orden.stock_abastecido) || 0
+  const nuevo = cantidadAbastecerOrden(orden.id)
+  const delta = nuevo - previo
+  if (delta !== 0) {
+    db.prepare('UPDATE productos SET stock = stock + ? WHERE id = ?').run(delta, orden.producto_id)
+    // Registra el abastecimiento por producción en el historial del producto
+    db.prepare(
+      `INSERT INTO producto_movimientos (producto_id, tipo, cantidad, costo_unitario, fecha, descripcion, orden_produccion_id)
+       VALUES (?, 'produccion', ?, 0, ?, ?, ?)`
+    ).run(orden.producto_id, delta, new Date().toISOString(), `Producción: orden #${orden.id}`, orden.id)
+  }
+  db.prepare('UPDATE ordenes_produccion SET stock_abastecido = ? WHERE id = ?').run(nuevo, orden.id)
+}
+
+// Revierte del stock del producto lo que la orden había abastecido (al reabrir o
+// eliminar una orden terminada) y deja el marcador en 0.
+function revertirStockProducto(orden) {
+  const previo = Number(orden.stock_abastecido) || 0
+  if (previo !== 0 && orden.producto_id) {
+    db.prepare('UPDATE productos SET stock = stock - ? WHERE id = ?').run(previo, orden.producto_id)
+    // Registra la reversa (cantidad negativa) para dejar rastro en el historial
+    db.prepare(
+      `INSERT INTO producto_movimientos (producto_id, tipo, cantidad, costo_unitario, fecha, descripcion, orden_produccion_id)
+       VALUES (?, 'produccion', ?, 0, ?, ?, ?)`
+    ).run(orden.producto_id, -previo, new Date().toISOString(), `Reversa producción: orden #${orden.id} reabierta/eliminada`, orden.id)
+  }
+  db.prepare('UPDATE ordenes_produccion SET stock_abastecido = 0 WHERE id = ?').run(orden.id)
 }
 
 const insertTareaProduccionHistorial = db.prepare(
@@ -936,7 +1071,10 @@ const insertTareaProduccionHistorial = db.prepare(
 )
 
 // ---- Órdenes de producción (agrupan tareas de un mismo lote/producto) ----
-app.get('/api/ordenes-produccion', permisoRequired('gestion-produccion', 'ver'), (req, res) => {
+app.get('/api/ordenes-produccion', permisoAnyRequired([
+  ['gestion-produccion', 'ver'],
+  ['reportes', 'ver'],
+]), (req, res) => {
   const { estado, productoId } = req.query
   const cond = []
   const params = []
@@ -976,21 +1114,52 @@ app.put('/api/ordenes-produccion/:id', permisoRequired('gestion-produccion', 'ed
 app.post('/api/ordenes-produccion/:id/terminar', permisoRequired('gestion-produccion', 'editar'), (req, res) => {
   const orden = db.prepare('SELECT * FROM ordenes_produccion WHERE id = ?').get(req.params.id)
   if (!orden) return res.status(404).json({ error: 'Orden no encontrada' })
+
+  // El producto debe haber pasado por todas sus etapas: la orden debe tener todos
+  // los procesos configurados en el producto y todos deben estar terminados.
+  const tareas = db.prepare('SELECT * FROM tareas_produccion WHERE orden_produccion_id = ?').all(orden.id)
+  const procesosProducto = orden.producto_id
+    ? db.prepare('SELECT nombre FROM procesos WHERE producto_id = ?').all(orden.producto_id)
+    : []
+  if (procesosProducto.length > 0) {
+    const enOrden = new Set(tareas.map((t) => (t.proceso_nombre || '').toLowerCase()))
+    const faltantes = procesosProducto.filter((p) => !enOrden.has((p.nombre || '').toLowerCase()))
+    if (faltantes.length > 0) {
+      return res.status(400).json({ error: `Faltan procesos del producto: ${faltantes.map((p) => p.nombre).join(', ')}` })
+    }
+  }
+  const sinTerminar = tareas.filter((t) => t.estado !== 'terminada')
+  if (sinTerminar.length > 0) {
+    return res.status(400).json({ error: `Faltan procesos por terminar: ${sinTerminar.map((t) => t.proceso_nombre).join(', ')}` })
+  }
+
   const ahora = new Date().toISOString()
-  db.prepare("UPDATE ordenes_produccion SET estado = 'terminada', actualizado = ? WHERE id = ?").run(ahora, orden.id)
+  const terminar = db.transaction(() => {
+    db.prepare("UPDATE ordenes_produccion SET estado = 'terminada', actualizado = ? WHERE id = ?").run(ahora, orden.id)
+    // Al terminar, abastece el stock del producto con la cantidad del último proceso
+    abastecerStockProducto(orden)
+  })
+  terminar()
   res.json(ordenProduccionSalida(db.prepare('SELECT * FROM ordenes_produccion WHERE id = ?').get(orden.id)))
 })
 
 app.delete('/api/ordenes-produccion/:id', permisoRequired('gestion-produccion', 'eliminar'), (req, res) => {
-  const orden = db.prepare('SELECT id FROM ordenes_produccion WHERE id = ?').get(req.params.id)
+  const orden = db.prepare('SELECT * FROM ordenes_produccion WHERE id = ?').get(req.params.id)
   if (!orden) return res.status(404).json({ error: 'Orden no encontrada' })
+  // Una orden con procesos ya descontó materiales del inventario: no se puede
+  // eliminar para no perder ese descuento. Solo se eliminan órdenes vacías.
   const tareas = db.prepare('SELECT COUNT(*) c FROM tareas_produccion WHERE orden_produccion_id = ?').get(orden.id)
-  if (tareas.c > 0) return res.status(400).json({ error: 'Elimina primero las tareas de esta orden' })
-  db.prepare('DELETE FROM ordenes_produccion WHERE id = ?').run(req.params.id)
+  if (tareas.c > 0) {
+    return res.status(400).json({ error: 'No se puede eliminar: esta orden ya tiene procesos que descontaron materiales.' })
+  }
+  db.prepare('DELETE FROM ordenes_produccion WHERE id = ?').run(orden.id)
   res.json({ ok: true })
 })
 
-app.get('/api/tareas-produccion', permisoRequired('gestion-produccion', 'ver'), (req, res) => {
+app.get('/api/tareas-produccion', permisoAnyRequired([
+  ['gestion-produccion', 'ver'],
+  ['reportes', 'ver'],
+]), (req, res) => {
   const { empleadoId, estado, ordenProduccionId } = req.query
   const cond = []
   const params = []
@@ -1047,6 +1216,9 @@ app.post('/api/tareas-produccion', permisoRequired('gestion-produccion', 'crear'
     // Agregar trabajo a una orden ya terminada la reabre; si estaba pendiente
     // (sin trabajo aún) pasa a en_progreso.
     if (orden && orden.estado !== 'en_progreso') {
+      // Si estaba terminada y ya había abastecido stock del producto, se revierte
+      // porque la orden vuelve a estar en curso (se volverá a abastecer al terminarla).
+      if (orden.estado === 'terminada') revertirStockProducto(orden)
       db.prepare("UPDATE ordenes_produccion SET estado = 'en_progreso', actualizado = ? WHERE id = ?").run(ahora, orden.id)
     }
 
@@ -1089,9 +1261,11 @@ app.put('/api/tareas-produccion/:id', permisoRequired('gestion-produccion', 'edi
   const tarea = db.prepare('SELECT * FROM tareas_produccion WHERE id = ?').get(req.params.id)
   if (!tarea) return res.status(404).json({ error: 'Tarea no encontrada' })
 
-  const { progreso, comentario, estado } = req.body
+  const { progreso, comentario, estado, cantidad, motivoMerma } = req.body
   const nuevoProgreso = progreso == null ? tarea.progreso : Math.max(0, Math.min(100, Math.round(Number(progreso) || 0)))
   const nuevoComentario = comentario == null ? tarea.comentario : String(comentario)
+  const nuevaCantidad = cantidad == null ? tarea.cantidad : Math.max(0, Number(cantidad) || 0)
+  const nuevoMotivoMerma = motivoMerma == null ? tarea.motivo_merma : String(motivoMerma)
 
   let nuevoEstado = estado || tarea.estado
   if (!estado && tarea.estado !== 'terminada') {
@@ -1102,8 +1276,8 @@ app.put('/api/tareas-produccion/:id', permisoRequired('gestion-produccion', 'edi
 
   const ahora = new Date().toISOString()
   const tx = db.transaction(() => {
-    db.prepare('UPDATE tareas_produccion SET progreso = ?, comentario = ?, estado = ?, actualizado = ? WHERE id = ?')
-      .run(nuevoProgreso, nuevoComentario, nuevoEstado, ahora, tarea.id)
+    db.prepare('UPDATE tareas_produccion SET progreso = ?, comentario = ?, estado = ?, cantidad = ?, motivo_merma = ?, actualizado = ? WHERE id = ?')
+      .run(nuevoProgreso, nuevoComentario, nuevoEstado, nuevaCantidad, nuevoMotivoMerma, ahora, tarea.id)
 
     const cambioProgreso = nuevoProgreso !== tarea.progreso
     const cambioComentario = nuevoComentario !== (tarea.comentario || '')

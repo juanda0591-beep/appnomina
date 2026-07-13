@@ -340,7 +340,12 @@ export function generarPdfMovimientos({ empresa, desde, hasta, movimientos, ingr
 
 // Genera el PDF del reporte de fabricación (etapas de producción por producto).
 // `productos` es el array ya calculado en la página de Reportes.
-export function generarPdfFabricacion({ empresa, desde, hasta, productos }) {
+// Reporte de fabricación basado en las órdenes de producción.
+// `ordenes` viene de Reportes.jsx: [{ id, productoNombre, estado, creado,
+//   analisis: { iniciados, finales, merma, materiales:[{nombre,unidad,cantidad,costoTotal}], costoMateriales },
+//   tareas:[{ procesoNombre, cantidad, estado }] }]. `totales` es el resumen del periodo.
+const ESTADO_ORDEN_PDF = { pendiente: 'Pendiente', en_progreso: 'En progreso', terminada: 'Terminada' }
+export function generarPdfFabricacion({ empresa, desde, hasta, ordenes, totales }) {
   const doc = new jsPDF()
   const marginX = 14
   const pageH = doc.internal.pageSize.getHeight()
@@ -355,69 +360,73 @@ export function generarPdfFabricacion({ empresa, desde, hasta, productos }) {
   doc.setFontSize(11)
   doc.setTextColor(90)
   doc.text(`Periodo: ${formatFecha(desde)} — ${formatFecha(hasta)}`, marginX, y)
-  y += 6
-  doc.setFontSize(9)
-  doc.setTextColor(120)
-  doc.text('Cada proceso es una etapa (corte → ensamble). Un producto está completo al llegar a la última etapa.', marginX, y)
   y += 8
 
-  for (const p of productos) {
-    // Salto de página si no cabe el encabezado del producto
+  // Resumen del periodo (una tabla de totales)
+  if (totales) {
+    autoTable(doc, {
+      startY: y,
+      head: [['Órdenes', 'Terminadas', 'Iniciadas', 'Completadas', 'Merma', 'Costo materiales']],
+      body: [[
+        String(totales.ordenes), String(totales.terminadas), String(totales.iniciados),
+        String(totales.completados), String(totales.merma), formatCOP(totales.costoMateriales),
+      ]],
+      styles: { fontSize: 9, halign: 'right' },
+      headStyles: { fillColor: [37, 99, 235], halign: 'right' },
+    })
+    y = doc.lastAutoTable.finalY + 8
+  }
+
+  for (const o of ordenes) {
     if (y > pageH - 50) { doc.addPage(); y = 20 }
 
-    const completo = p.totalEtapas > 0 && p.etapasConProduccion === p.totalEtapas
-
-    doc.setFontSize(13)
+    doc.setFontSize(12)
     doc.setFont(undefined, 'bold')
     doc.setTextColor(15, 23, 42)
-    doc.text(p.nombre, marginX, y)
-    // Estado a la derecha del nombre
-    doc.setFontSize(10)
-    doc.setTextColor(...(completo ? [22, 163, 74] : [180, 83, 9]))
-    doc.text(completo ? '✓ Completo' : 'En proceso', doc.internal.pageSize.getWidth() - marginX, y, { align: 'right' })
+    doc.text(`Orden #${o.id} — ${o.productoNombre || ''}`, marginX, y)
+    doc.setFontSize(9)
+    doc.setTextColor(...(o.estado === 'terminada' ? [22, 163, 74] : [180, 83, 9]))
+    doc.text(ESTADO_ORDEN_PDF[o.estado] || o.estado, doc.internal.pageSize.getWidth() - marginX, y, { align: 'right' })
     doc.setFont(undefined, 'normal')
-    y += 6
+    y += 5
 
-    doc.setFontSize(10)
+    doc.setFontSize(9)
     doc.setTextColor(90)
     doc.text(
-      `Iniciados: ${p.iniciados}   ·   Completos: ${p.completos}   ·   En proceso: ${p.enProceso}   ·   Etapas: ${p.etapasConProduccion}/${p.totalEtapas}`,
+      `Inicio: ${formatFecha(o.creado)}   ·   Iniciados: ${o.analisis.iniciados}   ·   Terminados: ${o.estado === 'terminada' ? o.analisis.finales : 0}   ·   Merma: ${o.analisis.merma}`,
       marginX, y
     )
-    y += 4
+    y += 3
 
-    // Tabla: etapas con sus unidades (fila) y detalle por fecha
-    const cabecera = ['Fecha', ...p.etapas.map((e) => e.nombre)]
-    const filaTotales = ['TOTAL', ...p.etapas.map((e) => String(e.unidades))]
-    const filasFecha = p.porFecha.map((f) => [
-      formatFecha(f.fecha),
-      ...f.celdas.map((c) => (c ? String(c) : '—')),
-    ])
+    // Procesos de la orden
+    if (o.tareas.length > 0) {
+      autoTable(doc, {
+        startY: y + 2,
+        head: [['Proceso', 'Cantidad', 'Estado']],
+        body: o.tareas.map((t) => [t.procesoNombre, String(t.cantidad), ESTADO_ORDEN_PDF[t.estado] || t.estado]),
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [100, 116, 139] },
+        columnStyles: { 1: { halign: 'right' } },
+      })
+      y = doc.lastAutoTable.finalY + 3
+    }
 
-    // Índices de columnas de etapas terminadas (para pintarlas de verde)
-    const verdeCols = p.etapas.map((e, i) => (e.verde ? i + 1 : -1)).filter((i) => i >= 0)
-
-    autoTable(doc, {
-      startY: y + 2,
-      head: [cabecera],
-      body: filasFecha,
-      foot: [filaTotales],
-      styles: { fontSize: 9 },
-      headStyles: { fillColor: [37, 99, 235] },
-      footStyles: { fillColor: [226, 232, 240], textColor: 0, fontStyle: 'bold' },
-      columnStyles: Object.fromEntries(
-        p.etapas.map((_, i) => [i + 1, { halign: 'right' }])
-      ),
-      didParseCell: (data) => {
-        if (data.column.index > 0) data.cell.styles.halign = 'right'
-        // Resalta en verde las columnas de etapas terminadas
-        if (verdeCols.includes(data.column.index)) {
-          if (data.section === 'head') data.cell.styles.fillColor = [22, 163, 74]
-          else data.cell.styles.textColor = [21, 128, 61]
-        }
-      },
-    })
-    y = doc.lastAutoTable.finalY + 10
+    // Materiales consumidos por la orden
+    if (o.analisis.materiales.length > 0) {
+      autoTable(doc, {
+        startY: y + 1,
+        head: [['Material', 'Cantidad', 'Unidad', 'Costo total']],
+        body: o.analisis.materiales.map((m) => [m.nombre, String(m.cantidad), m.unidad, formatCOP(m.costoTotal)]),
+        foot: [['Total materiales', '', '', formatCOP(o.analisis.costoMateriales)]],
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [15, 118, 110] },
+        footStyles: { fillColor: [226, 232, 240], textColor: 0, fontStyle: 'bold' },
+        columnStyles: { 1: { halign: 'right' }, 3: { halign: 'right' } },
+      })
+      y = doc.lastAutoTable.finalY + 8
+    } else {
+      y += 6
+    }
   }
 
   pieDePagina(doc, empresa, marginX)

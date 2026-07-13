@@ -11,7 +11,7 @@ function inicioDeMes() {
 }
 
 export default function Reportes() {
-  const { getReporte, getReporteMateriales, getMovimientos, empresa, tareas, productos } = useData()
+  const { getReporte, getReporteMateriales, getMovimientos, empresa, ordenesProduccion, productos } = useData()
   const { puede } = useAuth()
   const puedeExportar = puede('reportes', 'exportar')
   const hoy = new Date().toISOString().slice(0, 10)
@@ -24,92 +24,57 @@ export default function Reportes() {
   const [materialAbierto, setMaterialAbierto] = useState(null) // materialId con detalle expandido
   const [cargando, setCargando] = useState(false)
 
-  // --- Reporte de fabricación (basado en Gestión de Nómina) ---
+  // --- Reporte de fabricación (basado en Producción / órdenes) ---
   const [buscarProducto, setBuscarProducto] = useState('')
-  const [detalleAbierto, setDetalleAbierto] = useState(null) // key de producto expandido
+  const [ordenAbierta, setOrdenAbierta] = useState(null) // id de orden expandida
 
-  // Agrupa las tareas por producto y reconstruye la línea de fabricación:
-  // cada proceso es una etapa (corte → ensamble). Las unidades que llegaron a
-  // la última etapa se consideran productos completos.
-  const fabricacion = useMemo(() => {
-    // Tareas dentro del rango, por fecha de creación
-    const enRango = tareas.filter((t) => {
-      const f = (t.creado || '').slice(0, 10)
-      return f && f >= desde && f <= hasta
-    })
+  const ESTADO_ORDEN = { pendiente: 'Pendiente', en_progreso: 'En progreso', terminada: 'Terminada' }
 
-    // Agrupar por producto (por id si existe, si no por nombre)
-    const grupos = {}
-    for (const t of enRango) {
-      const key = t.productoId != null ? `id:${t.productoId}` : `nm:${t.productoNombre}`
-      if (!grupos[key]) grupos[key] = { key, productoId: t.productoId, nombre: t.productoNombre || '(sin producto)', tareas: [] }
-      grupos[key].tareas.push(t)
+  // Analiza una orden de producción: sus procesos, unidades iniciadas (primer
+  // proceso) vs terminadas (último), merma total y materiales consumidos.
+  const analizarOrden = (orden) => {
+    const tareas = [...(orden.tareas || [])].sort((a, b) => (a.creado || '').localeCompare(b.creado || ''))
+    const iniciados = tareas.length ? Number(tareas[0].cantidad) || 0 : 0
+    const finales = tareas.length ? Number(tareas[tareas.length - 1].cantidad) || 0 : 0
+    const merma = Math.max(0, iniciados - finales)
+    // Consolida materiales consumidos por todos los procesos de la orden
+    const matMap = {}
+    for (const t of tareas) {
+      for (const m of t.materialesConsumidos || []) {
+        if (!matMap[m.materialId]) matMap[m.materialId] = { nombre: m.materialNombre, unidad: m.unidad, cantidad: 0, costoTotal: 0 }
+        matMap[m.materialId].cantidad += m.cantidad
+        matMap[m.materialId].costoTotal += m.cantidad * (m.costoUnitario || 0)
+      }
     }
+    const materiales = Object.values(matMap).sort((a, b) => a.nombre.localeCompare(b.nombre))
+    const costoMateriales = materiales.reduce((s, m) => s + m.costoTotal, 0)
+    return { tareas, iniciados, finales, merma, materiales, costoMateriales }
+  }
 
-    const matchEtapa = (t, e) =>
-      (e.id != null && String(t.procesoId) === String(e.id)) ||
-      (t.procesoNombre || '').toLowerCase().trim() === (e.nombre || '').toLowerCase().trim()
-
-    return Object.values(grupos)
-      .map((g) => {
-        // Etapas en orden: las del producto (corte primero, ensamble último).
-        // Si el producto ya no existe, se deduce por primera aparición.
-        const prod = productos.find((p) => String(p.id) === String(g.productoId))
-        let etapas
-        if (prod && prod.procesos?.length) {
-          etapas = prod.procesos.map((p) => ({ id: p.id, nombre: p.nombre }))
-        } else {
-          const vistos = []
-          for (const t of [...g.tareas].sort((a, b) => (a.creado || '').localeCompare(b.creado || ''))) {
-            if (t.procesoNombre && !vistos.includes(t.procesoNombre)) vistos.push(t.procesoNombre)
-          }
-          etapas = vistos.map((n) => ({ id: null, nombre: n }))
-        }
-
-        const terminada = (t) => t.estado === 'terminada' || t.estado === 'pagada'
-        const etapasCant = etapas.map((e) => {
-          const tareasEtapa = g.tareas.filter((t) => matchEtapa(t, e))
-          const unidades = tareasEtapa.reduce((s, t) => s + Number(t.cantidad || 0), 0)
-          const unidadesTerminadas = tareasEtapa
-            .filter(terminada)
-            .reduce((s, t) => s + Number(t.cantidad || 0), 0)
-          // La etapa se marca en verde cuando tiene producción y todas sus tareas
-          // fueron marcadas como terminadas (o ya pagadas) en Gestión de Nómina.
-          const verde = tareasEtapa.length > 0 && tareasEtapa.every(terminada)
-          return { ...e, unidades, unidadesTerminadas, verde }
-        })
-
-        const iniciados = etapasCant[0]?.unidades || 0
-        const completos = etapasCant.length ? etapasCant[etapasCant.length - 1].unidades : 0
-        const etapasConProduccion = etapasCant.filter((e) => e.unidades > 0).length
-
-        // Detalle por fecha: una fila por día, una columna por etapa
-        const fechas = {}
-        for (const t of g.tareas) {
-          const f = (t.creado || '').slice(0, 10)
-          if (!fechas[f]) fechas[f] = etapasCant.map(() => 0)
-          const idx = etapasCant.findIndex((e) => matchEtapa(t, e))
-          if (idx >= 0) fechas[f][idx] += Number(t.cantidad || 0)
-        }
-        const porFecha = Object.entries(fechas)
-          .map(([fecha, celdas]) => ({ fecha, celdas }))
-          .sort((a, b) => b.fecha.localeCompare(a.fecha))
-
-        return {
-          key: g.key,
-          nombre: g.nombre,
-          etapas: etapasCant,
-          iniciados,
-          completos,
-          enProceso: Math.max(0, iniciados - completos),
-          totalEtapas: etapasCant.length,
-          etapasConProduccion,
-          porFecha,
-        }
+  // Órdenes de producción dentro del rango (por fecha de creación), analizadas.
+  const fabricacion = useMemo(() => {
+    return (ordenesProduccion || [])
+      .filter((o) => {
+        const f = (o.creado || '').slice(0, 10)
+        return f && f >= desde && f <= hasta
       })
-      .filter((g) => g.nombre.toLowerCase().includes(buscarProducto.trim().toLowerCase()))
-      .sort((a, b) => a.nombre.localeCompare(b.nombre))
-  }, [tareas, productos, desde, hasta, buscarProducto])
+      .filter((o) => (o.productoNombre || '').toLowerCase().includes(buscarProducto.trim().toLowerCase()))
+      .map((o) => ({ ...o, analisis: analizarOrden(o) }))
+      .sort((a, b) => (b.creado || '').localeCompare(a.creado || ''))
+  }, [ordenesProduccion, desde, hasta, buscarProducto])
+
+  // Totales del periodo para las tarjetas y el resumen
+  const fabTotales = useMemo(() => {
+    const t = { ordenes: fabricacion.length, terminadas: 0, iniciados: 0, completados: 0, merma: 0, costoMateriales: 0 }
+    for (const o of fabricacion) {
+      if (o.estado === 'terminada') t.terminadas += 1
+      t.iniciados += o.analisis.iniciados
+      t.completados += o.estado === 'terminada' ? o.analisis.finales : 0
+      t.merma += o.analisis.merma
+      t.costoMateriales += o.analisis.costoMateriales
+    }
+    return t
+  }, [fabricacion])
 
   const consultar = async () => {
     if (desde > hasta) { notify.error('La fecha "desde" no puede ser mayor que "hasta"'); return }
@@ -163,6 +128,45 @@ export default function Reportes() {
     window.open(`https://wa.me/${telefono}?text=${encodeURIComponent(mensaje)}`, '_blank')
   }
 
+  // --- Exportaciones del reporte de fabricación (producción) ---
+  const exportarFabricacionExcel = () => {
+    if (fabricacion.length === 0) { notify.error('No hay órdenes en el periodo'); return }
+    const filas = [['Orden', 'Fecha', 'Producto', 'Estado', 'Iniciados', 'Terminados', 'Merma', 'Costo materiales']]
+    for (const o of fabricacion) {
+      filas.push([
+        `#${o.id}`, (o.creado || '').slice(0, 10), o.productoNombre || '', ESTADO_ORDEN[o.estado] || o.estado,
+        o.analisis.iniciados, o.estado === 'terminada' ? o.analisis.finales : 0, o.analisis.merma, o.analisis.costoMateriales,
+      ])
+    }
+    filas.push(['TOTALES', '', '', '', fabTotales.iniciados, fabTotales.completados, fabTotales.merma, fabTotales.costoMateriales])
+    descargarCSV(`reporte_fabricacion_${desde}_a_${hasta}.csv`, filas)
+  }
+
+  const enviarFabricacionWhatsApp = async () => {
+    if (fabricacion.length === 0) { notify.error('No hay órdenes en el periodo'); return }
+    const telefono = await preguntarTexto(
+      'Ingresa el número de WhatsApp de destino (con código de país, sin espacios ni +).',
+      { titulo: 'Enviar por WhatsApp', placeholder: 'Ej: 573001234567', textoOk: 'Enviar' }
+    )
+    if (!telefono) return
+
+    const lineas = fabricacion
+      .map((o) => `• #${o.id} ${o.productoNombre}: ${ESTADO_ORDEN[o.estado] || o.estado}, inició ${o.analisis.iniciados}, terminó ${o.estado === 'terminada' ? o.analisis.finales : 0}${o.analisis.merma > 0 ? `, merma ${o.analisis.merma}` : ''}`)
+      .join('\n')
+
+    const mensaje =
+      `*REPORTE DE FABRICACIÓN*\n` +
+      `Periodo: ${formatFecha(desde)} — ${formatFecha(hasta)}\n\n` +
+      `Órdenes: ${fabTotales.ordenes} (${fabTotales.terminadas} terminadas)\n` +
+      `Unidades iniciadas: ${fabTotales.iniciados}\n` +
+      `Unidades completadas: ${fabTotales.completados}\n` +
+      `Merma total: ${fabTotales.merma}\n` +
+      `Costo en materiales: ${formatCOP(fabTotales.costoMateriales)}\n\n` +
+      (lineas || 'Sin órdenes en el periodo.')
+
+    window.open(`https://wa.me/${telefono}?text=${encodeURIComponent(mensaje)}`, '_blank')
+  }
+
   const rangoRapido = (dias) => {
     const h = new Date()
     const d = new Date()
@@ -197,22 +201,26 @@ export default function Reportes() {
         </div>
       </div>
 
-      {/* ===== Fabricación de productos (según Gestión de Nómina) ===== */}
+      {/* ===== Fabricación (órdenes de producción) ===== */}
       <div className="card">
         <div className="card-head">
-          <h3>🏭 Fabricación de productos</h3>
+          <h3>🏭 Fabricación (órdenes de producción)</h3>
           {fabricacion.length > 0 && puedeExportar && (
-            <button
-              className="btn-secondary"
-              onClick={() => generarPdfFabricacion({ empresa, desde, hasta, productos: fabricacion })}
-            >
-              📄 Descargar PDF
-            </button>
+            <div className="actions">
+              <button
+                className="btn-secondary"
+                onClick={() => generarPdfFabricacion({ empresa, desde, hasta, ordenes: fabricacion, totales: fabTotales })}
+              >
+                📄 PDF
+              </button>
+              <button className="btn-secondary" onClick={exportarFabricacionExcel}>📊 Excel</button>
+              <button className="btn-secondary" onClick={enviarFabricacionWhatsApp}>📱 WhatsApp</button>
+            </div>
           )}
         </div>
         <p className="muted small">
-          Cada proceso es una etapa de fabricación (el primero es el corte y el último el ensamble).
-          Un producto está completo cuando llega a la última etapa. Periodo: {formatFecha(desde)} — {formatFecha(hasta)}.
+          Órdenes creadas en el periodo {formatFecha(desde)} — {formatFecha(hasta)}. "Iniciadas" es la cantidad
+          del primer proceso; "completadas" la del último (solo en órdenes terminadas); la diferencia es merma.
         </p>
 
         <div className="row" style={{ marginBottom: 10 }}>
@@ -228,83 +236,118 @@ export default function Reportes() {
         </div>
 
         {fabricacion.length === 0 && (
-          <p className="muted">No hay tareas de fabricación en este periodo.</p>
+          <p className="muted">No hay órdenes de producción en este periodo.</p>
         )}
 
-        {fabricacion.map((g) => {
-          const completo = g.totalEtapas > 0 && g.etapasConProduccion === g.totalEtapas
-          const abierto = detalleAbierto === g.key
-          return (
-            <div className="tarea-item" key={g.key}>
-              <div className="tarea-head">
-                <div>
-                  <strong>{g.nombre}</strong>
-                  <span className="muted"> · {g.etapasConProduccion}/{g.totalEtapas} etapas</span>
-                </div>
-                <span className={`chip ${completo ? 'ok' : 'warn'}`}>
-                  {completo ? '✓ Completo' : 'En proceso'}
-                </span>
+        {fabricacion.length > 0 && (
+          <>
+            <div className="cards-grid">
+              <div className="stat-card">
+                <span className="stat-label">Órdenes</span>
+                <span className="stat-value">{fabTotales.ordenes}</span>
               </div>
-
-              <div className="muted small" style={{ marginBottom: 8 }}>
-                Iniciados (1ª etapa): <strong>{g.iniciados}</strong> ·
-                {' '}Completos (última etapa): <strong>{g.completos}</strong> ·
-                {' '}En proceso: <strong>{g.enProceso}</strong>
+              <div className="stat-card">
+                <span className="stat-label">Terminadas</span>
+                <span className="stat-value">{fabTotales.terminadas}</span>
               </div>
-
-              {/* Unidades por etapa */}
-              <div className="etapas-flow">
-                {g.etapas.map((e, i) => (
-                  <div key={i} className={`etapa-chip${e.verde ? ' terminada' : ''}`}>
-                    <span className="small etapa-nombre">
-                      {e.verde && '✓ '}{i + 1}. {e.nombre}
-                    </span>
-                    <strong>{e.unidades}</strong>
-                    {e.unidadesTerminadas > 0 && e.unidadesTerminadas < e.unidades && (
-                      <span className="small muted">{e.unidadesTerminadas} terminadas</span>
-                    )}
-                  </div>
-                ))}
+              <div className="stat-card">
+                <span className="stat-label">Merma total</span>
+                <span className="stat-value danger-text">{fabTotales.merma}</span>
               </div>
-
-              <div className="actions" style={{ marginTop: 10 }}>
-                <button className="btn-icon" onClick={() => setDetalleAbierto(abierto ? null : g.key)}>
-                  📅 {abierto ? 'Ocultar' : 'Ver'} detalle por fecha
-                </button>
+              <div className="stat-card highlight">
+                <span className="stat-label">Costo materiales</span>
+                <span className="stat-value">{formatCOP(fabTotales.costoMateriales)}</span>
               </div>
-
-              {abierto && (
-                <div className="historial-box">
-                  {g.porFecha.length === 0 && <p className="muted small">Sin registros por fecha.</p>}
-                  {g.porFecha.length > 0 && (
-                    <div className="table-wrap">
-                      <table className="table compact">
-                        <thead>
-                          <tr>
-                            <th>Fecha</th>
-                            {g.etapas.map((e, i) => (
-                              <th key={i} className="num">{e.nombre}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {g.porFecha.map((f) => (
-                            <tr key={f.fecha}>
-                              <td>{formatFecha(f.fecha)}</td>
-                              {f.celdas.map((c, i) => (
-                                <td key={i} className="num">{c || '—'}</td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
-          )
-        })}
+
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Orden</th>
+                    <th>Producto</th>
+                    <th>Estado</th>
+                    <th className="num">Iniciados</th>
+                    <th className="num">Terminados</th>
+                    <th className="num">Merma</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fabricacion.map((o) => {
+                    const abierto = ordenAbierta === o.id
+                    return (
+                      <Fragment key={o.id}>
+                        <tr className="chip-clicable" onClick={() => setOrdenAbierta(abierto ? null : o.id)}>
+                          <td>{abierto ? '▾' : '▸'} #{o.id}<div className="muted small">{formatFecha(o.creado)}</div></td>
+                          <td><strong>{o.productoNombre}</strong></td>
+                          <td>
+                            <span className={`chip ${o.estado === 'terminada' ? 'ok' : o.estado === 'en_progreso' ? 'warn' : ''}`}>
+                              {ESTADO_ORDEN[o.estado] || o.estado}
+                            </span>
+                          </td>
+                          <td className="num">{o.analisis.iniciados}</td>
+                          <td className="num">{o.estado === 'terminada' ? o.analisis.finales : '—'}</td>
+                          <td className="num">{o.analisis.merma > 0 ? <span className="texto-salida">-{o.analisis.merma}</span> : '—'}</td>
+                          <td className="num muted small">{o.tareas.length} proceso(s)</td>
+                        </tr>
+                        {abierto && (
+                          <tr>
+                            <td colSpan={7}>
+                              <strong className="small">Procesos</strong>
+                              <div className="table-wrap">
+                                <table className="table compact">
+                                  <thead>
+                                    <tr><th>Proceso</th><th className="num">Cantidad</th><th>Estado</th></tr>
+                                  </thead>
+                                  <tbody>
+                                    {o.tareas.map((t) => (
+                                      <tr key={t.id}>
+                                        <td>{t.procesoNombre}</td>
+                                        <td className="num">{t.cantidad}</td>
+                                        <td>
+                                          <span className={`chip ${t.estado === 'terminada' ? 'ok' : t.estado === 'en_progreso' ? 'warn' : ''}`}>
+                                            {ESTADO_ORDEN[t.estado] || t.estado}
+                                          </span>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                              {o.analisis.materiales.length > 0 && (
+                                <>
+                                  <strong className="small">Materiales usados</strong>
+                                  <div className="table-wrap">
+                                    <table className="table compact">
+                                      <thead>
+                                        <tr><th>Material</th><th className="num">Cantidad</th><th>Unidad</th><th className="num">Costo total</th></tr>
+                                      </thead>
+                                      <tbody>
+                                        {o.analisis.materiales.map((m, i) => (
+                                          <tr key={i}>
+                                            <td>{m.nombre}</td>
+                                            <td className="num texto-salida">-{m.cantidad}</td>
+                                            <td>{m.unidad}</td>
+                                            <td className="num">{formatCOP(m.costoTotal)}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </div>
 
       {/* ===== Materiales: entradas, salidas y stock disponible ===== */}

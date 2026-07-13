@@ -12,7 +12,14 @@ db.pragma('foreign_keys = ON')
 db.exec(`
   CREATE TABLE IF NOT EXISTS productos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre TEXT NOT NULL
+    nombre TEXT NOT NULL,
+    codigo TEXT,
+    descripcion TEXT,
+    valor_venta REAL NOT NULL DEFAULT 0,
+    valor_compra REAL NOT NULL DEFAULT 0,
+    stock_apertura REAL NOT NULL DEFAULT 0,
+    stock REAL NOT NULL DEFAULT 0,
+    stock_minimo REAL NOT NULL DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS procesos (
@@ -201,6 +208,7 @@ db.exec(`
     progreso INTEGER NOT NULL DEFAULT 0,
     estado TEXT NOT NULL DEFAULT 'pendiente',   -- pendiente|en_progreso|terminada
     comentario TEXT,
+    motivo_merma TEXT,
     creado TEXT,
     actualizado TEXT,
     FOREIGN KEY (empleado_id) REFERENCES empleados(id) ON DELETE CASCADE
@@ -229,6 +237,18 @@ db.exec(`
     FOREIGN KEY (empleado_id) REFERENCES empleados(id) ON DELETE CASCADE
   );
 
+  CREATE TABLE IF NOT EXISTS producto_movimientos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    producto_id INTEGER NOT NULL,
+    tipo TEXT NOT NULL DEFAULT 'entrada',   -- entrada (compra) | produccion
+    cantidad REAL NOT NULL DEFAULT 0,
+    costo_unitario REAL NOT NULL DEFAULT 0,
+    fecha TEXT,
+    descripcion TEXT,
+    orden_produccion_id INTEGER,
+    FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE CASCADE
+  );
+
   CREATE TABLE IF NOT EXISTS ordenes_produccion (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     producto_id INTEGER,
@@ -236,6 +256,7 @@ db.exec(`
     cantidad REAL NOT NULL DEFAULT 0,
     estado TEXT NOT NULL DEFAULT 'pendiente',   -- pendiente|en_progreso|terminada
     comentario TEXT,
+    stock_abastecido REAL NOT NULL DEFAULT 0,   -- cantidad ya sumada al stock del producto
     creado TEXT,
     actualizado TEXT
   );
@@ -279,12 +300,46 @@ if (!colsMateriales.some((c) => c.name === 'stock_minimo')) {
   db.exec('ALTER TABLE materiales ADD COLUMN stock_minimo REAL NOT NULL DEFAULT 0')
 }
 
+// Columnas nuevas de productos: código, precios, e inventario propio (stock que se
+// abastece cuando termina una orden de producción). Bases creadas antes de esto
+// reciben las columnas con default 0 y sin romper productos existentes.
+const colsProductos = db.prepare("PRAGMA table_info(productos)").all()
+const addColProducto = (nombre, ddl) => {
+  if (!colsProductos.some((c) => c.name === nombre)) db.exec(`ALTER TABLE productos ADD COLUMN ${ddl}`)
+}
+addColProducto('codigo', 'codigo TEXT')
+addColProducto('descripcion', 'descripcion TEXT')
+addColProducto('valor_venta', 'valor_venta REAL NOT NULL DEFAULT 0')
+addColProducto('valor_compra', 'valor_compra REAL NOT NULL DEFAULT 0')
+addColProducto('stock_apertura', 'stock_apertura REAL NOT NULL DEFAULT 0')
+addColProducto('stock', 'stock REAL NOT NULL DEFAULT 0')
+addColProducto('stock_minimo', 'stock_minimo REAL NOT NULL DEFAULT 0')
+// Genera un código correlativo (PRD-0001) para productos que aún no tengan uno
+{
+  const sinCodigo = db.prepare("SELECT id FROM productos WHERE codigo IS NULL OR codigo = '' ORDER BY id ASC").all()
+  const asignarCodigo = db.prepare('UPDATE productos SET codigo = ? WHERE id = ?')
+  for (const p of sinCodigo) {
+    asignarCodigo.run(`PRD-${String(p.id).padStart(4, '0')}`, p.id)
+  }
+}
+
+// Marca en la orden si ya abasteció el stock del producto al terminarse, para no
+// sumar dos veces y poder revertir si se reabre o elimina una orden terminada.
+const colsOrdenesProd = db.prepare("PRAGMA table_info(ordenes_produccion)").all()
+if (!colsOrdenesProd.some((c) => c.name === 'stock_abastecido')) {
+  db.exec('ALTER TABLE ordenes_produccion ADD COLUMN stock_abastecido REAL NOT NULL DEFAULT 0')
+}
+
 // Columna de orden de producción en tareas_produccion (agrupa tareas del mismo
 // lote a través de sus distintos procesos). Nullable: las tareas creadas antes
 // de esta migración quedan sin orden asignada.
 const colsTareasProd = db.prepare("PRAGMA table_info(tareas_produccion)").all()
 if (!colsTareasProd.some((c) => c.name === 'orden_produccion_id')) {
   db.exec('ALTER TABLE tareas_produccion ADD COLUMN orden_produccion_id INTEGER')
+}
+// Motivo de merma opcional por proceso (ej: "material defectuoso", "error de corte")
+if (!colsTareasProd.some((c) => c.name === 'motivo_merma')) {
+  db.exec('ALTER TABLE tareas_produccion ADD COLUMN motivo_merma TEXT')
 }
 
 // Columna que liga cada movimiento de stock con la tarea de producción que lo

@@ -79,8 +79,8 @@ export function DataProvider({ children }) {
         cargarSiPuede(puedeLeer(['control-dinero', 'ver']), '/movimientos', []),
         cargarSiPuede(puedeLeer(['empresa', 'ver'], ['nomina', 'ver'], ['historial', 'ver']), '/empresa', null),
         cargarSiPuede(puedeLeer(['gestion-nomina', 'ver'], ['nomina', 'ver'], ['reportes', 'ver']), '/tareas', []),
-        cargarSiPuede(puedeLeer(['gestion-produccion', 'ver']), '/tareas-produccion', []),
-        cargarSiPuede(puedeLeer(['gestion-produccion', 'ver']), '/ordenes-produccion', []),
+        cargarSiPuede(puedeLeer(['gestion-produccion', 'ver'], ['reportes', 'ver']), '/tareas-produccion', []),
+        cargarSiPuede(puedeLeer(['gestion-produccion', 'ver'], ['reportes', 'ver']), '/ordenes-produccion', []),
         cargarSiPuede(puedeLeer(['materiales', 'ver']), '/materiales', []),
         cargarSiPuede(puedeLeer(['productos', 'ver']), '/procesos-globales', []),
       ])
@@ -109,18 +109,26 @@ export function DataProvider({ children }) {
   }, [])
 
   // ---------- PRODUCTOS ----------
-  const addProducto = async (nombre, procesos) => {
-    await http('/productos', { method: 'POST', body: JSON.stringify({ nombre, procesos }) })
+  // `datos` incluye nombre, procesos y los campos nuevos (descripcion, valorVenta,
+  // valorCompra, stockApertura, stockMinimo). Se manda el objeto completo.
+  const addProducto = async (datos) => {
+    await http('/productos', { method: 'POST', body: JSON.stringify(datos) })
     await recargar()
   }
-  const updateProducto = async (id, nombre, procesos) => {
-    await http(`/productos/${id}`, { method: 'PUT', body: JSON.stringify({ nombre, procesos }) })
+  const updateProducto = async (id, datos) => {
+    await http(`/productos/${id}`, { method: 'PUT', body: JSON.stringify(datos) })
     await recargar()
   }
   const deleteProducto = async (id) => {
     await http(`/productos/${id}`, { method: 'DELETE' })
     await recargar()
   }
+  const registrarEntradaProducto = async (id, entrada) => {
+    const actualizado = await http(`/productos/${id}/entrada`, { method: 'POST', body: JSON.stringify(entrada) })
+    await recargar()
+    return actualizado
+  }
+  const getProductoMovimientos = (id) => http(`/productos/${id}/movimientos`)
 
   // ---------- EMPLEADOS ----------
   const addEmpleado = async (emp) => {
@@ -336,6 +344,8 @@ export function DataProvider({ children }) {
     addProducto,
     updateProducto,
     deleteProducto,
+    registrarEntradaProducto,
+    getProductoMovimientos,
     addEmpleado,
     updateEmpleado,
     deleteEmpleado,

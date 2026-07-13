@@ -89,6 +89,57 @@ export default function GestionProduccion() {
   const productoDeOrdenSel = productos.find((p) => String(p.id) === String(ordenSel?.productoId))
   const ordenDetalle = ordenesProduccion.find((o) => o.id === ordenDetalleId)
 
+  // Consolida todos los materiales consumidos por los procesos de una orden, sumando
+  // cantidades del mismo material (para la tabla "materiales de esta orden").
+  const materialesDeOrden = (orden) => {
+    const map = {}
+    for (const t of orden?.tareas || []) {
+      for (const m of t.materialesConsumidos || []) {
+        if (!map[m.materialId]) {
+          map[m.materialId] = { ...m, cantidad: 0, costoTotal: 0 }
+        }
+        map[m.materialId].cantidad += m.cantidad
+        map[m.materialId].costoTotal += m.cantidad * (m.costoUnitario || 0)
+      }
+    }
+    return Object.values(map).sort((a, b) => a.materialNombre.localeCompare(b.materialNombre))
+  }
+
+  // Merma de la orden: cantidad con la que se inició (primer proceso) vs la del último
+  // proceso. Las tareas vienen ordenadas por creación asc desde el backend.
+  const mermaDeOrden = (orden) => {
+    const tareas = orden?.tareas || []
+    if (tareas.length < 2) return null
+    const inicial = Number(tareas[0].cantidad) || 0
+    const final = Number(tareas[tareas.length - 1].cantidad) || 0
+    const merma = inicial - final
+    const pct = inicial > 0 ? (merma / inicial) * 100 : 0
+    return { inicial, final, merma, pct, procesoInicial: tareas[0].procesoNombre, procesoFinal: tareas[tareas.length - 1].procesoNombre }
+  }
+
+  // Evalúa si una orden está lista para terminar: debe tener TODOS los procesos que
+  // se configuraron en el producto, y todos deben estar terminados. Devuelve el
+  // motivo si no se puede (para avisar al usuario), o null si está lista.
+  const motivoNoTerminar = (orden) => {
+    const producto = productos.find((p) => String(p.id) === String(orden.productoId))
+    const procesosProducto = producto?.procesos || []
+    if (procesosProducto.length === 0) {
+      // Sin receta de procesos no hay contra qué validar: solo exige que lo que tenga esté terminado
+      const pend = orden.tareas.filter((t) => t.estado !== 'terminada').length
+      return pend > 0 ? `Faltan ${pend} proceso(s) por terminar` : null
+    }
+    const nombresEnOrden = new Set(orden.tareas.map((t) => (t.procesoNombre || '').toLowerCase()))
+    const faltantes = procesosProducto.filter((p) => !nombresEnOrden.has((p.nombre || '').toLowerCase()))
+    if (faltantes.length > 0) {
+      return `Faltan procesos del producto: ${faltantes.map((p) => p.nombre).join(', ')}`
+    }
+    const sinTerminar = orden.tareas.filter((t) => t.estado !== 'terminada')
+    if (sinTerminar.length > 0) {
+      return `Faltan procesos por terminar: ${sinTerminar.map((t) => t.procesoNombre).join(', ')}`
+    }
+    return null
+  }
+
   // Procesos que la orden seleccionada ya tiene (por nombre, en minúsculas), para
   // no ofrecerlos de nuevo en el select: un proceso no se repite dentro de una orden.
   const procesosUsados = new Set(
@@ -140,11 +191,13 @@ export default function GestionProduccion() {
   }
 
   const handleTerminarOrden = async (orden) => {
-    const pendientes = orden.tareas.filter((t) => t.estado !== 'terminada').length
-    const aviso = pendientes > 0
-      ? `Esta orden tiene ${pendientes} proceso(s) sin terminar. ¿Marcarla como terminada de todos modos?`
-      : '¿Marcar esta orden como terminada?'
-    if (!(await confirmar(aviso, { titulo: 'Terminar orden', textoOk: 'Sí, terminar', peligro: pendientes > 0 }))) return
+    // El producto debe pasar por todas sus etapas antes de darse por terminado
+    const motivo = motivoNoTerminar(orden)
+    if (motivo) {
+      notify.error(`No se puede terminar la orden. ${motivo}.`)
+      return
+    }
+    if (!(await confirmar('¿Marcar esta orden como terminada? Se sumará al stock del producto.', { titulo: 'Terminar orden', textoOk: 'Sí, terminar', peligro: false }))) return
     try {
       await terminarOrdenProduccion(orden.id)
     } catch (e) {
@@ -153,9 +206,15 @@ export default function GestionProduccion() {
   }
 
   const handleEliminarOrden = async (orden) => {
-    if (!(await confirmar(`¿Eliminar la orden de "${orden.productoNombre}"?`))) return
+    // Una orden con procesos ya descontó materiales del inventario: no se elimina.
+    if (orden.tareas.length > 0) {
+      notify.error('No se puede eliminar: esta orden ya tiene procesos que descontaron materiales. Elimina los procesos primero si de verdad quieres borrarla.')
+      return
+    }
+    if (!(await confirmar(`¿Eliminar la orden de "${orden.productoNombre}"?`, { titulo: 'Eliminar orden', textoOk: 'Sí, eliminar', peligro: true }))) return
     try {
       await deleteOrdenProduccion(orden.id)
+      notify.ok('Orden eliminada')
     } catch (e) {
       notify.error('Error: ' + e.message)
     }
@@ -208,6 +267,8 @@ export default function GestionProduccion() {
   // ---------- Edición de tareas individuales ----------
   const valorProgreso = (t) => (borradores[t.id]?.progreso ?? t.progreso)
   const valorComentario = (t) => (borradores[t.id]?.comentario ?? t.comentario)
+  const valorCantidad = (t) => (borradores[t.id]?.cantidad ?? t.cantidad)
+  const valorMotivoMerma = (t) => (borradores[t.id]?.motivoMerma ?? (t.motivoMerma || ''))
 
   const setBorrador = (id, campo, val) =>
     setBorradores((b) => ({ ...b, [id]: { ...b[id], [campo]: val } }))
@@ -217,6 +278,8 @@ export default function GestionProduccion() {
       await updateTareaProduccion(t.id, {
         progreso: Number(valorProgreso(t)),
         comentario: valorComentario(t),
+        cantidad: Number(valorCantidad(t)),
+        motivoMerma: valorMotivoMerma(t),
       })
       setBorradores((b) => {
         const next = { ...b }
@@ -262,7 +325,10 @@ export default function GestionProduccion() {
 
   const hayBorrador = (t) =>
     borradores[t.id] &&
-    (Number(valorProgreso(t)) !== t.progreso || valorComentario(t) !== t.comentario)
+    (Number(valorProgreso(t)) !== t.progreso ||
+      valorComentario(t) !== t.comentario ||
+      Number(valorCantidad(t)) !== t.cantidad ||
+      valorMotivoMerma(t) !== (t.motivoMerma || ''))
 
   const toggleProceso = (id) => setProcesoExpandidoId((actual) => (actual === id ? null : id))
 
@@ -298,8 +364,33 @@ export default function GestionProduccion() {
           </div>
         )}
 
+        {!bloqueada && (
+          <div className="row" style={{ marginTop: 4, alignItems: 'flex-end' }}>
+            <div style={{ flex: 1 }}>
+              <label className="small">Cantidad que salió de este proceso</label>
+              <input
+                type="number" min="0" step="any"
+                value={valorCantidad(t)}
+                onChange={(e) => setBorrador(t.id, 'cantidad', e.target.value)}
+              />
+            </div>
+            <div style={{ flex: 3 }}>
+              <label className="small">Motivo de merma (si salieron menos que en el proceso anterior)</label>
+              <input
+                type="text"
+                value={valorMotivoMerma(t)}
+                onChange={(e) => setBorrador(t.id, 'motivoMerma', e.target.value)}
+                placeholder="Ej: material defectuoso, error de corte"
+              />
+            </div>
+          </div>
+        )}
+
         {bloqueada && t.comentario && (
           <p className="muted small" style={{ marginTop: 8 }}>💬 {t.comentario}</p>
+        )}
+        {t.motivoMerma && (
+          <p className="muted small" style={{ marginTop: 8 }}>📉 Merma: {t.motivoMerma}</p>
         )}
 
         <p className="muted small" style={{ marginTop: 10, marginBottom: 4 }}>
@@ -523,16 +614,24 @@ export default function GestionProduccion() {
                               + Proceso
                             </button>
                           )}
-                          {puedeEditar && orden.estado !== 'terminada' && (
-                            <button className="btn-primary btn-sm" onClick={() => handleTerminarOrden(orden)}>
-                              ✓ Terminar
-                            </button>
-                          )}
+                          {puedeEditar && orden.estado !== 'terminada' && (() => {
+                            const motivo = motivoNoTerminar(orden)
+                            return (
+                              <button
+                                className="btn-primary btn-sm"
+                                disabled={!!motivo}
+                                title={motivo || 'Marcar la orden como terminada'}
+                                onClick={() => handleTerminarOrden(orden)}
+                              >
+                                ✓ Terminar
+                              </button>
+                            )
+                          })()}
                           {puedeEliminar && (
                             <button
                               className="btn-danger btn-sm"
                               disabled={orden.tareas.length > 0}
-                              title={orden.tareas.length > 0 ? 'Elimina primero los procesos de esta orden' : ''}
+                              title={orden.tareas.length > 0 ? 'No se puede eliminar: ya tiene procesos que descontaron materiales' : 'Eliminar esta orden'}
                               onClick={() => handleEliminarOrden(orden)}
                             >
                               🗑 Eliminar
@@ -640,17 +739,27 @@ export default function GestionProduccion() {
                       <th>Proceso</th>
                       <th>Empleado</th>
                       <th className="num">Cantidad</th>
+                      <th className="num">Merma</th>
                       <th style={{ minWidth: 140 }}>Progreso</th>
                       <th>Estado</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {ordenDetalle.tareas.map((t) => (
+                    {ordenDetalle.tareas.map((t, idx) => {
+                      // Merma respecto al proceso anterior (la cantidad que entró vs la que salió)
+                      const prev = idx > 0 ? ordenDetalle.tareas[idx - 1] : null
+                      const merma = prev ? (Number(prev.cantidad) || 0) - (Number(t.cantidad) || 0) : 0
+                      return (
                       <Fragment key={t.id}>
                         <tr className="chip-clicable" onClick={() => toggleProceso(t.id)}>
                           <td>{procesoExpandidoId === t.id ? '▾' : '▸'} {t.procesoNombre}</td>
                           <td>{nombreEmpleado(t.empleadoId)}</td>
                           <td className="num">{t.cantidad}</td>
+                          <td className="num">
+                            {prev && merma > 0
+                              ? <span className="texto-salida">-{merma}</span>
+                              : <span className="muted">—</span>}
+                          </td>
                           <td><BarraProgreso valor={t.progreso} /></td>
                           <td>
                             <span className={`chip ${t.estado === 'terminada' ? 'ok' : t.estado === 'en_progreso' ? 'warn' : ''}`}>
@@ -660,15 +769,78 @@ export default function GestionProduccion() {
                         </tr>
                         {procesoExpandidoId === t.id && (
                           <tr>
-                            <td colSpan={5}>{renderDetalleProceso(t)}</td>
+                            <td colSpan={6}>{renderDetalleProceso(t)}</td>
                           </tr>
                         )}
                       </Fragment>
-                    ))}
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
             )}
+
+            {/* Resumen de merma entre el primer y el último proceso */}
+            {(() => {
+              const m = mermaDeOrden(ordenDetalle)
+              if (!m) return null
+              return (
+                <div className="card" style={{ background: '#f8fafc', marginTop: 14, marginBottom: 0 }}>
+                  <strong>📉 Merma de la orden</strong>
+                  <p className="muted small" style={{ margin: '6px 0 0' }}>
+                    Inició con <strong>{m.inicial}</strong> en "{m.procesoInicial}" y terminó con{' '}
+                    <strong>{m.final}</strong> en "{m.procesoFinal}".{' '}
+                    {m.merma > 0 ? (
+                      <span className="texto-salida">Merma: {m.merma} unidad(es) ({m.pct.toFixed(1)}%)</span>
+                    ) : (
+                      <span className="texto-entrada">Sin merma.</span>
+                    )}
+                  </p>
+                </div>
+              )
+            })()}
+
+            {/* Materiales consumidos por toda la orden (consolidado) */}
+            {(() => {
+              const mats = materialesDeOrden(ordenDetalle)
+              if (mats.length === 0) return null
+              const totalOrden = mats.reduce((s, m) => s + m.costoTotal, 0)
+              return (
+                <>
+                  <p className="muted small" style={{ marginTop: 14, marginBottom: 4 }}>
+                    <strong>Materiales usados en esta orden</strong>
+                  </p>
+                  <div className="table-wrap">
+                    <table className="table compact">
+                      <thead>
+                        <tr>
+                          <th>Material</th>
+                          <th className="num">Cantidad</th>
+                          <th>Unidad</th>
+                          <th className="num">Costo total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {mats.map((m) => (
+                          <tr key={m.materialId}>
+                            <td>{m.materialNombre}</td>
+                            <td className="num texto-salida">-{m.cantidad}</td>
+                            <td>{m.unidad}</td>
+                            <td className="num">{formatCOP(m.costoTotal)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr>
+                          <td colSpan={3}><strong>Total en materiales</strong></td>
+                          <td className="num"><strong>{formatCOP(totalOrden)}</strong></td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </>
+              )
+            })()}
 
             <div className="form-actions">
               <button className="btn-secondary" onClick={cerrarDetalleOrden}>Cerrar</button>
