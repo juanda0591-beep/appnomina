@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha } from '../utils/format.js'
@@ -30,6 +30,36 @@ function BarraProgreso({ valor }) {
   )
 }
 
+// Una orden está atrasada si tiene fecha de entrega pasada y no está terminada.
+function estaAtrasada(orden) {
+  if (!orden.fechaEntrega || orden.estado === 'terminada') return false
+  return orden.fechaEntrega.slice(0, 10) < new Date().toISOString().slice(0, 10)
+}
+
+// Aviso visual del chequeo de material (MRP). Muestra faltantes o "alcanza".
+function AvisoMaterial({ mrp }) {
+  if (!mrp || !mrp.items || mrp.items.length === 0) return null
+  if (!mrp.hayFaltantes) {
+    return <p className="chip ok" style={{ display: 'inline-block', marginTop: 8 }}>✓ Hay material suficiente en stock</p>
+  }
+  const faltantes = mrp.items.filter((i) => i.faltante > 0)
+  return (
+    <div className="card" style={{ background: '#fef2f2', border: '1px solid #fecaca', marginTop: 10, marginBottom: 0 }}>
+      <strong className="texto-salida">⚠️ Material insuficiente en stock</strong>
+      <p className="muted small" style={{ margin: '4px 0 0' }}>
+        Se puede crear igual (el stock quedará en negativo), pero faltaría:
+      </p>
+      <ul className="small" style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+        {faltantes.map((i) => (
+          <li key={i.materialId}>
+            <strong>{i.materialNombre}</strong>: faltan {i.faltante} {i.unidad} (necesita {i.requerido}, hay {i.stockActual})
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 // Describe en qué proceso va la orden: el primer proceso sin terminar (en el
 // orden en que se agregaron), o si ya no queda ninguno pendiente.
 function procesoActualDe(orden) {
@@ -45,6 +75,7 @@ export default function GestionProduccion() {
     addTareaProduccion, updateTareaProduccion, terminarTareaProduccion, deleteTareaProduccion,
     getTareaProduccionHistorial,
     addOrdenProduccion, terminarOrdenProduccion, deleteOrdenProduccion,
+    cambiarEstadoOrden, chequearMaterialOrden,
     getEmpleado,
   } = useData()
   const { puede } = useAuth()
@@ -53,11 +84,17 @@ export default function GestionProduccion() {
   const puedeEditar = puede('gestion-produccion', 'editar')
   const puedeEliminar = puede('gestion-produccion', 'eliminar')
 
+  // Vista tabla o tablero Kanban (se recuerda en localStorage, como el sidebar)
+  const [vista, setVista] = useState(() => localStorage.getItem('produccion_vista') || 'tabla')
+  const cambiarVista = (v) => { setVista(v); localStorage.setItem('produccion_vista', v) }
+
   // --- Formulario: nueva orden de producción ---
   const [formOrdenAbierto, setFormOrdenAbierto] = useState(false)
   const [ordenProductoId, setOrdenProductoId] = useState('')
   const [ordenCantidad, setOrdenCantidad] = useState('')
   const [ordenComentario, setOrdenComentario] = useState('')
+  const [ordenFechaEntrega, setOrdenFechaEntrega] = useState('')
+  const [mrpOrden, setMrpOrden] = useState(null) // chequeo de material para la nueva orden
   const [guardandoOrden, setGuardandoOrden] = useState(false)
 
   // --- Formulario: agregar proceso (tarea) a una orden ---
@@ -66,6 +103,7 @@ export default function GestionProduccion() {
   const [taProcesoId, setTaProcesoId] = useState('')
   const [taCantidad, setTaCantidad] = useState('')
   const [taComentario, setTaComentario] = useState('')
+  const [mrpTarea, setMrpTarea] = useState(null) // chequeo de material al agregar proceso
   const [guardandoTarea, setGuardandoTarea] = useState(false)
 
   // --- Filtros de órdenes ---
@@ -168,6 +206,8 @@ export default function GestionProduccion() {
     setOrdenProductoId('')
     setOrdenCantidad('')
     setOrdenComentario('')
+    setOrdenFechaEntrega('')
+    setMrpOrden(null)
     setFormOrdenAbierto(false)
   }
 
@@ -180,6 +220,7 @@ export default function GestionProduccion() {
         productoId: ordenProductoId,
         cantidad: Number(ordenCantidad),
         comentario: ordenComentario,
+        fechaEntrega: ordenFechaEntrega || null,
       })
       resetOrdenForm()
       notify.ok('Orden de producción creada')
@@ -187,6 +228,20 @@ export default function GestionProduccion() {
       notify.error('Error al crear la orden: ' + e.message)
     } finally {
       setGuardandoOrden(false)
+    }
+  }
+
+  const handleCambiarEstado = async (orden, estado) => {
+    // Al pasar a terminada respeta la misma validación de etapas completas
+    if (estado === 'terminada') {
+      const motivo = motivoNoTerminar(orden)
+      if (motivo) { notify.error(`No se puede terminar la orden. ${motivo}.`); return }
+      if (!(await confirmar('¿Marcar esta orden como terminada? Se sumará al stock del producto.', { titulo: 'Terminar orden', textoOk: 'Sí, terminar', peligro: false }))) return
+    }
+    try {
+      await cambiarEstadoOrden(orden.id, estado)
+    } catch (e) {
+      notify.error('Error: ' + e.message)
     }
   }
 
@@ -263,6 +318,38 @@ export default function GestionProduccion() {
       setGuardandoTarea(false)
     }
   }
+
+  // ---------- Chequeo preventivo de materiales (MRP) ----------
+  // Al elegir producto+cantidad en la nueva orden, consulta si el stock alcanza
+  // para TODOS los procesos del producto (suma sus recetas × cantidad).
+  useEffect(() => {
+    const prod = productos.find((p) => String(p.id) === String(ordenProductoId))
+    const cant = Number(ordenCantidad) || 0
+    if (!formOrdenAbierto || !prod || !(cant > 0) || !(prod.procesos?.length)) {
+      setMrpOrden(null)
+      return
+    }
+    let cancelado = false
+    chequearMaterialOrden({ procesos: prod.procesos.map((p) => p.id), cantidad: cant })
+      .then((r) => { if (!cancelado) setMrpOrden(r) })
+      .catch(() => { if (!cancelado) setMrpOrden(null) })
+    return () => { cancelado = true }
+  }, [formOrdenAbierto, ordenProductoId, ordenCantidad, productos])
+
+  // Al elegir proceso+cantidad al agregar una tarea, consulta si el stock alcanza
+  // para ese proceso (su receta × cantidad).
+  useEffect(() => {
+    const cant = Number(taCantidad) || 0
+    if (!taProcesoId || !(cant > 0)) {
+      setMrpTarea(null)
+      return
+    }
+    let cancelado = false
+    chequearMaterialOrden({ procesoId: taProcesoId, cantidad: cant })
+      .then((r) => { if (!cancelado) setMrpTarea(r) })
+      .catch(() => { if (!cancelado) setMrpTarea(null) })
+    return () => { cancelado = true }
+  }, [taProcesoId, taCantidad])
 
   // ---------- Edición de tareas individuales ----------
   const valorProgreso = (t) => (borradores[t.id]?.progreso ?? t.progreso)
@@ -482,13 +569,29 @@ export default function GestionProduccion() {
         consumió cada uno.
       </p>
 
-      {puedeCrear && (
-        <div className="form-actions">
+      <div className="form-actions" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+        {puedeCrear ? (
           <button type="button" className="btn-primary" onClick={() => setFormOrdenAbierto(true)}>
             + Nueva orden
           </button>
+        ) : <span />}
+        <div className="tabs" style={{ margin: 0, flex: '0 0 auto' }}>
+          <button
+            type="button"
+            className={`tab ${vista === 'tabla' ? 'active' : ''}`}
+            onClick={() => cambiarVista('tabla')}
+          >
+            📋 Tabla
+          </button>
+          <button
+            type="button"
+            className={`tab ${vista === 'kanban' ? 'active' : ''}`}
+            onClick={() => cambiarVista('kanban')}
+          >
+            🟦 Tablero
+          </button>
         </div>
-      )}
+      </div>
 
       {puedeCrear && formOrdenAbierto && (
         <>
@@ -514,15 +617,60 @@ export default function GestionProduccion() {
                 />
               </div>
             </div>
-            <div style={{ marginTop: 10 }}>
-              <label>Comentario (opcional)</label>
-              <input
-                type="text" placeholder="Ej: entrega para el viernes"
-                value={ordenComentario}
-                onChange={(e) => setOrdenComentario(e.target.value)}
-                style={{ width: '100%' }}
-              />
+            <div className="row" style={{ marginTop: 10 }}>
+              <div style={{ flex: 1 }}>
+                <label>Fecha de entrega (opcional)</label>
+                <input
+                  type="date"
+                  value={ordenFechaEntrega}
+                  onChange={(e) => setOrdenFechaEntrega(e.target.value)}
+                />
+              </div>
+              <div style={{ flex: 2 }}>
+                <label>Comentario (opcional)</label>
+                <input
+                  type="text" placeholder="Ej: entrega para el viernes"
+                  value={ordenComentario}
+                  onChange={(e) => setOrdenComentario(e.target.value)}
+                  style={{ width: '100%' }}
+                />
+              </div>
             </div>
+
+            {/* Chequeo preventivo de materiales (MRP) para toda la orden */}
+            {mrpOrden && mrpOrden.items.length > 0 && (
+              <div className="card" style={{ background: '#f8fafc', marginTop: 12, marginBottom: 0 }}>
+                <strong className="small">
+                  {mrpOrden.hayFaltantes ? '⚠️ Material insuficiente para esta orden' : '✓ Hay material suficiente'}
+                </strong>
+                <div className="table-wrap" style={{ marginTop: 6 }}>
+                  <table className="table compact">
+                    <thead>
+                      <tr>
+                        <th>Material</th>
+                        <th className="num">Necesita</th>
+                        <th className="num">Stock</th>
+                        <th className="num">Falta</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {mrpOrden.items.map((m) => (
+                        <tr key={m.materialId} className={m.faltante > 0 ? 'fila-alerta' : ''}>
+                          <td>{m.materialNombre}</td>
+                          <td className="num">{m.requerido} {m.unidad}</td>
+                          <td className="num">{m.stockActual}</td>
+                          <td className="num">{m.faltante > 0 ? `-${m.faltante}` : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="muted small" style={{ marginBottom: 0 }}>
+                  Es solo un aviso; puedes crear la orden igual (el material se descuenta al agregar cada proceso).
+                </p>
+              </div>
+            )}
+
             {productos.length === 0 && (
               <p className="muted small">Necesitas productos creados para abrir una orden.</p>
             )}
@@ -571,13 +719,14 @@ export default function GestionProduccion() {
           </Vacio>
         )}
 
-        {ordenesFiltradas.length > 0 && (
+        {ordenesFiltradas.length > 0 && vista === 'tabla' && (
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
                   <th>Orden</th>
                   <th>Inicio</th>
+                  <th>Entrega</th>
                   <th>Producto</th>
                   <th className="num">Cantidad</th>
                   <th>Proceso actual</th>
@@ -588,10 +737,16 @@ export default function GestionProduccion() {
               <tbody>
                 {ordenesFiltradas.map((orden) => {
                   const actual = procesoActualDe(orden)
+                  const atrasada = estaAtrasada(orden)
                   return (
-                    <tr key={orden.id}>
+                    <tr key={orden.id} className={atrasada ? 'fila-alerta' : ''}>
                       <td>#{orden.id}</td>
                       <td className="muted small">{formatFecha(orden.creado)}</td>
+                      <td className="small">
+                        {orden.fechaEntrega
+                          ? <>{formatFecha(orden.fechaEntrega)}{atrasada && <span className="chip danger" style={{ marginLeft: 6 }}>⚠️ Atrasada</span>}</>
+                          : <span className="muted">—</span>}
+                      </td>
                       <td><strong>{orden.productoNombre || '— eliminado'}</strong></td>
                       <td className="num">{orden.cantidad}</td>
                       <td>
@@ -646,6 +801,61 @@ export default function GestionProduccion() {
             </table>
           </div>
         )}
+
+        {ordenesFiltradas.length > 0 && vista === 'kanban' && (
+          <div className="kanban">
+            {['pendiente', 'en_progreso', 'terminada'].map((estado) => {
+              const enColumna = ordenesFiltradas.filter((o) => o.estado === estado)
+              return (
+                <div className="kanban-col" key={estado}>
+                  <div className="kanban-col-head">
+                    <span>{ESTADO_LABEL[estado]}</span>
+                    <span className="chip">{enColumna.length}</span>
+                  </div>
+                  {enColumna.length === 0 && <p className="muted small">Sin órdenes.</p>}
+                  {enColumna.map((orden) => {
+                    const actual = procesoActualDe(orden)
+                    const atrasada = estaAtrasada(orden)
+                    const motivo = motivoNoTerminar(orden)
+                    return (
+                      <div className={`kanban-card${atrasada ? ' atrasada' : ''}`} key={orden.id}>
+                        <div className="kanban-card-head">
+                          <strong>#{orden.id} {orden.productoNombre || '— eliminado'}</strong>
+                          <span className="muted small">{orden.cantidad} und</span>
+                        </div>
+                        <div className="muted small">{actual.texto}</div>
+                        {orden.fechaEntrega && (
+                          <div className="small">
+                            📅 {formatFecha(orden.fechaEntrega)}
+                            {atrasada && <span className="chip danger" style={{ marginLeft: 6 }}>⚠️ Atrasada</span>}
+                          </div>
+                        )}
+                        {orden.costoReal?.total > 0 && (
+                          <div className="small muted">Costo real: {formatCOP(orden.costoReal.total)}</div>
+                        )}
+                        <div className="actions" style={{ marginTop: 8 }}>
+                          <button className="btn-secondary btn-sm" onClick={() => setOrdenDetalleId(orden.id)}>🔎</button>
+                          {puedeEditar && estado === 'pendiente' && (
+                            <button className="btn-primary btn-sm" onClick={() => handleCambiarEstado(orden, 'en_progreso')}>▶ Iniciar</button>
+                          )}
+                          {puedeEditar && estado === 'en_progreso' && (
+                            <>
+                              <button className="btn-secondary btn-sm" onClick={() => handleCambiarEstado(orden, 'pendiente')} title="Volver a pendiente">◀</button>
+                              <button className="btn-primary btn-sm" disabled={!!motivo} title={motivo || 'Marcar terminada'} onClick={() => handleCambiarEstado(orden, 'terminada')}>✓ Terminar</button>
+                            </>
+                          )}
+                          {puedeEditar && estado === 'terminada' && (
+                            <button className="btn-secondary btn-sm" onClick={() => handleCambiarEstado(orden, 'en_progreso')} title="Reabrir">◀ Reabrir</button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* Modal: agregar proceso a una orden */}
@@ -687,6 +897,24 @@ export default function GestionProduccion() {
             <p className="muted small">
               La cantidad viene precargada con la de la orden ({ordenSel.cantidad}); ajústala si hubo merma en procesos anteriores.
             </p>
+            {mrpTarea && mrpTarea.items.length > 0 && (
+              <div className={`banner ${mrpTarea.hayFaltantes ? 'error' : ''}`} style={{ marginTop: 6 }}>
+                {mrpTarea.hayFaltantes ? (
+                  <>
+                    ⚠️ Con el stock actual no alcanza:
+                    <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                      {mrpTarea.items.filter((i) => i.faltante > 0).map((i) => (
+                        <li key={i.materialId}>
+                          {i.materialNombre}: faltan {i.faltante} {i.unidad} (necesita {i.requerido}, hay {i.stockActual})
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : (
+                  <>✓ Hay stock suficiente para este proceso.</>
+                )}
+              </div>
+            )}
             {productoDeOrdenSel && procesosDisponibles.length === 0 && (
               <p className="muted small">
                 ✓ Esta orden ya tiene todos los procesos del producto. No quedan procesos por agregar.
@@ -839,6 +1067,60 @@ export default function GestionProduccion() {
                     </table>
                   </div>
                 </>
+              )
+            })()}
+
+            {/* Costo real de la orden: materiales + mano de obra, vs estimado y venta */}
+            {(() => {
+              const cr = ordenDetalle.costoReal
+              if (!cr || cr.total <= 0) return null
+              const venta = Number(ordenDetalle.valorVenta) || 0
+              const est = ordenDetalle.costoEstimadoUnit
+              const gananciaUnit = venta > 0 ? venta - cr.unitario : null
+              const margenPct = venta > 0 ? (gananciaUnit / venta) * 100 : null
+              return (
+                <div className="card" style={{ background: '#f8fafc', marginTop: 14, marginBottom: 0 }}>
+                  <strong>💰 Costo real de la orden</strong>
+                  <div className="table-wrap" style={{ marginTop: 6 }}>
+                    <table className="table compact">
+                      <tbody>
+                        <tr><td>Materiales</td><td className="num">{formatCOP(cr.materiales)}</td></tr>
+                        <tr><td>Mano de obra</td><td className="num">{formatCOP(cr.manoObra)}</td></tr>
+                        <tr><td><strong>Costo total</strong></td><td className="num"><strong>{formatCOP(cr.total)}</strong></td></tr>
+                        <tr><td>Costo por unidad ({cr.producidas} und)</td><td className="num">{formatCOP(cr.unitario)}</td></tr>
+                        {est != null && (
+                          <tr>
+                            <td>Costo estimado x und</td>
+                            <td className="num">
+                              {formatCOP(est)}
+                              {cr.unitario > est
+                                ? <span className="chip danger" style={{ marginLeft: 6 }}>+{formatCOP(cr.unitario - est)}</span>
+                                : <span className="chip ok" style={{ marginLeft: 6 }}>ok</span>}
+                            </td>
+                          </tr>
+                        )}
+                        {venta > 0 && (
+                          <>
+                            <tr><td>Valor de venta x und</td><td className="num">{formatCOP(venta)}</td></tr>
+                            <tr>
+                              <td><strong>Ganancia x und</strong></td>
+                              <td className="num">
+                                <strong className={gananciaUnit >= 0 ? 'texto-entrada' : 'texto-salida'}>
+                                  {formatCOP(gananciaUnit)} ({margenPct.toFixed(0)}%)
+                                </strong>
+                              </td>
+                            </tr>
+                          </>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  {est == null && (
+                    <p className="muted small" style={{ marginBottom: 0 }}>
+                      Liga un costeo a este producto (en Costos) para comparar contra el costo estimado.
+                    </p>
+                  )}
+                </div>
               )
             })()}
 

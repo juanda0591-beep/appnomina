@@ -202,6 +202,7 @@ export function DataProvider({ children }) {
 
   // ---------- DASHBOARD ----------
   const getDashboard = () => http('/dashboard')
+  const getProduccionDashboard = () => http('/produccion/dashboard')
 
   // ---------- USUARIOS (solo admin) ----------
   const getUsuarios = () => http('/usuarios')
@@ -215,10 +216,10 @@ export function DataProvider({ children }) {
 
   // ---------- COSTEOS (Costos de productos) ----------
   const getCosteos = () => http('/costeos')
-  const addCosteo = (nombre, datos) =>
-    http('/costeos', { method: 'POST', body: JSON.stringify({ nombre, datos }) })
-  const updateCosteo = (id, nombre, datos) =>
-    http(`/costeos/${id}`, { method: 'PUT', body: JSON.stringify({ nombre, datos }) })
+  const addCosteo = (nombre, datos, productoId) =>
+    http('/costeos', { method: 'POST', body: JSON.stringify({ nombre, datos, productoId }) })
+  const updateCosteo = (id, nombre, datos, productoId) =>
+    http(`/costeos/${id}`, { method: 'PUT', body: JSON.stringify({ nombre, datos, productoId }) })
   const deleteCosteo = (id) => http(`/costeos/${id}`, { method: 'DELETE' })
 
   // ---------- TAREAS (Gestión de Nómina) ----------
@@ -287,6 +288,14 @@ export function DataProvider({ children }) {
     await http(`/ordenes-produccion/${id}`, { method: 'DELETE' })
     await recargar()
   }
+  const cambiarEstadoOrden = async (id, estado) => {
+    const actualizada = await http(`/ordenes-produccion/${id}/estado`, { method: 'POST', body: JSON.stringify({ estado }) })
+    await recargar()
+    return actualizada
+  }
+  // Chequeo preventivo de materiales (MRP): no muta nada, solo consulta faltantes.
+  const chequearMaterialOrden = (params) =>
+    http('/produccion/chequeo-material', { method: 'POST', body: JSON.stringify(params) })
 
   // ---------- MATERIALES ----------
   const addMaterial = async (material) => {
@@ -364,6 +373,8 @@ export function DataProvider({ children }) {
     getReporte,
     getReporteMateriales,
     getDashboard,
+    getProduccionDashboard,
+    chequearMaterialOrden,
     getUsuarios,
     addUsuario,
     deleteUsuario,
@@ -390,6 +401,7 @@ export function DataProvider({ children }) {
     updateOrdenProduccion,
     terminarOrdenProduccion,
     deleteOrdenProduccion,
+    cambiarEstadoOrden,
     addMaterial,
     updateMaterial,
     deleteMaterial,

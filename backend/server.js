@@ -977,7 +977,25 @@ const materialesConsumidosStmt = db.prepare(
    ORDER BY mm.id ASC`
 )
 
+// Pago de mano de obra por unidad de un proceso. Se busca primero por proceso_id
+// (exacto); si el proceso fue re-creado al editar el producto (ids nuevos), cae
+// al nombre dentro del mismo producto, que es más estable.
+function pagoUnitarioDeTarea(t) {
+  if (t.proceso_id) {
+    const p = db.prepare('SELECT pago FROM procesos WHERE id = ?').get(t.proceso_id)
+    if (p) return Number(p.pago) || 0
+  }
+  if (t.producto_id && t.proceso_nombre) {
+    const p = db
+      .prepare('SELECT pago FROM procesos WHERE producto_id = ? AND LOWER(nombre) = LOWER(?)')
+      .get(t.producto_id, t.proceso_nombre)
+    if (p) return Number(p.pago) || 0
+  }
+  return 0
+}
+
 function tareaProduccionSalida(t) {
+  const pagoUnitario = pagoUnitarioDeTarea(t)
   return {
     id: t.id,
     empleadoId: t.empleado_id,
@@ -991,6 +1009,8 @@ function tareaProduccionSalida(t) {
     comentario: t.comentario || '',
     motivoMerma: t.motivo_merma || '',
     ordenProduccionId: t.orden_produccion_id,
+    pagoUnitario,
+    manoObra: (Number(t.cantidad) || 0) * pagoUnitario,
     creado: t.creado,
     actualizado: t.actualizado,
     materialesConsumidos: materialesConsumidosStmt.all(t.id).map((m) => ({
@@ -1003,11 +1023,49 @@ function tareaProduccionSalida(t) {
   }
 }
 
+// Costo unitario estimado a partir del objeto `datos` de un costeo (mismo cálculo
+// que src/utils/costeo.js, replicado aquí para comparar contra el costo real).
+function calcularCostoUnitarioEstimado(d) {
+  const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0 }
+  const materialesUnit = (d.insumos || []).reduce((s, i) => s + num(i.cantidad) * num(i.precioUnitario), 0)
+  const manoObraUnit = (d.manoObra || []).reduce((s, m) => s + (m.tipo === 'hora' ? num(m.horas) * num(m.valor) : num(m.valor)), 0)
+  const directosUnit = materialesUnit + manoObraUnit
+  const indirectosPeriodo = (d.indirectos || []).reduce((s, i) => s + num(i.montoPeriodo), 0)
+  const unidadesPeriodo = num(d.unidadesPeriodo)
+  const indirectosUnit = unidadesPeriodo > 0 ? indirectosPeriodo / unidadesPeriodo : 0
+  const subtotalUnit = directosUnit + indirectosUnit
+  const imprevistoUnit = subtotalUnit * (num(d.imprevistoPct) / 100)
+  return subtotalUnit + imprevistoUnit
+}
+
 function ordenProduccionSalida(o) {
   const tareas = db
     .prepare('SELECT * FROM tareas_produccion WHERE orden_produccion_id = ? ORDER BY creado ASC, id ASC')
     .all(o.id)
     .map(tareaProduccionSalida)
+
+  // Costo real de la orden: materiales consumidos (a su costo al momento) +
+  // mano de obra de cada proceso (cantidad × pago del proceso).
+  let materiales = 0
+  let manoObra = 0
+  for (const t of tareas) {
+    for (const m of t.materialesConsumidos) materiales += (Number(m.cantidad) || 0) * (Number(m.costoUnitario) || 0)
+    manoObra += Number(t.manoObra) || 0
+  }
+  const total = materiales + manoObra
+  // Unidades producidas = cantidad del último proceso (refleja la merma).
+  const producidas = tareas.length ? Number(tareas[tareas.length - 1].cantidad) || 0 : 0
+  const unitario = producidas > 0 ? total / producidas : 0
+
+  // Comparación: valor de venta del producto + costo estimado del costeo ligado.
+  const producto = o.producto_id ? db.prepare('SELECT valor_venta FROM productos WHERE id = ?').get(o.producto_id) : null
+  const valorVenta = producto ? Number(producto.valor_venta) || 0 : 0
+  const costeo = o.producto_id ? db.prepare('SELECT datos FROM costeos WHERE producto_id = ? ORDER BY id DESC LIMIT 1').get(o.producto_id) : null
+  let costoEstimadoUnit = null
+  if (costeo) {
+    try { costoEstimadoUnit = calcularCostoUnitarioEstimado(JSON.parse(costeo.datos || '{}')) } catch { costoEstimadoUnit = null }
+  }
+
   return {
     id: o.id,
     productoId: o.producto_id,
@@ -1015,9 +1073,13 @@ function ordenProduccionSalida(o) {
     cantidad: o.cantidad,
     estado: o.estado,
     comentario: o.comentario || '',
+    fechaEntrega: o.fecha_entrega || '',
     stockAbastecido: o.stock_abastecido || 0,
     creado: o.creado,
     actualizado: o.actualizado,
+    costoReal: { materiales, manoObra, total, unitario, producidas },
+    valorVenta,
+    costoEstimadoUnit,
     tareas,
   }
 }
@@ -1086,28 +1148,29 @@ app.get('/api/ordenes-produccion', permisoAnyRequired([
 })
 
 app.post('/api/ordenes-produccion', permisoRequired('gestion-produccion', 'crear'), (req, res) => {
-  const { productoId, cantidad, comentario } = req.body
+  const { productoId, cantidad, comentario, fechaEntrega } = req.body
   const cant = Number(cantidad) || 0
   if (!(cant > 0)) return res.status(400).json({ error: 'Indica una cantidad mayor a 0' })
 
   const producto = productoId ? db.prepare('SELECT * FROM productos WHERE id = ?').get(productoId) : null
   const ahora = new Date().toISOString()
   const r = db.prepare(
-    `INSERT INTO ordenes_produccion (producto_id, producto_nombre, cantidad, estado, comentario, creado, actualizado)
-     VALUES (?, ?, ?, 'pendiente', ?, ?, ?)`
-  ).run(productoId || null, producto?.nombre || '', cant, comentario || '', ahora, ahora)
+    `INSERT INTO ordenes_produccion (producto_id, producto_nombre, cantidad, estado, comentario, fecha_entrega, creado, actualizado)
+     VALUES (?, ?, ?, 'pendiente', ?, ?, ?, ?)`
+  ).run(productoId || null, producto?.nombre || '', cant, comentario || '', fechaEntrega || null, ahora, ahora)
   res.json(ordenProduccionSalida(db.prepare('SELECT * FROM ordenes_produccion WHERE id = ?').get(r.lastInsertRowid)))
 })
 
 app.put('/api/ordenes-produccion/:id', permisoRequired('gestion-produccion', 'editar'), (req, res) => {
   const orden = db.prepare('SELECT * FROM ordenes_produccion WHERE id = ?').get(req.params.id)
   if (!orden) return res.status(404).json({ error: 'Orden no encontrada' })
-  const { cantidad, comentario } = req.body
+  const { cantidad, comentario, fechaEntrega } = req.body
   const nuevaCantidad = cantidad == null ? orden.cantidad : Number(cantidad) || 0
   const nuevoComentario = comentario == null ? orden.comentario : String(comentario)
+  const nuevaFechaEntrega = fechaEntrega === undefined ? orden.fecha_entrega : (fechaEntrega || null)
   const ahora = new Date().toISOString()
-  db.prepare('UPDATE ordenes_produccion SET cantidad = ?, comentario = ?, actualizado = ? WHERE id = ?')
-    .run(nuevaCantidad, nuevoComentario, ahora, orden.id)
+  db.prepare('UPDATE ordenes_produccion SET cantidad = ?, comentario = ?, fecha_entrega = ?, actualizado = ? WHERE id = ?')
+    .run(nuevaCantidad, nuevoComentario, nuevaFechaEntrega, ahora, orden.id)
   res.json(ordenProduccionSalida(db.prepare('SELECT * FROM ordenes_produccion WHERE id = ?').get(orden.id)))
 })
 
@@ -1141,6 +1204,62 @@ app.post('/api/ordenes-produccion/:id/terminar', permisoRequired('gestion-produc
   })
   terminar()
   res.json(ordenProduccionSalida(db.prepare('SELECT * FROM ordenes_produccion WHERE id = ?').get(orden.id)))
+})
+
+// Cambio de estado para el tablero Kanban. Solo permite los movimientos manuales
+// pendiente↔en_progreso; para pasar a 'terminada' se usa /terminar (que valida
+// procesos completos y abastece stock), y para salir de 'terminada' se reabre
+// agregando trabajo. Si se retrocede una orden que ya abasteció, se revierte.
+app.post('/api/ordenes-produccion/:id/estado', permisoRequired('gestion-produccion', 'editar'), (req, res) => {
+  const orden = db.prepare('SELECT * FROM ordenes_produccion WHERE id = ?').get(req.params.id)
+  if (!orden) return res.status(404).json({ error: 'Orden no encontrada' })
+  const { estado } = req.body
+  if (!['pendiente', 'en_progreso'].includes(estado)) {
+    return res.status(400).json({ error: 'Estado inválido. Para terminar usa el botón Terminar.' })
+  }
+  const ahora = new Date().toISOString()
+  const tx = db.transaction(() => {
+    // Si venía de 'terminada', revertir el stock que había abastecido.
+    if (orden.estado === 'terminada') revertirStockProducto(orden)
+    db.prepare('UPDATE ordenes_produccion SET estado = ?, actualizado = ? WHERE id = ?').run(estado, ahora, orden.id)
+  })
+  tx()
+  res.json(ordenProduccionSalida(db.prepare('SELECT * FROM ordenes_produccion WHERE id = ?').get(orden.id)))
+})
+
+// Chequeo de material (MRP ligero preventivo): dada una lista de procesos y una
+// cantidad, calcula cuánto material se necesita y si el stock actual alcanza.
+// No descuenta ni bloquea nada; es solo informativo. Recibe body:
+//   { procesos: [procesoId, ...], cantidad }  ó  { procesoId, cantidad }
+app.post('/api/produccion/chequeo-material', permisoAnyRequired([
+  ['gestion-produccion', 'ver'],
+  ['gestion-produccion', 'crear'],
+]), (req, res) => {
+  const { procesos, procesoId, cantidad } = req.body
+  const cant = Number(cantidad) || 0
+  const ids = procesos && Array.isArray(procesos) ? procesos : (procesoId ? [procesoId] : [])
+  if (ids.length === 0 || !(cant > 0)) {
+    return res.json({ items: [], hayFaltantes: false })
+  }
+
+  // Acumula el requerido por material sumando la receta de todos los procesos.
+  const requeridoPorMaterial = new Map()
+  for (const pid of ids) {
+    for (const item of materialesDeProceso(pid)) {
+      const prev = requeridoPorMaterial.get(item.materialId) || { materialNombre: item.materialNombre, unidad: item.unidad, requerido: 0 }
+      prev.requerido += (Number(item.cantidad) || 0) * cant
+      requeridoPorMaterial.set(item.materialId, prev)
+    }
+  }
+
+  const items = [...requeridoPorMaterial.entries()].map(([materialId, r]) => {
+    const material = db.prepare('SELECT stock FROM materiales WHERE id = ?').get(materialId)
+    const stockActual = material ? Number(material.stock) || 0 : 0
+    const faltante = Math.max(0, r.requerido - stockActual)
+    return { materialId, materialNombre: r.materialNombre, unidad: r.unidad, requerido: r.requerido, stockActual, faltante }
+  }).sort((a, b) => a.materialNombre.localeCompare(b.materialNombre))
+
+  res.json({ items, hayFaltantes: items.some((i) => i.faltante > 0) })
 })
 
 app.delete('/api/ordenes-produccion/:id', permisoRequired('gestion-produccion', 'eliminar'), (req, res) => {
@@ -1329,6 +1448,70 @@ app.get('/api/tareas-produccion/:id/historial', permisoRequired('gestion-producc
   })))
 })
 
+// Dashboard de producción: KPIs y cuello de botella. Solo lectura.
+app.get('/api/produccion/dashboard', permisoAnyRequired([
+  ['produccion-dashboard', 'ver'],
+  ['gestion-produccion', 'ver'],
+]), (req, res) => {
+  const mes = new Date().toISOString().slice(0, 7)
+  const ordenes = db.prepare('SELECT * FROM ordenes_produccion').all().map(ordenProduccionSalida)
+
+  const activas = ordenes.filter((o) => o.estado !== 'terminada').length
+  const terminadasMes = ordenes.filter((o) => o.estado === 'terminada' && (o.actualizado || '').slice(0, 7) === mes)
+
+  // Unidades producidas y costo real del mes (órdenes terminadas este mes)
+  let unidadesMes = 0
+  let costoRealMes = 0
+  for (const o of terminadasMes) {
+    unidadesMes += o.costoReal.producidas
+    costoRealMes += o.costoReal.total
+  }
+
+  // Merma promedio de las órdenes terminadas del mes (con ≥2 procesos)
+  const mermas = terminadasMes
+    .filter((o) => o.tareas.length >= 2)
+    .map((o) => {
+      const ini = Number(o.tareas[0].cantidad) || 0
+      const fin = Number(o.tareas[o.tareas.length - 1].cantidad) || 0
+      return ini > 0 ? ((ini - fin) / ini) * 100 : 0
+    })
+  const mermaPromedio = mermas.length ? mermas.reduce((s, m) => s + m, 0) / mermas.length : 0
+
+  // Cuello de botella: proceso con más tareas sin terminar (en órdenes activas)
+  const cuelloMap = {}
+  for (const o of ordenes) {
+    if (o.estado === 'terminada') continue
+    for (const t of o.tareas) {
+      if (t.estado === 'terminada') continue
+      const key = t.procesoNombre || '(sin proceso)'
+      cuelloMap[key] = (cuelloMap[key] || 0) + 1
+    }
+  }
+  const cuelloBotella = Object.entries(cuelloMap)
+    .map(([proceso, tareas]) => ({ proceso, tareas }))
+    .sort((a, b) => b.tareas - a.tareas)
+
+  // Unidades producidas por producto (mes)
+  const porProductoMap = {}
+  for (const o of terminadasMes) {
+    const key = o.productoNombre || '(sin producto)'
+    porProductoMap[key] = (porProductoMap[key] || 0) + o.costoReal.producidas
+  }
+  const unidadesPorProducto = Object.entries(porProductoMap)
+    .map(([producto, unidades]) => ({ producto, unidades }))
+    .sort((a, b) => b.unidades - a.unidades)
+
+  res.json({
+    ordenesActivas: activas,
+    ordenesTerminadasMes: terminadasMes.length,
+    unidadesMes,
+    costoRealMes,
+    mermaPromedio,
+    cuelloBotella,
+    unidadesPorProducto,
+  })
+})
+
 // ============ MOVIMIENTOS (Control de dinero) ============
 app.get('/api/movimientos', permisoRequired('control-dinero', 'ver'), (req, res) => {
   const { desde, hasta } = req.query
@@ -1495,7 +1678,7 @@ function costeoSalida(c) {
   } catch {
     datos = {}
   }
-  return { id: c.id, nombre: c.nombre, actualizado: c.actualizado, datos }
+  return { id: c.id, nombre: c.nombre, productoId: c.producto_id, actualizado: c.actualizado, datos }
 }
 
 app.get('/api/costeos', permisoRequired('costos', 'ver'), (req, res) => {
@@ -1504,21 +1687,21 @@ app.get('/api/costeos', permisoRequired('costos', 'ver'), (req, res) => {
 })
 
 app.post('/api/costeos', permisoRequired('costos', 'crear'), (req, res) => {
-  const { nombre, datos } = req.body
+  const { nombre, datos, productoId } = req.body
   const nom = String(nombre || '').trim()
   if (!nom) return res.status(400).json({ error: 'El nombre del costeo es obligatorio' })
   const r = db
-    .prepare('INSERT INTO costeos (nombre, datos, actualizado) VALUES (?, ?, ?)')
-    .run(nom, JSON.stringify(datos || {}), new Date().toISOString())
+    .prepare('INSERT INTO costeos (nombre, producto_id, datos, actualizado) VALUES (?, ?, ?, ?)')
+    .run(nom, productoId || null, JSON.stringify(datos || {}), new Date().toISOString())
   res.json(costeoSalida(db.prepare('SELECT * FROM costeos WHERE id = ?').get(r.lastInsertRowid)))
 })
 
 app.put('/api/costeos/:id', permisoRequired('costos', 'editar'), (req, res) => {
-  const { nombre, datos } = req.body
+  const { nombre, datos, productoId } = req.body
   const nom = String(nombre || '').trim()
   if (!nom) return res.status(400).json({ error: 'El nombre del costeo es obligatorio' })
-  db.prepare('UPDATE costeos SET nombre = ?, datos = ?, actualizado = ? WHERE id = ?')
-    .run(nom, JSON.stringify(datos || {}), new Date().toISOString(), req.params.id)
+  db.prepare('UPDATE costeos SET nombre = ?, producto_id = ?, datos = ?, actualizado = ? WHERE id = ?')
+    .run(nom, productoId || null, JSON.stringify(datos || {}), new Date().toISOString(), req.params.id)
   res.json(costeoSalida(db.prepare('SELECT * FROM costeos WHERE id = ?').get(req.params.id)))
 })
 

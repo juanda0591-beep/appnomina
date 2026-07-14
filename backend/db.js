@@ -113,6 +113,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS costeos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nombre TEXT NOT NULL,
+    producto_id INTEGER,
     datos TEXT NOT NULL DEFAULT '{}',
     actualizado TEXT
   );
@@ -257,6 +258,7 @@ db.exec(`
     estado TEXT NOT NULL DEFAULT 'pendiente',   -- pendiente|en_progreso|terminada
     comentario TEXT,
     stock_abastecido REAL NOT NULL DEFAULT 0,   -- cantidad ya sumada al stock del producto
+    fecha_entrega TEXT,                         -- fecha de compromiso de entrega (opcional)
     creado TEXT,
     actualizado TEXT
   );
@@ -348,6 +350,19 @@ if (!colsTareasProd.some((c) => c.name === 'motivo_merma')) {
 const colsMovimientos = db.prepare("PRAGMA table_info(material_movimientos)").all()
 if (!colsMovimientos.some((c) => c.name === 'tarea_produccion_id')) {
   db.exec('ALTER TABLE material_movimientos ADD COLUMN tarea_produccion_id INTEGER')
+}
+
+// Vínculo opcional de un costeo con un producto, para comparar el costo real de
+// una orden contra su costo estimado. Nullable: los costeos viejos quedan sueltos.
+const colsCosteos = db.prepare("PRAGMA table_info(costeos)").all()
+if (!colsCosteos.some((c) => c.name === 'producto_id')) {
+  db.exec('ALTER TABLE costeos ADD COLUMN producto_id INTEGER')
+}
+
+// Fecha de entrega comprometida de una orden de producción (para alertar atrasos).
+const colsOrdenesEntrega = db.prepare("PRAGMA table_info(ordenes_produccion)").all()
+if (!colsOrdenesEntrega.some((c) => c.name === 'fecha_entrega')) {
+  db.exec('ALTER TABLE ordenes_produccion ADD COLUMN fecha_entrega TEXT')
 }
 
 // Garantiza que exista la fila única de configuración de empresa

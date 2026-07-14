@@ -67,7 +67,7 @@ function PieChart({ datos, size = 180 }) {
 }
 
 export default function Costos() {
-  const { getCosteos, addCosteo, updateCosteo, deleteCosteo, empresa } = useData()
+  const { getCosteos, addCosteo, updateCosteo, deleteCosteo, empresa, productos } = useData()
   const { puede } = useAuth()
 
   const puedeCrear = puede('costos', 'crear')
@@ -82,6 +82,7 @@ export default function Costos() {
   // costeo en edición
   const [id, setId] = useState(null) // null = nuevo sin guardar
   const [nombre, setNombre] = useState('')
+  const [productoId, setProductoId] = useState('') // producto ligado (opcional) para comparar costo real
   const [datos, setDatos] = useState(costeoVacio())
   const [guardando, setGuardando] = useState(false)
 
@@ -114,6 +115,7 @@ export default function Costos() {
   const nuevo = () => {
     setId(null)
     setNombre('')
+    setProductoId('')
     setDatos(costeoVacio())
     setMsg(null)
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -122,6 +124,7 @@ export default function Costos() {
   const abrir = (c) => {
     setId(c.id)
     setNombre(c.nombre)
+    setProductoId(c.productoId != null ? String(c.productoId) : '')
     setDatos({ ...costeoVacio(), ...c.datos })
     setMsg(null)
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -132,10 +135,11 @@ export default function Costos() {
     setGuardando(true)
     setMsg(null)
     try {
+      const prodId = productoId ? Number(productoId) : null
       if (id) {
-        await updateCosteo(id, nombre.trim(), datos)
+        await updateCosteo(id, nombre.trim(), datos, prodId)
       } else {
-        const creado = await addCosteo(nombre.trim(), datos)
+        const creado = await addCosteo(nombre.trim(), datos, prodId)
         setId(creado.id)
       }
       setMsg({ tipo: 'ok', texto: '✅ Costeo guardado' })
@@ -238,12 +242,28 @@ export default function Costos() {
 
       {/* ===== Nombre del costeo ===== */}
       <div className="card">
-        <label>Nombre del producto / costeo</label>
-        <input
-          value={nombre}
-          onChange={(e) => setNombre(e.target.value)}
-          placeholder="Ej: Camiseta estampada talla M"
-        />
+        <div className="row">
+          <div style={{ flex: 2 }}>
+            <label>Nombre del producto / costeo</label>
+            <input
+              value={nombre}
+              onChange={(e) => setNombre(e.target.value)}
+              placeholder="Ej: Camiseta estampada talla M"
+            />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label>Producto vinculado (opcional)</label>
+            <select value={productoId} onChange={(e) => setProductoId(e.target.value)}>
+              <option value="">— Sin vincular —</option>
+              {productos.map((p) => (
+                <option key={p.id} value={p.id}>{p.nombre}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <p className="muted small">
+          Vincula el costeo a un producto para comparar este costo estimado contra el costo real de sus órdenes de producción.
+        </p>
       </div>
 
       {/* ===== Materiales ===== */}

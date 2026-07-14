@@ -1,48 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha } from '../utils/format.js'
 import { GraficoBarras, GraficoDona, COLOR } from '../components/Grafico.jsx'
+import { NumeroAnimado, Anillo } from '../components/dashboardWidgets.jsx'
 import Vacio from '../components/Vacio.jsx'
-
-// Anima un número desde 0 hasta `valor` al montar. `formato` da el texto final.
-function useContador(valor, duracion = 900) {
-  const [n, setN] = useState(0)
-  const rafRef = useRef(null)
-  useEffect(() => {
-    const objetivo = Number(valor) || 0
-    const inicio = performance.now()
-    const tick = (ahora) => {
-      const t = Math.min(1, (ahora - inicio) / duracion)
-      // easing suave (easeOutCubic) para que frene al final
-      const eased = 1 - Math.pow(1 - t, 3)
-      setN(objetivo * eased)
-      if (t < 1) rafRef.current = requestAnimationFrame(tick)
-      else setN(objetivo)
-    }
-    rafRef.current = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(rafRef.current)
-  }, [valor, duracion])
-  return n
-}
-
-// Número animado. Si `moneda`, formatea como COP; si no, entero.
-function NumeroAnimado({ valor, moneda = false }) {
-  const n = useContador(valor)
-  return <>{moneda ? formatCOP(Math.round(n)) : Math.round(n).toLocaleString('es-CO')}</>
-}
-
-// Anillo de progreso con CSS puro (conic-gradient). El color cambia según el nivel.
-function Anillo({ porcentaje }) {
-  const pct = Math.max(0, Math.min(100, Math.round(porcentaje)))
-  // verde si se gastó poco, ámbar a la mitad, rojo si se acerca al 100% del ingreso
-  const nivel = pct >= 90 ? 'alto' : pct >= 60 ? 'medio' : 'bajo'
-  return (
-    <div className={`anillo nivel-${nivel}`} style={{ '--pct': `${pct}%` }}>
-      <span className="anillo-num">{pct}%</span>
-    </div>
-  )
-}
 
 // Calcula la variación porcentual de hoy vs ayer para el badge de tendencia.
 function calcTendencia(hoy, ayer) {

@@ -8,6 +8,7 @@ import Prestamos from './pages/Prestamos.jsx'
 import Nomina from './pages/Nomina.jsx'
 import GestionNomina from './pages/GestionNomina.jsx'
 import GestionProduccion from './pages/GestionProduccion.jsx'
+import ProduccionDashboard from './pages/ProduccionDashboard.jsx'
 import ControlDinero from './pages/ControlDinero.jsx'
 import Historial from './pages/Historial.jsx'
 import Reportes from './pages/Reportes.jsx'
@@ -39,6 +40,7 @@ const links = [
     items: [
       { to: '/materiales', label: '🧱 Materiales', pagina: 'materiales' },
       { to: '/gestion-produccion', label: '🏭 Producción', pagina: 'gestion-produccion' },
+      { to: '/produccion-dashboard', label: '📈 Panel Producción', pagina: 'produccion-dashboard' },
     ],
   },
   { to: '/control-dinero', label: '💰 Control de Dinero', pagina: 'control-dinero' },
@@ -198,6 +200,7 @@ export default function App() {
           <Route path="/productos" element={protegida('productos', <Productos />)} />
           <Route path="/materiales" element={protegida('materiales', <Materiales />)} />
           <Route path="/gestion-produccion" element={protegida('gestion-produccion', <GestionProduccion />)} />
+          <Route path="/produccion-dashboard" element={protegida('produccion-dashboard', <ProduccionDashboard />)} />
           <Route path="/empleados" element={protegida('empleados', <Empleados />)} />
           <Route path="/prestamos" element={protegida('prestamos', <Prestamos />)} />
           <Route path="/control-dinero" element={protegida('control-dinero', <ControlDinero />)} />
