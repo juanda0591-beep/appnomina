@@ -36,6 +36,7 @@ export default function Empleados() {
   const [form, setForm] = useState(emptyEmp)
   const [formAbierto, setFormAbierto] = useState(false)
   const [editId, setEditId] = useState(null)
+  const [busqueda, setBusqueda] = useState('')
 
   // --- Herramientas entregadas ---
   const [herramientasEmpleadoId, setHerramientasEmpleadoId] = useState(null) // empleado con el modal abierto
@@ -165,6 +166,14 @@ export default function Empleados() {
 
   const empleadoHerramientas = empleados.find((e) => e.id === herramientasEmpleadoId)
 
+  const q = busqueda.trim().toLowerCase()
+  const empleadosFiltrados = q
+    ? empleados.filter((e) =>
+        [e.nombre, e.cargo, e.cedula, e.telefono]
+          .some((v) => (v || '').toLowerCase().includes(q))
+      )
+    : empleados
+
   return (
     <div>
       <h2>👷 Empleados</h2>
@@ -183,12 +192,26 @@ export default function Empleados() {
 
       <div className="card">
         <h3>Empleados registrados ({empleados.length})</h3>
+
+        {empleados.length > 0 && (
+          <input
+            type="search"
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            placeholder="🔎 Buscar por nombre, cargo, cédula o teléfono…"
+            style={{ marginBottom: 12 }}
+          />
+        )}
+
         {empleados.length === 0 && (
           <Vacio icono="👷" titulo="Aún no hay empleados">
             Crea el primero con el botón "+ Nuevo empleado".
           </Vacio>
         )}
-        {empleados.map((emp) => {
+        {empleados.length > 0 && empleadosFiltrados.length === 0 && (
+          <p className="muted">Ningún empleado coincide con la búsqueda.</p>
+        )}
+        {empleadosFiltrados.map((emp) => {
           const prestamos = prestamosDeEmpleado(emp.id)
           const saldoAdelanto = prestamos.reduce((s, p) => s + p.saldo, 0)
           return (

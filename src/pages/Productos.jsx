@@ -34,6 +34,9 @@ export default function Productos() {
   const [editId, setEditId] = useState(null)
   const [formAbierto, setFormAbierto] = useState(false)
 
+  // Buscador (por nombre, código o descripción)
+  const [busqueda, setBusqueda] = useState('')
+
   // Fila que está creando un proceso nuevo en el catálogo global (índice o null)
   const [filaNuevoProceso, setFilaNuevoProceso] = useState(null)
   const [nombreNuevoProceso, setNombreNuevoProceso] = useState('')
@@ -254,6 +257,16 @@ export default function Productos() {
 
   const materialesOrdenados = [...materiales].sort((a, b) => a.nombre.localeCompare(b.nombre))
 
+  // Filtra los productos por nombre, código o descripción (búsqueda insensible a mayúsculas)
+  const q = busqueda.trim().toLowerCase()
+  const productosFiltrados = q
+    ? productos.filter((p) =>
+        (p.nombre || '').toLowerCase().includes(q) ||
+        (p.codigo || '').toLowerCase().includes(q) ||
+        (p.descripcion || '').toLowerCase().includes(q)
+      )
+    : productos
+
   return (
     <div>
       <h2>📦 Productos y procesos</h2>
@@ -450,13 +463,27 @@ export default function Productos() {
 
       <div className="card">
         <h3>Productos registrados ({productos.length})</h3>
+
+        {productos.length > 0 && (
+          <input
+            type="search"
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            placeholder="🔎 Buscar por nombre, código o descripción…"
+            style={{ marginBottom: 12 }}
+          />
+        )}
+
         {productos.length === 0 && (
           <Vacio icono="📦" titulo="Aún no hay productos">
             Crea el primero para empezar a fabricar y cotizar.
           </Vacio>
         )}
+        {productos.length > 0 && productosFiltrados.length === 0 && (
+          <p className="muted">Ningún producto coincide con la búsqueda.</p>
+        )}
 
-        {productos.length > 0 && (
+        {productosFiltrados.length > 0 && (
           <div className="table-wrap">
             <table className="table">
               <thead>
@@ -471,7 +498,7 @@ export default function Productos() {
                 </tr>
               </thead>
               <tbody>
-                {productos.map((prod) => (
+                {productosFiltrados.map((prod) => (
                   <tr
                     key={prod.id}
                     className={`chip-clicable ${stockBajo(prod) ? 'fila-alerta' : ''}`}
