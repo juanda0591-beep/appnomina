@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
-import { formatCOP, formatFecha } from '../utils/format.js'
+import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
 import { notify, confirmar } from '../utils/notify.js'
 import Vacio from '../components/Vacio.jsx'
 
 const emptyEmp = { nombre: '', cedula: '', telefono: '', cargo: '' }
 
-const hoy = () => new Date().toISOString().slice(0, 10)
+const hoy = hoyISO
 const emptyHerramienta = () => ({ herramienta: '', cantidad: '1', fechaEntrega: hoy(), estado: 'buen_estado', comentario: '' })
 
 // Estados posibles de una herramienta entregada

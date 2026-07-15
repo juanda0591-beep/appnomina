@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
-import { formatCOP } from '../utils/format.js'
+import { formatCOP, hoyISO } from '../utils/format.js'
 import { generarPdfNomina } from '../utils/pdf.js'
 import { notify, confirmar } from '../utils/notify.js'
 
@@ -9,7 +9,7 @@ const nuevoItem = () => ({ key: Math.random().toString(36).slice(2), productoId:
 export default function Nomina() {
   const { empleados, productos, empresa, prestamosDeEmpleado, getEmpleado, getProducto, addNomina, tareasTerminadasDeEmpleado, getTareaFotos } = useData()
 
-  const hoy = new Date().toISOString().slice(0, 10)
+  const hoy = hoyISO()
   const [empleadoId, setEmpleadoId] = useState('')
   const [fecha, setFecha] = useState(hoy)
   const [items, setItems] = useState([nuevoItem()])

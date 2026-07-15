@@ -3,7 +3,9 @@ import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const dbPath = join(__dirname, 'nomina.db')
+// Ruta de la base de datos: por defecto nomina.db junto a este archivo.
+// Se puede sobreescribir con la variable de entorno DB_PATH (útil para pruebas).
+const dbPath = process.env.DB_PATH || join(__dirname, 'nomina.db')
 
 const db = new Database(dbPath)
 db.pragma('journal_mode = WAL')
@@ -521,7 +523,11 @@ addCol('pedido_items', 'variante_id', 'variante_id INTEGER')
 addCol('pedido_items', 'color_nombre', 'color_nombre TEXT')
 addCol('venta_items', 'variante_id', 'variante_id INTEGER')
 addCol('venta_items', 'color_nombre', 'color_nombre TEXT')
+addCol('venta_items', 'descuento_pct', 'descuento_pct REAL NOT NULL DEFAULT 0')
 addCol('ventas', 'codigo', 'codigo TEXT')
+addCol('ventas', 'descuento_pct', 'descuento_pct REAL NOT NULL DEFAULT 0')
+// Método de pago del abono: 'efectivo' (entra a caja) o 'transferencia' (no entra a caja)
+addCol('venta_pagos', 'metodo', "metodo TEXT NOT NULL DEFAULT 'efectivo'")
 
 // Backfill de ventas existentes: asigna código VTA-#### y registra el "pagado"
 // histórico como un abono inicial (sin volver a mover caja, ya se movió en su día).

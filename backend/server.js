@@ -2107,11 +2107,13 @@ function pedidoSalida(p) {
 }
 
 // Inserta los ítems de un pedido/venta y devuelve el total. Reutilizable.
-function insertarItems(tabla, fkCampo, parentId, items) {
-  const stmt = db.prepare(
-    `INSERT INTO ${tabla} (${fkCampo}, producto_id, producto_nombre, variante_id, color_nombre, cantidad, precio_unitario)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  )
+// Inserta los ítems de una venta o pedido y devuelve el subtotal.
+// Con conDescuento=true (venta_items) guarda el % de descuento por línea y lo
+// resta al subtotal; en pedidos no hay descuento por ítem.
+function insertarItems(tabla, fkCampo, parentId, items, conDescuento = false) {
+  const cols = `${fkCampo}, producto_id, producto_nombre, variante_id, color_nombre, cantidad, precio_unitario${conDescuento ? ', descuento_pct' : ''}`
+  const marks = conDescuento ? '?, ?, ?, ?, ?, ?, ?, ?' : '?, ?, ?, ?, ?, ?, ?'
+  const stmt = db.prepare(`INSERT INTO ${tabla} (${cols}) VALUES (${marks})`)
   let total = 0
   for (const it of items || []) {
     const cantidad = Number(it.cantidad) || 0
@@ -2124,8 +2126,12 @@ function insertarItems(tabla, fkCampo, parentId, items) {
       const v = db.prepare('SELECT c.nombre FROM producto_variantes pv LEFT JOIN colores c ON c.id = pv.color_id WHERE pv.id = ?').get(it.varianteId)
       colorNombre = v?.nombre || ''
     }
-    stmt.run(parentId, it.productoId || null, prod?.nombre || it.productoNombre || '', it.varianteId || null, colorNombre, cantidad, precio)
-    total += cantidad * precio
+    // % de descuento por línea (solo aplica en ventas); acotado a 0–100
+    const descPct = conDescuento ? Math.max(0, Math.min(100, Number(it.descuentoPct) || 0)) : 0
+    const args = [parentId, it.productoId || null, prod?.nombre || it.productoNombre || '', it.varianteId || null, colorNombre, cantidad, precio]
+    if (conDescuento) args.push(descPct)
+    stmt.run(...args)
+    total += cantidad * precio * (1 - descPct / 100)
   }
   return total
 }
@@ -2195,7 +2201,9 @@ function ventaSalida(v) {
     colorNombre: it.color_nombre || '',
     cantidad: it.cantidad,
     precioUnitario: it.precio_unitario,
-    subtotal: (Number(it.cantidad) || 0) * (Number(it.precio_unitario) || 0),
+    descuentoPct: Number(it.descuento_pct) || 0,
+    // Subtotal de la línea ya con su descuento por producto aplicado
+    subtotal: Math.round((Number(it.cantidad) || 0) * (Number(it.precio_unitario) || 0) * (1 - (Number(it.descuento_pct) || 0) / 100)),
   }))
   // Abonos registrados + estado de pago derivado del saldo
   const pagos = db.prepare('SELECT * FROM venta_pagos WHERE venta_id = ? ORDER BY fecha ASC, id ASC').all(v.id).map((p) => ({
@@ -2203,6 +2211,7 @@ function ventaSalida(v) {
     monto: p.monto,
     fecha: p.fecha,
     comentario: p.comentario || '',
+    metodo: p.metodo || 'efectivo',
   }))
   const total = Number(v.total) || 0
   const pagado = Number(v.pagado) || 0
@@ -2215,6 +2224,9 @@ function ventaSalida(v) {
     clienteNombre: v.cliente_nombre || '',
     pedidoId: v.pedido_id,
     total,
+    descuentoPct: Number(v.descuento_pct) || 0,
+    // Subtotal bruto (antes de descuento global) para mostrarlo en el detalle/PDF
+    subtotalBruto: items.reduce((s, it) => s + it.subtotal, 0),
     anticipoAplicado: v.anticipo_aplicado,
     pagado,
     saldo,
@@ -2230,24 +2242,32 @@ function ventaSalida(v) {
 // Núcleo de una venta: crea la venta + ítems, descuenta stock, aplica anticipo y
 // registra el ingreso. Se usa tanto en la venta directa como al convertir un pedido.
 // Devuelve { ventaId, avisos }.
-function crearVentaCore({ clienteId, items, comentario, aplicarAnticipo, pedidoId, pagoInicial, fecha }) {
+function crearVentaCore({ clienteId, items, comentario, aplicarAnticipo, pedidoId, pagoInicial, fecha, descuentoTipo, descuentoPct, metodoPago }) {
   const cliente = clienteId ? db.prepare('SELECT * FROM clientes WHERE id = ?').get(clienteId) : null
   const itemsValidos = (items || []).filter((it) => (Number(it.cantidad) || 0) > 0)
   if (itemsValidos.length === 0) throw new Error('La venta no tiene productos')
   const ahora = new Date().toISOString()
   const fechaVenta = fecha || ahora
   const avisos = []
+  // Descuento global (sobre toda la venta) vs por producto (por línea). Excluyentes.
+  const esGlobal = descuentoTipo === 'global'
+  const descGlobalPct = esGlobal ? Math.max(0, Math.min(100, Number(descuentoPct) || 0)) : 0
+  // Método de pago del abono inicial: solo 'efectivo' entra a caja
+  const metodo = metodoPago === 'transferencia' ? 'transferencia' : 'efectivo'
 
   const r = db.prepare(
-    `INSERT INTO ventas (codigo, cliente_id, cliente_nombre, pedido_id, total, anticipo_aplicado, pagado, fecha, comentario, creado)
-     VALUES (?, ?, ?, ?, 0, 0, 0, ?, ?, ?)`
-  ).run(null, clienteId || null, cliente?.nombre || '', pedidoId || null, fechaVenta, (comentario || '').trim(), ahora)
+    `INSERT INTO ventas (codigo, cliente_id, cliente_nombre, pedido_id, total, anticipo_aplicado, pagado, descuento_pct, fecha, comentario, creado)
+     VALUES (?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?)`
+  ).run(null, clienteId || null, cliente?.nombre || '', pedidoId || null, descGlobalPct, fechaVenta, (comentario || '').trim(), ahora)
   const ventaId = r.lastInsertRowid
   // Código legible VTA-####
   db.prepare('UPDATE ventas SET codigo = ? WHERE id = ?').run(`VTA-${String(ventaId).padStart(4, '0')}`, ventaId)
 
-  // Ítems + descuento de stock (por variante)
-  const total = insertarItems('venta_items', 'venta_id', ventaId, itemsValidos)
+  // Ítems (con descuento por línea si el modo es "por producto"). El subtotal ya
+  // trae aplicados los descuentos de línea; luego restamos el descuento global.
+  const itemsInsertar = esGlobal ? itemsValidos.map((it) => ({ ...it, descuentoPct: 0 })) : itemsValidos
+  const subtotal = insertarItems('venta_items', 'venta_id', ventaId, itemsInsertar, true)
+  const total = Math.round(subtotal * (1 - descGlobalPct / 100))
   for (const it of itemsValidos) {
     if (!it.productoId) continue
     const cantidad = Number(it.cantidad) || 0
@@ -2295,18 +2315,21 @@ function crearVentaCore({ clienteId, items, comentario, aplicarAnticipo, pedidoI
   db.prepare('UPDATE ventas SET total = ?, anticipo_aplicado = ?, pagado = ? WHERE id = ?')
     .run(total, anticipoAplicado, pagado, ventaId)
 
-  // Registra el abono inicial en efectivo y su ingreso a caja (el anticipo ya entró en su día)
+  // Registra el abono inicial. Solo si es en EFECTIVO entra a caja; una
+  // transferencia bancaria salda la venta pero no ingresa a la caja física.
   if (abonoInicial > 0) {
-    db.prepare('INSERT INTO venta_pagos (venta_id, monto, fecha, comentario, creado) VALUES (?, ?, ?, ?, ?)')
-      .run(ventaId, abonoInicial, fechaVenta, 'Pago inicial', ahora)
-    registrarIngreso({
-      fecha: fechaVenta,
-      categoria: 'Venta',
-      monto: abonoInicial,
-      descripcion: `Venta #${ventaId}${cliente ? ' — ' + cliente.nombre : ''}`,
-      origen: 'venta',
-      refId: ventaId,
-    })
+    db.prepare('INSERT INTO venta_pagos (venta_id, monto, fecha, comentario, metodo, creado) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(ventaId, abonoInicial, fechaVenta, 'Pago inicial', metodo, ahora)
+    if (metodo === 'efectivo') {
+      registrarIngreso({
+        fecha: fechaVenta,
+        categoria: 'Venta',
+        monto: abonoInicial,
+        descripcion: `Venta #${ventaId}${cliente ? ' — ' + cliente.nombre : ''}`,
+        origen: 'venta',
+        refId: ventaId,
+      })
+    }
   }
 
   return { ventaId, avisos }
@@ -2318,12 +2341,12 @@ app.get('/api/ventas', permisoRequired('ventas', 'ver'), (req, res) => {
 })
 
 app.post('/api/ventas', permisoRequired('ventas', 'crear'), (req, res) => {
-  const { clienteId, items, comentario, aplicarAnticipo, pagoInicial, fecha } = req.body
+  const { clienteId, items, comentario, aplicarAnticipo, pagoInicial, fecha, descuentoTipo, descuentoPct, metodoPago } = req.body
   const itemsValidos = (items || []).filter((it) => (Number(it.cantidad) || 0) > 0)
   if (itemsValidos.length === 0) return res.status(400).json({ error: 'Agrega al menos un producto a la venta' })
   let resultado
   const crear = db.transaction(() => {
-    resultado = crearVentaCore({ clienteId, items: itemsValidos, comentario, aplicarAnticipo, pagoInicial, fecha })
+    resultado = crearVentaCore({ clienteId, items: itemsValidos, comentario, aplicarAnticipo, pagoInicial, fecha, descuentoTipo, descuentoPct, metodoPago })
   })
   crear()
   const venta = ventaSalida(db.prepare('SELECT * FROM ventas WHERE id = ?').get(resultado.ventaId))
@@ -2336,7 +2359,9 @@ app.post('/api/pedidos/:id/convertir', permisoRequired('ventas', 'crear'), (req,
   const pedido = db.prepare('SELECT * FROM pedidos WHERE id = ?').get(req.params.id)
   if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' })
   if (pedido.estado === 'entregado') return res.status(400).json({ error: 'Este pedido ya fue convertido en venta.' })
-  const items = db.prepare('SELECT * FROM pedido_items WHERE pedido_id = ?').all(pedido.id).map((it) => ({
+  // Ítems: los editados desde el formulario de venta si vienen; si no, los del pedido.
+  const itemsBody = (req.body.items || []).filter((it) => (Number(it.cantidad) || 0) > 0)
+  const items = itemsBody.length > 0 ? itemsBody : db.prepare('SELECT * FROM pedido_items WHERE pedido_id = ?').all(pedido.id).map((it) => ({
     productoId: it.producto_id,
     productoNombre: it.producto_nombre,
     varianteId: it.variante_id || null,
@@ -2350,9 +2375,13 @@ app.post('/api/pedidos/:id/convertir', permisoRequired('ventas', 'crear'), (req,
     resultado = crearVentaCore({
       clienteId: pedido.cliente_id,
       items,
-      comentario: `Pedido #${pedido.id}`,
+      comentario: (req.body.comentario || '').trim() || `Pedido #${pedido.id}`,
       aplicarAnticipo: req.body.aplicarAnticipo,
       pedidoId: pedido.id,
+      pagoInicial: req.body.pagoInicial,
+      descuentoTipo: req.body.descuentoTipo,
+      descuentoPct: req.body.descuentoPct,
+      metodoPago: req.body.metodoPago,
     })
     db.prepare("UPDATE pedidos SET estado = 'entregado', venta_id = ?, actualizado = ? WHERE id = ?")
       .run(resultado.ventaId, new Date().toISOString(), pedido.id)
@@ -2376,18 +2405,22 @@ app.post('/api/ventas/:id/pagos', permisoRequired('ventas', 'editar'), (req, res
   const ahora = new Date().toISOString()
   const fecha = req.body.fecha || ahora
   const comentario = (req.body.comentario || '').trim() || 'Abono'
+  // Solo el efectivo entra a caja; la transferencia salda la venta pero no ingresa a caja
+  const metodo = req.body.metodo === 'transferencia' ? 'transferencia' : 'efectivo'
   const registrar = db.transaction(() => {
-    db.prepare('INSERT INTO venta_pagos (venta_id, monto, fecha, comentario, creado) VALUES (?, ?, ?, ?, ?)')
-      .run(venta.id, monto, fecha, comentario, ahora)
+    db.prepare('INSERT INTO venta_pagos (venta_id, monto, fecha, comentario, metodo, creado) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(venta.id, monto, fecha, comentario, metodo, ahora)
     db.prepare('UPDATE ventas SET pagado = pagado + ? WHERE id = ?').run(monto, venta.id)
-    registrarIngreso({
-      fecha,
-      categoria: 'Venta',
-      monto,
-      descripcion: `Abono venta ${venta.codigo || '#' + venta.id}${venta.cliente_nombre ? ' — ' + venta.cliente_nombre : ''}`,
-      origen: 'venta',
-      refId: venta.id,
-    })
+    if (metodo === 'efectivo') {
+      registrarIngreso({
+        fecha,
+        categoria: 'Venta',
+        monto,
+        descripcion: `Abono venta ${venta.codigo || '#' + venta.id}${venta.cliente_nombre ? ' — ' + venta.cliente_nombre : ''}`,
+        origen: 'venta',
+        refId: venta.id,
+      })
+    }
   })
   registrar()
   res.json(ventaSalida(db.prepare('SELECT * FROM ventas WHERE id = ?').get(venta.id)))

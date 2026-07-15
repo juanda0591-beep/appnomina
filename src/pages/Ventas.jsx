@@ -1,14 +1,15 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
-import { formatCOP, formatFecha } from '../utils/format.js'
+import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
 import { notify, confirmar } from '../utils/notify.js'
 import Vacio from '../components/Vacio.jsx'
 import { generarPdfVenta, ventaPdfFile, imprimirVenta } from '../utils/pdf.js'
 import { abrirWhatsApp, mensajeVenta } from '../utils/whatsapp.js'
 
-const emptyItem = () => ({ productoId: '', varianteId: '', cantidad: '', precioUnitario: '' })
-const hoy = () => new Date().toISOString().slice(0, 10)
+const emptyItem = () => ({ productoId: '', varianteId: '', cantidad: '', precioUnitario: '', descuentoPct: '' })
+const hoy = hoyISO
 
 const ESTADO_PAGO = {
   pagado: { label: 'Pagado', chip: 'ok' },
@@ -17,19 +18,25 @@ const ESTADO_PAGO = {
 }
 
 export default function Ventas() {
-  const { ventas, clientes, productos, empresa, addVenta, deleteVenta, registrarPagoVenta } = useData()
+  const { ventas, clientes, productos, empresa, addVenta, deleteVenta, registrarPagoVenta, convertirPedido } = useData()
   const { puede } = useAuth()
   const puedeCrear = puede('ventas', 'crear')
   const puedeEditar = puede('ventas', 'editar')
   const puedeEliminar = puede('ventas', 'eliminar')
+  const location = useLocation()
+  const navigate = useNavigate()
 
   const [formAbierto, setFormAbierto] = useState(false)
+  const [pedidoOrigenId, setPedidoOrigenId] = useState(null) // si la venta viene de convertir un pedido
   const [clienteId, setClienteId] = useState('')
   const [comentario, setComentario] = useState('')
   const [items, setItems] = useState([emptyItem()])
   const [aplicarAnticipo, setAplicarAnticipo] = useState(false)
   const [ventaCredito, setVentaCredito] = useState(false) // si true, se cobra parcial (o nada) ahora
   const [pagoInicial, setPagoInicial] = useState('')       // cuánto paga ahora si es a crédito
+  const [metodoPago, setMetodoPago] = useState('efectivo') // efectivo (entra a caja) | transferencia
+  const [descuentoTipo, setDescuentoTipo] = useState('ninguno') // ninguno | global | producto
+  const [descuentoGlobal, setDescuentoGlobal] = useState('')    // % sobre toda la venta
   const [guardando, setGuardando] = useState(false)
   const [detalleId, setDetalleId] = useState(null)
 
@@ -47,6 +54,7 @@ export default function Ventas() {
   const [pagoMonto, setPagoMonto] = useState('')
   const [pagoFecha, setPagoFecha] = useState(hoy())
   const [pagoComentario, setPagoComentario] = useState('')
+  const [pagoMetodo, setPagoMetodo] = useState('efectivo')
   const [guardandoPago, setGuardandoPago] = useState(false)
 
   const ventaDetalle = ventas.find((v) => v.id === detalleId)
@@ -58,7 +66,28 @@ export default function Ventas() {
   const resetForm = () => {
     setClienteId(''); setComentario(''); setItems([emptyItem()])
     setAplicarAnticipo(false); setVentaCredito(false); setPagoInicial(''); setFormAbierto(false)
+    setMetodoPago('efectivo'); setDescuentoTipo('ninguno'); setDescuentoGlobal(''); setPedidoOrigenId(null)
   }
+
+  // Cuando se llega desde Pedidos → "Convertir en venta": abre el formulario
+  // prellenado con los datos del pedido para poder ajustar antes de confirmar.
+  useEffect(() => {
+    const ped = location.state?.convertirPedido
+    if (!ped) return
+    setPedidoOrigenId(ped.id)
+    setClienteId(ped.clienteId ? String(ped.clienteId) : '')
+    setComentario(ped.comentario || '')
+    setItems((ped.items && ped.items.length ? ped.items : [{}]).map((it) => ({
+      productoId: it.productoId ? String(it.productoId) : '',
+      varianteId: it.varianteId ? String(it.varianteId) : '',
+      cantidad: it.cantidad != null ? String(it.cantidad) : '',
+      precioUnitario: it.precioUnitario != null ? String(it.precioUnitario) : '',
+      descuentoPct: '',
+    })))
+    setFormAbierto(true)
+    // Limpia el state de navegación para que no se reabra al refrescar/volver
+    navigate(location.pathname, { replace: true, state: null })
+  }, [location.state, location.pathname, navigate])
 
   const setItem = (idx, campo, val) => {
     setItems((its) => its.map((it, i) => {
@@ -76,7 +105,17 @@ export default function Ventas() {
   const addItem = () => setItems((its) => [...its, emptyItem()])
   const removeItem = (idx) => setItems((its) => (its.length === 1 ? its : its.filter((_, i) => i !== idx)))
 
-  const totalForm = items.reduce((s, it) => s + (Number(it.cantidad) || 0) * (Number(it.precioUnitario) || 0), 0)
+  // Subtotal bruto y subtotal con descuentos por línea (modo "por producto")
+  const clamp = (n) => Math.max(0, Math.min(100, Number(n) || 0))
+  const subtotalBruto = items.reduce((s, it) => s + (Number(it.cantidad) || 0) * (Number(it.precioUnitario) || 0), 0)
+  const subtotalConLinea = items.reduce((s, it) => {
+    const base = (Number(it.cantidad) || 0) * (Number(it.precioUnitario) || 0)
+    const pct = descuentoTipo === 'producto' ? clamp(it.descuentoPct) : 0
+    return s + base * (1 - pct / 100)
+  }, 0)
+  const descGlobalPct = descuentoTipo === 'global' ? clamp(descuentoGlobal) : 0
+  const totalForm = Math.round(subtotalConLinea * (1 - descGlobalPct / 100))
+  const descuentoValor = subtotalBruto - totalForm
   const anticipoUsado = aplicarAnticipo ? Math.min(saldoCliente, totalForm) : 0
   const saldoTrasAnticipo = Math.max(0, totalForm - anticipoUsado)
   // Lo que paga ahora: todo (contado) o lo indicado (crédito)
@@ -91,22 +130,42 @@ export default function Ventas() {
       notify.error('Una venta a crédito necesita un cliente para registrar la deuda')
       return
     }
+    // Confirmación con el resumen de la venta antes de registrarla
+    const metodoTxt = metodoPago === 'transferencia' ? 'transferencia (no entra a caja)' : 'efectivo (entra a caja)'
+    const partes = [`Total: ${formatCOP(totalForm)}`]
+    if (descuentoValor > 0) partes.push(`Descuento: −${formatCOP(descuentoValor)}`)
+    if (pagaAhora > 0) partes.push(`Paga ahora: ${formatCOP(pagaAhora)} en ${metodoTxt}`)
+    if (quedaDebiendo > 0) partes.push(`Queda debiendo: ${formatCOP(quedaDebiendo)}`)
+    const okConfirm = await confirmar(partes.join('\n'), {
+      titulo: pedidoOrigenId ? `Convertir pedido #${pedidoOrigenId} en venta` : '¿Registrar esta venta?',
+      textoOk: 'Sí, registrar', textoCancelar: 'Revisar', peligro: false,
+    })
+    if (!okConfirm) return
     setGuardando(true)
     try {
-      const venta = await addVenta({
+      const payloadVenta = {
         clienteId: clienteId || null,
         comentario,
         aplicarAnticipo,
         // Si es contado, no mandamos pagoInicial (el backend salda todo por defecto)
         pagoInicial: ventaCredito ? pagaAhora : undefined,
+        metodoPago,
+        descuentoTipo: descuentoTipo === 'ninguno' ? undefined : descuentoTipo,
+        descuentoPct: descuentoTipo === 'global' ? clamp(descuentoGlobal) : undefined,
         items: itemsValidos.map((it) => ({
           productoId: Number(it.productoId),
           varianteId: it.varianteId ? Number(it.varianteId) : null,
           cantidad: Number(it.cantidad),
           precioUnitario: Number(it.precioUnitario) || 0,
+          descuentoPct: descuentoTipo === 'producto' ? clamp(it.descuentoPct) : 0,
         })),
-      })
-      notify.ok('Venta registrada')
+      }
+      // Si viene de un pedido, se convierte (marca el pedido como entregado y lo liga);
+      // si no, es una venta normal. Ambos comparten el mismo payload.
+      const venta = pedidoOrigenId
+        ? await convertirPedido(pedidoOrigenId, payloadVenta)
+        : await addVenta(payloadVenta)
+      notify.ok(pedidoOrigenId ? 'Pedido convertido en venta' : 'Venta registrada')
       for (const aviso of venta?.avisos || []) notify.error(`⚠️ ${aviso}`)
       resetForm()
     } catch (err) {
@@ -132,15 +191,24 @@ export default function Ventas() {
     setPagoMonto(String(v.saldo || ''))
     setPagoFecha(hoy())
     setPagoComentario('')
+    setPagoMetodo('efectivo')
   }
   const cerrarPago = () => { setPagoVentaId(null); setPagoMonto(''); setPagoComentario('') }
   const handleRegistrarPago = async (e) => {
     e.preventDefault()
     const monto = Number(pagoMonto) || 0
     if (monto <= 0) { notify.error('Indica un monto mayor a 0'); return }
+    // Confirmación del abono (monto, método y saldo que quedaría)
+    const metodoTxt = pagoMetodo === 'transferencia' ? 'transferencia (no entra a caja)' : 'efectivo (entra a caja)'
+    const saldoRestante = Math.max(0, (ventaPago?.saldo || 0) - monto)
+    const okConfirm = await confirmar(
+      `Abono: ${formatCOP(monto)} en ${metodoTxt}\nSaldo restante: ${formatCOP(saldoRestante)}`,
+      { titulo: `Registrar abono · ${ventaPago?.codigo || '#' + pagoVentaId}`, textoOk: 'Sí, registrar', textoCancelar: 'Revisar', peligro: false }
+    )
+    if (!okConfirm) return
     setGuardandoPago(true)
     try {
-      await registrarPagoVenta(pagoVentaId, { monto, fecha: pagoFecha, comentario: pagoComentario })
+      await registrarPagoVenta(pagoVentaId, { monto, fecha: pagoFecha, comentario: pagoComentario, metodo: pagoMetodo })
       notify.ok('Abono registrado')
       cerrarPago()
     } catch (err) {
@@ -355,7 +423,7 @@ export default function Ventas() {
         <>
           <div className="overlay" onClick={resetForm} />
           <form className="modal modal-lg" onSubmit={handleSubmit}>
-            <h3>Nueva venta</h3>
+            <h3>{pedidoOrigenId ? `Convertir pedido #${pedidoOrigenId} en venta` : 'Nueva venta'}</h3>
             <div className="row">
               <div style={{ flex: 2 }}>
                 <label>Cliente</label>
@@ -377,6 +445,7 @@ export default function Ventas() {
                     <th style={{ minWidth: 110 }}>Color</th>
                     <th className="num">Cantidad</th>
                     <th className="num">Precio unitario</th>
+                    {descuentoTipo === 'producto' && <th className="num" style={{ minWidth: 80 }}>Desc. %</th>}
                     <th className="num">Subtotal</th>
                     <th></th>
                   </tr>
@@ -415,7 +484,12 @@ export default function Ventas() {
                         <td className="num">
                           <input type="number" min="0" step="any" value={it.precioUnitario} onChange={(e) => setItem(i, 'precioUnitario', e.target.value)} placeholder="0" />
                         </td>
-                        <td className="num">{formatCOP((Number(it.cantidad) || 0) * (Number(it.precioUnitario) || 0))}</td>
+                        {descuentoTipo === 'producto' && (
+                          <td className="num">
+                            <input type="number" min="0" max="100" step="any" value={it.descuentoPct} onChange={(e) => setItem(i, 'descuentoPct', e.target.value)} placeholder="0" />
+                          </td>
+                        )}
+                        <td className="num">{formatCOP((Number(it.cantidad) || 0) * (Number(it.precioUnitario) || 0) * (1 - (descuentoTipo === 'producto' ? clamp(it.descuentoPct) : 0) / 100))}</td>
                         <td><button type="button" className="btn-icon danger" onClick={() => removeItem(i)}>✕</button></td>
                       </tr>
                     )
@@ -424,6 +498,27 @@ export default function Ventas() {
               </table>
             </div>
             <button type="button" className="btn-secondary" onClick={addItem}>+ Agregar producto</button>
+
+            {/* Descuento: ninguno / global / por producto (excluyentes) */}
+            <div className="row" style={{ marginTop: 12, alignItems: 'flex-end' }}>
+              <div style={{ flex: 1 }}>
+                <label>Descuento</label>
+                <select value={descuentoTipo} onChange={(e) => setDescuentoTipo(e.target.value)}>
+                  <option value="ninguno">Sin descuento</option>
+                  <option value="global">% sobre toda la venta</option>
+                  <option value="producto">% por producto</option>
+                </select>
+              </div>
+              {descuentoTipo === 'global' && (
+                <div style={{ flex: 1 }}>
+                  <label>% de descuento</label>
+                  <input type="number" min="0" max="100" step="any" value={descuentoGlobal} onChange={(e) => setDescuentoGlobal(e.target.value)} placeholder="0" />
+                </div>
+              )}
+              {descuentoTipo === 'producto' && (
+                <div style={{ flex: 2 }}><span className="muted small">Escribe el % en la columna "Desc. %" de cada producto.</span></div>
+              )}
+            </div>
 
             {clienteSel && saldoCliente > 0 && (
               <label className="small" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontWeight: 400 }}>
@@ -449,7 +544,20 @@ export default function Ventas() {
               </div>
             )}
 
+            {/* Método de pago de lo que se cobra ahora */}
+            {pagaAhora > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <label>Método de pago (de lo que se paga ahora)</label>
+                <select value={metodoPago} onChange={(e) => setMetodoPago(e.target.value)} style={{ maxWidth: 260 }}>
+                  <option value="efectivo">Efectivo (entra a caja)</option>
+                  <option value="transferencia">Transferencia bancaria (no entra a caja)</option>
+                </select>
+              </div>
+            )}
+
             <div className="totals-row" style={{ marginTop: 12, flexDirection: 'column', gap: 4 }}>
+              {descuentoValor > 0 && <span className="muted">Subtotal: {formatCOP(subtotalBruto)}</span>}
+              {descuentoValor > 0 && <span className="muted">Descuento{descGlobalPct > 0 ? ` (${descGlobalPct}%)` : ' por producto'}: −{formatCOP(descuentoValor)}</span>}
               <span>Total: <strong>{formatCOP(totalForm)}</strong></span>
               {anticipoUsado > 0 && <span className="muted">Anticipo aplicado: −{formatCOP(anticipoUsado)}</span>}
               <span>Paga ahora: <strong>{formatCOP(pagaAhora)}</strong></span>
@@ -567,6 +675,11 @@ export default function Ventas() {
                 <input type="date" value={pagoFecha} onChange={(e) => setPagoFecha(e.target.value)} />
               </div>
             </div>
+            <label style={{ marginTop: 10 }}>Método de pago</label>
+            <select value={pagoMetodo} onChange={(e) => setPagoMetodo(e.target.value)}>
+              <option value="efectivo">Efectivo (entra a caja)</option>
+              <option value="transferencia">Transferencia bancaria (no entra a caja)</option>
+            </select>
             <label style={{ marginTop: 10 }}>Comentario (opcional)</label>
             <input value={pagoComentario} onChange={(e) => setPagoComentario(e.target.value)} placeholder="Ej: abono en efectivo" />
             <div className="form-actions">

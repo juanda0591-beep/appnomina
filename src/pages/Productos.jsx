@@ -1,14 +1,14 @@
 import { useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
-import { formatCOP, formatFecha } from '../utils/format.js'
+import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
 import { notify, confirmar } from '../utils/notify.js'
 import Vacio from '../components/Vacio.jsx'
 
 const NUEVO_PROCESO = '__nuevo__'
 const emptyProceso = () => ({ nombre: '', pago: '', materiales: [] })
 const emptyRecetaFila = () => ({ materialId: '', cantidad: '', porColor: false, familia: '' })
-const hoy = () => new Date().toISOString().slice(0, 10)
+const hoy = hoyISO
 const emptyEntrada = () => ({ cantidad: '', costoUnitario: '', fecha: hoy(), descripcion: '', varianteId: '' })
 const TIPO_MOV_LABEL = { entrada: 'Compra', produccion: 'Producción' }
 const emptyDatos = () => ({

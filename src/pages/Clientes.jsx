@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
-import { formatCOP, formatFecha } from '../utils/format.js'
+import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
 import { notify, confirmar } from '../utils/notify.js'
 import Vacio from '../components/Vacio.jsx'
 
-const hoy = () => new Date().toISOString().slice(0, 10)
+const hoy = hoyISO
 const emptyCliente = () => ({
   nombre: '', apellidos: '', cedula: '', correo: '',
   direccion: '', municipio: '', telefono: '', tipo: 'cliente',

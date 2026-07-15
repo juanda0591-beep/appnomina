@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
-import { formatCOP, formatFecha } from '../utils/format.js'
+import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
 import { notify, confirmar } from '../utils/notify.js'
 import Vacio from '../components/Vacio.jsx'
 
@@ -11,7 +11,7 @@ export default function Prestamos() {
   const puedeCrear = puede('prestamos', 'crear')
   const puedeEliminar = puede('prestamos', 'eliminar')
 
-  const hoy = new Date().toISOString().slice(0, 10)
+  const hoy = hoyISO()
   const [formAbierto, setFormAbierto] = useState(false)
   const [empleadoId, setEmpleadoId] = useState('')
   const [monto, setMonto] = useState('')

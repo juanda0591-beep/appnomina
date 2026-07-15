@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
-import { formatCOP, formatFecha } from '../utils/format.js'
+import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
 import { notify, confirmar } from '../utils/notify.js'
 import Vacio from '../components/Vacio.jsx'
 
 const CATEGORIAS_INGRESO = ['Venta', 'Abono cliente', 'Préstamo recibido', 'Otro ingreso']
 const CATEGORIAS_GASTO = ['Materiales', 'Servicios', 'Arriendo', 'Transporte', 'Nómina', 'Adelanto', 'Otro gasto']
 
-const hoy = () => new Date().toISOString().slice(0, 10)
+const hoy = hoyISO
 const formVacio = () => ({ fecha: hoy(), categoria: '', monto: '', descripcion: '', comprobante: '', comprobanteTipo: '' })
 
 // Etiqueta legible del origen de un movimiento automático

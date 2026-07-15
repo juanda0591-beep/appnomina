@@ -701,6 +701,7 @@ input[type="file"] {
 .swal-nomina .swal2-html-container {
   color: var(--muted);
   font-size: 15px;
+  white-space: pre-line; /* respeta los saltos de línea en resúmenes de confirmación */
 }
 .swal-nomina .swal2-confirm,
 .swal-nomina .swal2-cancel {

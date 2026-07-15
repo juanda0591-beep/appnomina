@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
-import { formatCOP, formatFecha } from '../utils/format.js'
+import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
 import { generarPdfReporte, generarPdfMovimientos, generarPdfFabricacion, generarPdfReporteMateriales, descargarCSV } from '../utils/pdf.js'
 import { notify, preguntarTexto } from '../utils/notify.js'
 
@@ -14,7 +14,7 @@ export default function Reportes() {
   const { getReporte, getReporteMateriales, getMovimientos, empresa, ordenesProduccion, productos } = useData()
   const { puede } = useAuth()
   const puedeExportar = puede('reportes', 'exportar')
-  const hoy = new Date().toISOString().slice(0, 10)
+  const hoy = hoyISO()
 
   const [desde, setDesde] = useState(inicioDeMes())
   const [hasta, setHasta] = useState(hoy)

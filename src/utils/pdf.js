@@ -2,71 +2,153 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { formatCOP, formatFecha } from './format.js'
 
+// ── Paleta de colores (misma del sistema de diseño de la app) ──────────────
+const C = {
+  primary:   [37, 99, 235],    // #2563eb
+  accent:    [139, 92, 246],   // #8b5cf6
+  dark:      [15, 23, 42],     // #0f172a
+  muted:     [100, 116, 139],  // #64748b
+  border:    [226, 232, 240],  // #e2e8f0
+  rowAlt:    [248, 250, 252],  // #f8fafc — fila alterna (zebra)
+  headBg:    [239, 246, 255],  // pie de tabla y secciones
+  success:   [22, 163, 74],    // verde
+  danger:    [220, 38, 38],    // rojo
+  warning:   [180, 83, 9],     // ámbar
+}
+
+// Opciones base compartidas para todas las tablas autoTable.
+// Úsalas combinando: autoTable(doc, { ...T(), startY: y, head, body, foot, ... })
+function T(overrides = {}) {
+  return {
+    styles: {
+      fontSize: 10,
+      cellPadding: { top: 4, bottom: 4, left: 5, right: 5 },
+      lineColor: C.border,
+      lineWidth: 0.25,
+      textColor: C.dark,
+    },
+    headStyles: {
+      fillColor: C.primary,
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 10,
+      cellPadding: { top: 5, bottom: 5, left: 5, right: 5 },
+    },
+    footStyles: {
+      fillColor: C.headBg,
+      textColor: C.dark,
+      fontStyle: 'bold',
+      lineWidth: { top: 0.6, bottom: 0, left: 0, right: 0 },
+      lineColor: C.primary,
+    },
+    alternateRowStyles: { fillColor: C.rowAlt },
+    ...overrides,
+  }
+}
+
+// Dibuja un recuadro de "total final" con fondo azul degradado al final de un doc.
+// Devuelve la nueva posición Y.
+function cajaTotales(doc, marginX, y, lineas) {
+  // lineas = [{ etiqueta, valor, destacado? }]
+  const pageW = doc.internal.pageSize.getWidth()
+  const ancho = 90
+  const x = pageW - marginX - ancho
+  const altoLinea = 7
+  const padV = 4
+  const alto = lineas.length * altoLinea + padV * 2
+
+  // Fondo
+  doc.setFillColor(...C.headBg)
+  doc.setDrawColor(...C.border)
+  doc.setLineWidth(0.4)
+  doc.roundedRect(x, y, ancho, alto, 2, 2, 'FD')
+
+  // Línea izquierda de acento
+  doc.setFillColor(...C.primary)
+  doc.rect(x, y, 2.5, alto, 'F')
+
+  let ly = y + padV + altoLinea * 0.75
+  for (const { etiqueta, valor, destacado } of lineas) {
+    if (destacado) {
+      doc.setFont(undefined, 'bold')
+      doc.setFontSize(11.5)
+      doc.setTextColor(...C.primary)
+    } else {
+      doc.setFont(undefined, 'normal')
+      doc.setFontSize(10)
+      doc.setTextColor(...C.muted)
+    }
+    doc.text(etiqueta, x + 8, ly)
+    doc.text(valor, x + ancho - 3, ly, { align: 'right' })
+    ly += altoLinea
+  }
+  doc.setFont(undefined, 'normal')
+  doc.setTextColor(...C.dark)
+  return y + alto + 8
+}
+
 // Dibuja el encabezado con los datos de la empresa y el logo.
 // Devuelve la posición Y donde puede continuar el contenido.
 function drawEncabezadoEmpresa(doc, empresa, marginX) {
   const pageW = doc.internal.pageSize.getWidth()
-  const topY = 14 // tope común para logo y texto
 
-  // 1) Medir el logo (sin dibujarlo todavía) para poder centrar el texto.
+  // ── Barra de acento superior (degradado simulado con dos rectángulos) ──
+  doc.setFillColor(...C.primary)
+  doc.rect(0, 0, pageW * 0.65, 5, 'F')
+  doc.setFillColor(...C.accent)
+  doc.rect(pageW * 0.65, 0, pageW * 0.35, 5, 'F')
+
+  const topY = 11
+
+  // Logo
   let textX = marginX
-  let logoW = 0
-  let logoH = 0
-  let logoData = null
-  let logoFmt = 'JPEG'
+  let logoW = 0, logoH = 0, logoData = null, logoFmt = 'JPEG'
   if (empresa?.logo) {
     try {
       const props = doc.getImageProperties(empresa.logo)
       logoFmt = String(empresa.logo).startsWith('data:image/png') ? 'PNG' : 'JPEG'
-      logoW = 26
-      logoH = (props.height * logoW) / props.width
-      logoData = empresa.logo
-      textX = marginX + logoW + 6
-    } catch {
-      // si el logo no es válido, se ignora
-    }
+      logoW = 28; logoH = (props.height * logoW) / props.width
+      logoData = empresa.logo; textX = marginX + logoW + 8
+    } catch { /* logo inválido, se ignora */ }
   }
 
-  // 2) Armar las líneas de texto y medir su alto total.
-  const nombreAlto = empresa?.nombre ? 6 : 0
+  const nombreAlto = empresa?.nombre ? 7 : 0
   const lineas = []
   if (empresa?.nit) lineas.push(`NIT: ${empresa.nit}`)
   if (empresa?.direccion) lineas.push(empresa.direccion)
-  const contacto = [empresa?.telefono && `Tel: ${empresa.telefono}`, empresa?.correo]
-    .filter(Boolean)
-    .join('   ·   ')
+  const contacto = [empresa?.telefono && `Tel: ${empresa.telefono}`, empresa?.correo].filter(Boolean).join('   ·   ')
   if (contacto) lineas.push(contacto)
   const textoAlto = nombreAlto + lineas.length * 5
 
-  // 3) Centrar verticalmente el bloque más corto respecto al más alto.
-  const bloqueAlto = Math.max(textoAlto, logoH)
+  const bloqueAlto = Math.max(textoAlto, logoH, 10)
   const logoY = topY + (bloqueAlto - logoH) / 2
-  let y = topY + (bloqueAlto - textoAlto) / 2 + 5 // +5 ≈ ascenso de la 1ª línea
+  let y = topY + (bloqueAlto - textoAlto) / 2 + 5
 
-  if (logoData) {
-    doc.addImage(logoData, logoFmt, marginX, logoY, logoW, logoH)
-  }
+  if (logoData) doc.addImage(logoData, logoFmt, marginX, logoY, logoW, logoH)
 
   if (empresa?.nombre) {
     doc.setFont(undefined, 'bold')
-    doc.setFontSize(16)
-    doc.setTextColor(15, 23, 42)
+    doc.setFontSize(17)
+    doc.setTextColor(...C.primary)
     doc.text(empresa.nombre, textX, y)
     doc.setFont(undefined, 'normal')
-    y += 6
+    y += 7
   }
 
   doc.setFontSize(9)
-  doc.setTextColor(90)
-  for (const l of lineas) {
-    doc.text(l, textX, y)
-    y += 5
-  }
+  doc.setTextColor(...C.muted)
+  for (const l of lineas) { doc.text(l, textX, y); y += 5 }
 
-  // línea divisoria al final del bloque más alto
-  const bottom = topY + bloqueAlto + 3
-  doc.setDrawColor(220)
-  doc.line(marginX, bottom, pageW - marginX, bottom)
+  // Línea divisoria con degradado simulado
+  const bottom = topY + bloqueAlto + 4
+  doc.setDrawColor(...C.primary)
+  doc.setLineWidth(0.7)
+  doc.line(marginX, bottom, pageW * 0.4, bottom)
+  doc.setDrawColor(...C.border)
+  doc.setLineWidth(0.3)
+  doc.line(pageW * 0.4, bottom, pageW - marginX, bottom)
+
+  doc.setTextColor(...C.dark)
   return bottom + 8
 }
 
@@ -77,10 +159,7 @@ export function generarPdfNomina({ empresa, empleado, fecha, items, descuentos, 
 
   let y = drawEncabezadoEmpresa(doc, empresa, marginX)
 
-  doc.setFontSize(16)
-  doc.setTextColor(15, 23, 42)
-  doc.text('Comprobante de Pago de Nómina', marginX, y)
-  y += 9
+  y = tituloDoc(doc, marginX, y, 'Comprobante de Pago de Nómina')
 
   doc.setFontSize(11)
   doc.setTextColor(90)
@@ -114,6 +193,7 @@ export function generarPdfNomina({ empresa, empleado, fecha, items, descuentos, 
     ]),
     styles: { fontSize: 10 },
     headStyles: { fillColor: [37, 99, 235] },
+    alternateRowStyles: { fillColor: C.rowAlt },
     columnStyles: {
       2: { halign: 'right' },
       3: { halign: 'right' },
@@ -236,10 +316,7 @@ export function generarPdfReporte({ empresa, desde, hasta, totalBruto, totalDesc
 
   let y = drawEncabezadoEmpresa(doc, empresa, marginX)
 
-  doc.setFontSize(16)
-  doc.setTextColor(15, 23, 42)
-  doc.text('Reporte de Nómina', marginX, y)
-  y += 8
+  y = tituloDoc(doc, marginX, y, 'Reporte de Nómina')
 
   doc.setFontSize(11)
   doc.setTextColor(90)
@@ -268,6 +345,7 @@ export function generarPdfReporte({ empresa, desde, hasta, totalBruto, totalDesc
     styles: { fontSize: 10 },
     headStyles: { fillColor: [37, 99, 235] },
     footStyles: { fillColor: [226, 232, 240], textColor: 0, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: C.rowAlt },
     columnStyles: {
       1: { halign: 'right' }, 2: { halign: 'right' },
       3: { halign: 'right' }, 4: { halign: 'right' },
@@ -290,10 +368,7 @@ export function generarPdfMovimientos({ empresa, desde, hasta, movimientos, ingr
 
   let y = drawEncabezadoEmpresa(doc, empresa, marginX)
 
-  doc.setFontSize(16)
-  doc.setTextColor(15, 23, 42)
-  doc.text('Reporte de Movimientos', marginX, y)
-  y += 8
+  y = tituloDoc(doc, marginX, y, 'Reporte de Movimientos')
 
   doc.setFontSize(11)
   doc.setTextColor(90)
@@ -309,6 +384,7 @@ export function generarPdfMovimientos({ empresa, desde, hasta, movimientos, ingr
     body: [[formatCOP(ingresos), '-' + formatCOP(gastos), formatCOP(balance)]],
     styles: { fontSize: 11, fontStyle: 'bold' },
     headStyles: { fillColor: [37, 99, 235] },
+    alternateRowStyles: { fillColor: C.rowAlt },
     columnStyles: { 0: { halign: 'right' }, 1: { halign: 'right' }, 2: { halign: 'right' } },
     didParseCell: (data) => { data.cell.styles.halign = 'right' },
   })
@@ -327,6 +403,7 @@ export function generarPdfMovimientos({ empresa, desde, hasta, movimientos, ingr
     ]),
     styles: { fontSize: 9 },
     headStyles: { fillColor: [37, 99, 235] },
+    alternateRowStyles: { fillColor: C.rowAlt },
     columnStyles: { 4: { halign: 'right' } },
     didParseCell: (data) => {
       if (data.column.index === 4) data.cell.styles.halign = 'right'
@@ -352,10 +429,7 @@ export function generarPdfFabricacion({ empresa, desde, hasta, ordenes, totales 
 
   let y = drawEncabezadoEmpresa(doc, empresa, marginX)
 
-  doc.setFontSize(16)
-  doc.setTextColor(15, 23, 42)
-  doc.text('Reporte de Fabricación', marginX, y)
-  y += 8
+  y = tituloDoc(doc, marginX, y, 'Reporte de Fabricación')
 
   doc.setFontSize(11)
   doc.setTextColor(90)
@@ -443,10 +517,7 @@ export function generarPdfReporteMateriales({ empresa, desde, hasta, materiales,
 
   let y = drawEncabezadoEmpresa(doc, empresa, marginX)
 
-  doc.setFontSize(16)
-  doc.setTextColor(15, 23, 42)
-  doc.text('Reporte de Materiales', marginX, y)
-  y += 8
+  y = tituloDoc(doc, marginX, y, 'Reporte de Materiales')
 
   doc.setFontSize(11)
   doc.setTextColor(90)
@@ -475,6 +546,7 @@ export function generarPdfReporteMateriales({ empresa, desde, hasta, materiales,
     styles: { fontSize: 9 },
     headStyles: { fillColor: [37, 99, 235] },
     footStyles: { fillColor: [226, 232, 240], textColor: 0, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: C.rowAlt },
     columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' } },
     didParseCell: (data) => {
       if ([2, 3, 4, 5, 6].includes(data.column.index)) data.cell.styles.halign = 'right'
@@ -671,10 +743,30 @@ function dibujarFirmas(doc, marginX, empleado, empresa) {
 }
 
 function pieDePagina(doc, empresa, marginX) {
-  doc.setTextColor(150)
-  doc.setFontSize(9)
-  const texto = empresa?.nombre ? `${empresa.nombre} · Sistema de Nómina` : 'Generado por Sistema de Nómina'
-  doc.text(texto, marginX, doc.internal.pageSize.getHeight() - 10)
+  const pageW = doc.internal.pageSize.getWidth()
+  const pageH = doc.internal.pageSize.getHeight()
+  const nPags = doc.getNumberOfPages()
+
+  // Aplica el footer a TODAS las páginas del documento
+  for (let i = 1; i <= nPags; i++) {
+    doc.setPage(i)
+    // Línea separadora
+    doc.setDrawColor(...C.primary)
+    doc.setLineWidth(0.5)
+    doc.line(marginX, pageH - 16, pageW - marginX, pageH - 16)
+
+    // Texto izquierda: empresa
+    doc.setFontSize(8)
+    doc.setTextColor(...C.muted)
+    const texto = empresa?.nombre ? `${empresa.nombre} · Sistema de Nómina` : 'Generado por Sistema de Nómina'
+    doc.text(texto, marginX, pageH - 10)
+
+    // Número de página derecha
+    if (nPags > 1) {
+      doc.text(`Página ${i} de ${nPags}`, pageW - marginX, pageH - 10, { align: 'right' })
+    }
+  }
+  doc.setTextColor(...C.dark)
 }
 
 // Genera y descarga el PDF de un costeo de producto.
@@ -685,10 +777,7 @@ export function generarPdfCosteo({ empresa, nombre, r }) {
 
   let y = drawEncabezadoEmpresa(doc, empresa, marginX)
 
-  doc.setFontSize(16)
-  doc.setTextColor(15, 23, 42)
-  doc.text('Costeo y rentabilidad', marginX, y)
-  y += 8
+  y = tituloDoc(doc, marginX, y, 'Costeo y rentabilidad')
 
   doc.setFontSize(12)
   doc.setTextColor(90)
@@ -709,6 +798,7 @@ export function generarPdfCosteo({ empresa, nombre, r }) {
     styles: { fontSize: 10 },
     headStyles: { fillColor: [37, 99, 235] },
     footStyles: { fillColor: [226, 232, 240], textColor: 0, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: C.rowAlt },
     columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' } },
     didParseCell: (data) => {
       if ([1, 2].includes(data.column.index)) data.cell.styles.halign = 'right'
@@ -738,6 +828,7 @@ export function generarPdfCosteo({ empresa, nombre, r }) {
       ]),
       styles: { fontSize: 9 },
       headStyles: { fillColor: [37, 99, 235] },
+      alternateRowStyles: { fillColor: C.rowAlt },
       columnStyles: {
         1: { halign: 'right' }, 2: { halign: 'right' },
         3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'center' },
@@ -761,10 +852,56 @@ export function generarPdfCosteo({ empresa, nombre, r }) {
   doc.save(`costeo_${(nombre || 'producto').replace(/\s+/g, '_')}.pdf`)
 }
 
-// Construye (sin guardar) el documento PDF de una venta / factura.
+// Dibuja el título del documento con subrayado de acento. Devuelve nueva Y.
+function tituloDoc(doc, marginX, y, titulo, subtitulo) {
+  const pageW = doc.internal.pageSize.getWidth()
+  doc.setFont(undefined, 'bold')
+  doc.setFontSize(18)
+  doc.setTextColor(...C.dark)
+  doc.text(titulo, marginX, y)
+  // Subrayado corto en azul
+  const w = Math.min(doc.getTextWidth(titulo), pageW * 0.6)
+  doc.setDrawColor(...C.primary)
+  doc.setLineWidth(1.5)
+  doc.line(marginX, y + 2, marginX + w, y + 2)
+  y += 9
+  if (subtitulo) {
+    doc.setFont(undefined, 'normal')
+    doc.setFontSize(10)
+    doc.setTextColor(...C.muted)
+    doc.text(subtitulo, marginX, y)
+    y += 6
+  }
+  doc.setFont(undefined, 'normal')
+  doc.setTextColor(...C.dark)
+  return y
+}
+
+// Dibuja un bloque de metadatos (etiqueta: valor) con fondo sutil.
+function metaDatos(doc, marginX, y, filas) {
+  const pageW = doc.internal.pageSize.getWidth()
+  const padH = 5, padV = 4, altoLinea = 6
+  const alto = filas.length * altoLinea + padV * 2
+  doc.setFillColor(...C.rowAlt)
+  doc.setDrawColor(...C.border)
+  doc.setLineWidth(0.25)
+  doc.roundedRect(marginX, y, pageW - marginX * 2, alto, 2, 2, 'FD')
+  let ly = y + padV + altoLinea * 0.75
+  for (const [etiqueta, valor] of filas) {
+    doc.setFontSize(9)
+    doc.setFont(undefined, 'bold')
+    doc.setTextColor(...C.muted)
+    doc.text(etiqueta, marginX + padH, ly)
+    doc.setFont(undefined, 'normal')
+    doc.setTextColor(...C.dark)
+    doc.text(String(valor || '—'), marginX + padH + 28, ly)
+    ly += altoLinea
+  }
+  return y + alto + 6
+}
 // `venta` trae { codigo, id, clienteNombre, fecha, total, pagado, saldo, estadoPago,
 //   comentario, items:[...], pagos:[...] }. Devuelve el objeto jsPDF.
-const ESTADO_PAGO_PDF = { pagado: 'PAGADO', parcial: 'ABONADO (parcial)', pendiente: 'PENDIENTE DE PAGO' }
+const ESTADO_PAGO_PDF = { pagado: 'PAGADO', parcial: 'ABONO PARCIAL', pendiente: 'PENDIENTE' }
 export function construirDocVenta({ empresa, venta, cliente }) {
   const doc = new jsPDF()
   const marginX = 14
@@ -772,10 +909,7 @@ export function construirDocVenta({ empresa, venta, cliente }) {
 
   let y = drawEncabezadoEmpresa(doc, empresa, marginX)
 
-  doc.setFontSize(16)
-  doc.setTextColor(15, 23, 42)
-  doc.text(`Factura de venta ${venta.codigo || '#' + venta.id}`, marginX, y)
-  y += 8
+  y = tituloDoc(doc, marginX, y, `Factura de venta ${venta.codigo || '#' + venta.id}`)
 
   // Datos del cliente y la fecha
   doc.setFontSize(11)
@@ -786,53 +920,61 @@ export function construirDocVenta({ empresa, venta, cliente }) {
   if (venta.fecha) { doc.text(`Fecha: ${formatFecha(venta.fecha)}`, marginX, y); y += 6 }
   y += 2
 
-  // Detalle de productos (con color si aplica)
+  // ¿Hay descuentos por producto? Solo entonces mostramos la columna "Desc."
+  const hayDescLinea = venta.items.some((it) => (Number(it.descuentoPct) || 0) > 0)
+  const head = hayDescLinea
+    ? [['Producto', 'Color', 'Cantidad', 'Precio', 'Desc.', 'Subtotal']]
+    : [['Producto', 'Color', 'Cantidad', 'Precio', 'Subtotal']]
+  const colsNum = hayDescLinea ? [2, 3, 4, 5] : [2, 3, 4]
   autoTable(doc, {
     startY: y,
-    head: [['Producto', 'Color', 'Cantidad', 'Precio', 'Subtotal']],
-    body: venta.items.map((it) => [
-      it.productoNombre || '',
-      it.colorNombre || '—',
-      String(it.cantidad),
-      formatCOP(it.precioUnitario),
-      formatCOP(it.subtotal != null ? it.subtotal : (Number(it.cantidad) || 0) * (Number(it.precioUnitario) || 0)),
-    ]),
+    head,
+    body: venta.items.map((it) => {
+      const bruto = (Number(it.cantidad) || 0) * (Number(it.precioUnitario) || 0)
+      const sub = it.subtotal != null ? it.subtotal : bruto
+      const fila = [it.productoNombre || '', it.colorNombre || '—', String(it.cantidad), formatCOP(it.precioUnitario)]
+      if (hayDescLinea) fila.push((Number(it.descuentoPct) || 0) > 0 ? `${it.descuentoPct}%` : '—')
+      fila.push(formatCOP(sub))
+      return fila
+    }),
     styles: { fontSize: 10 },
     headStyles: { fillColor: [37, 99, 235] },
-    columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
+    alternateRowStyles: { fillColor: C.rowAlt },
     didParseCell: (data) => {
-      if ([2, 3, 4].includes(data.column.index)) data.cell.styles.halign = 'right'
+      if (colsNum.includes(data.column.index)) data.cell.styles.halign = 'right'
     },
   })
   y = doc.lastAutoTable.finalY + 8
 
-  // Resumen de pago: total, abonado, saldo
-  doc.setFontSize(11)
-  doc.setTextColor(0)
-  doc.text(`Total: ${formatCOP(venta.total)}`, pageW - marginX, y, { align: 'right' }); y += 6
-  if (venta.anticipoAplicado > 0) {
-    doc.setTextColor(90)
-    doc.text(`Anticipo aplicado: ${formatCOP(venta.anticipoAplicado)}`, pageW - marginX, y, { align: 'right' }); y += 6
+  // Resumen de pago en recuadro destacado (con desglose de descuento si aplica)
+  const lineasTot = []
+  const descPct = Number(venta.descuentoPct) || 0
+  const bruto = venta.subtotalBruto != null ? venta.subtotalBruto : venta.total
+  if (bruto > venta.total + 0.5) {
+    lineasTot.push({ etiqueta: 'Subtotal', valor: formatCOP(bruto) })
+    lineasTot.push({ etiqueta: descPct > 0 ? `Descuento (${descPct}%)` : 'Descuento', valor: `−${formatCOP(bruto - venta.total)}` })
   }
-  doc.setTextColor(22, 163, 74)
-  doc.text(`Pagado: ${formatCOP(venta.pagado)}`, pageW - marginX, y, { align: 'right' }); y += 6
-  if ((venta.saldo || 0) > 0) {
-    doc.setTextColor(220, 38, 38)
-    doc.text(`Saldo pendiente: ${formatCOP(venta.saldo)}`, pageW - marginX, y, { align: 'right' }); y += 6
-  }
-  doc.setTextColor(0)
-  y += 2
+  lineasTot.push({ etiqueta: 'Total', valor: formatCOP(venta.total), destacado: true })
+  if (venta.anticipoAplicado > 0) lineasTot.push({ etiqueta: 'Anticipo aplicado', valor: formatCOP(venta.anticipoAplicado) })
+  lineasTot.push({ etiqueta: 'Pagado', valor: formatCOP(venta.pagado) })
+  if ((venta.saldo || 0) > 0) lineasTot.push({ etiqueta: 'Saldo pendiente', valor: formatCOP(venta.saldo), destacado: true })
+  y = cajaTotales(doc, marginX, y, lineasTot)
 
   // Historial de abonos (si hay más de uno o hay saldo)
   if (venta.pagos && venta.pagos.length > 0) {
     autoTable(doc, {
       startY: y,
-      head: [['Fecha del pago', 'Comentario', 'Monto']],
-      body: venta.pagos.map((p) => [formatFecha(p.fecha), p.comentario || '—', formatCOP(p.monto)]),
+      head: [['Fecha del pago', 'Comentario', 'Método', 'Monto']],
+      body: venta.pagos.map((p) => [
+        formatFecha(p.fecha),
+        p.comentario || '—',
+        p.metodo === 'transferencia' ? 'Transferencia' : 'Efectivo',
+        formatCOP(p.monto),
+      ]),
       styles: { fontSize: 9 },
       headStyles: { fillColor: [100, 116, 139] },
-      columnStyles: { 2: { halign: 'right' } },
-      didParseCell: (data) => { if (data.column.index === 2) data.cell.styles.halign = 'right' },
+      alternateRowStyles: { fillColor: C.rowAlt },
+      didParseCell: (data) => { if (data.column.index === 3) data.cell.styles.halign = 'right' },
     })
     y = doc.lastAutoTable.finalY + 8
   }
@@ -878,27 +1020,37 @@ export function imprimirVenta({ empresa, venta, cliente }) {
 }
 
 // Sello inclinado con el estado de pago (verde=pagado, ámbar=parcial, rojo=pendiente).
+// El recuadro se ajusta al ancho del texto para que las letras nunca se salgan.
 function dibujarSelloEstado(doc, marginX, texto, estado) {
   if (!texto) return
   const pageW = doc.internal.pageSize.getWidth()
-  const cx = pageW - marginX - 26
   const cy = 52
   const color = estado === 'pagado' ? [22, 163, 74] : estado === 'parcial' ? [180, 83, 9] : [220, 38, 38]
+
   doc.saveGraphicsState()
+  doc.setFont(undefined, 'bold')
+  doc.setFontSize(13)
+
+  // Ancho del recuadro = ancho real del texto + padding lateral
+  const textoW = doc.getTextWidth(texto)
+  const w = textoW + 12
+  const h = 15
+  const rad = (-18 * Math.PI) / 180
+  const cos = Math.cos(rad), sin = Math.sin(rad)
+
+  // Centro: dejamos que el borde derecho del recuadro rotado quede dentro del margen
+  const halfExtentX = Math.abs((w / 2) * cos) + Math.abs((h / 2) * sin)
+  const cx = pageW - marginX - halfExtentX - 2
+
   doc.setDrawColor(...color)
   doc.setTextColor(...color)
   doc.setLineWidth(1.4)
-  const rad = (-18 * Math.PI) / 180
-  const cos = Math.cos(rad), sin = Math.sin(rad)
-  const w = 52, h = 15
   const pts = [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]]
     .map(([px, py]) => [cx + px * cos - py * sin, cy + px * sin + py * cos])
   for (let i = 0; i < pts.length; i++) {
     const a = pts[i], b = pts[(i + 1) % pts.length]
     doc.line(a[0], a[1], b[0], b[1])
   }
-  doc.setFont(undefined, 'bold')
-  doc.setFontSize(13)
   doc.text(texto, cx, cy + 1, { align: 'center', angle: 18 })
   doc.setFont(undefined, 'normal')
   doc.restoreGraphicsState()
@@ -916,15 +1068,15 @@ export function construirDocPedido({ empresa, pedido, cliente }) {
 
   let y = drawEncabezadoEmpresa(doc, empresa, marginX)
 
-  doc.setFontSize(16)
-  doc.setTextColor(15, 23, 42)
-  doc.text(`Pedido #${pedido.id}`, marginX, y)
-  // Estado a la derecha
-  doc.setFontSize(10)
-  doc.setTextColor(...(pedido.estado === 'entregado' ? [22, 163, 74] : pedido.estado === 'anulado' ? [220, 38, 38] : [180, 83, 9]))
-  doc.text(ESTADO_PEDIDO_PDF[pedido.estado] || pedido.estado, pageW - marginX, y, { align: 'right' })
-  doc.setTextColor(90)
-  y += 8
+  const yTitulo = y
+  y = tituloDoc(doc, marginX, y, `Pedido #${pedido.id}`)
+  // Estado a la derecha, alineado con el título
+  doc.setFont(undefined, 'bold')
+  doc.setFontSize(11)
+  doc.setTextColor(...(pedido.estado === 'entregado' ? C.success : pedido.estado === 'anulado' ? C.danger : C.warning))
+  doc.text((ESTADO_PEDIDO_PDF[pedido.estado] || pedido.estado).toUpperCase(), pageW - marginX, yTitulo, { align: 'right' })
+  doc.setFont(undefined, 'normal')
+  doc.setTextColor(...C.dark)
 
   // Datos del cliente y la entrega
   doc.setFontSize(11)
@@ -946,16 +1098,16 @@ export function construirDocPedido({ empresa, pedido, cliente }) {
       formatCOP(it.precioUnitario),
       formatCOP(it.subtotal != null ? it.subtotal : (Number(it.cantidad) || 0) * (Number(it.precioUnitario) || 0)),
     ]),
-    foot: [['', '', '', 'TOTAL', formatCOP(pedido.total)]],
     styles: { fontSize: 10 },
     headStyles: { fillColor: [37, 99, 235] },
-    footStyles: { fillColor: [226, 232, 240], textColor: 0, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: C.rowAlt },
     columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
     didParseCell: (data) => {
       if ([2, 3, 4].includes(data.column.index)) data.cell.styles.halign = 'right'
     },
   })
-  y = doc.lastAutoTable.finalY + 10
+  y = doc.lastAutoTable.finalY + 8
+  y = cajaTotales(doc, marginX, y, [{ etiqueta: 'TOTAL', valor: formatCOP(pedido.total), destacado: true }])
 
   // Comentario / observaciones
   if (pedido.comentario && pedido.comentario.trim()) {

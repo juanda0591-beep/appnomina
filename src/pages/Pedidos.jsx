@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha } from '../utils/format.js'
@@ -13,13 +14,14 @@ const emptyItem = () => ({ productoId: '', varianteId: '', cantidad: '', precioU
 export default function Pedidos() {
   const {
     pedidos, clientes, productos, empresa,
-    addPedido, updatePedido, deletePedido, convertirPedido,
+    addPedido, updatePedido, deletePedido,
   } = useData()
   const { puede } = useAuth()
   const puedeCrear = puede('pedidos', 'crear')
   const puedeEditar = puede('pedidos', 'editar')
   const puedeEliminar = puede('pedidos', 'eliminar')
   const puedeVender = puede('ventas', 'crear')
+  const navigate = useNavigate()
 
   const [formAbierto, setFormAbierto] = useState(false)
   const [editId, setEditId] = useState(null)
@@ -136,24 +138,25 @@ export default function Pedidos() {
     }
   }
 
+  // No convierte de una: lleva al formulario de Ventas prellenado con el pedido,
+  // para poder ajustar productos, descuento y método de pago antes de confirmar.
   const handleConvertir = async (p) => {
-    let aplicarAnticipo = false
-    const cliente = clientes.find((c) => String(c.id) === String(p.clienteId))
-    if (cliente && cliente.saldoFavor > 0) {
-      aplicarAnticipo = await confirmar(
-        `${cliente.nombre} tiene ${formatCOP(cliente.saldoFavor)} de saldo a favor. ¿Aplicarlo a esta venta?`,
-        { titulo: 'Aplicar anticipo', textoOk: 'Sí, aplicar', textoCancelar: 'No aplicar', peligro: false }
-      )
-    } else {
-      if (!(await confirmar(`¿Convertir el pedido #${p.id} en venta? Se descontará stock e ingresará la plata.`, { titulo: 'Convertir en venta', textoOk: 'Sí, convertir', peligro: false }))) return
-    }
-    try {
-      const venta = await convertirPedido(p.id, { aplicarAnticipo })
-      notify.ok('Pedido convertido en venta')
-      for (const aviso of venta?.avisos || []) notify.error(`⚠️ ${aviso}`)
-    } catch (err) {
-      notify.error('Error al convertir: ' + err.message)
-    }
+    const ok = await confirmar(
+      `Se abrirá el formulario de venta con los datos del pedido #${p.id} para que ajustes productos, descuento y método de pago antes de confirmar.`,
+      { titulo: 'Convertir en venta', textoOk: 'Continuar', textoCancelar: 'Cancelar', peligro: false }
+    )
+    if (!ok) return
+    navigate('/ventas', { state: { convertirPedido: {
+      id: p.id,
+      clienteId: p.clienteId || null,
+      comentario: p.comentario || '',
+      items: (p.items || []).map((it) => ({
+        productoId: it.productoId,
+        varianteId: it.varianteId || null,
+        cantidad: it.cantidad,
+        precioUnitario: it.precioUnitario,
+      })),
+    } } })
   }
 
   const clienteDePedido = (p) => clientes.find((c) => String(c.id) === String(p.clienteId)) || null
