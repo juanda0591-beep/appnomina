@@ -42,7 +42,11 @@ export function DataProvider({ children }) {
   const [tareasProduccion, setTareasProduccion] = useState([])
   const [ordenesProduccion, setOrdenesProduccion] = useState([])
   const [materiales, setMateriales] = useState([])
+  const [colores, setColores] = useState([])
   const [procesosGlobales, setProcesosGlobales] = useState([])
+  const [clientes, setClientes] = useState([])
+  const [pedidos, setPedidos] = useState([])
+  const [ventas, setVentas] = useState([])
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState(null)
 
@@ -63,7 +67,7 @@ export function DataProvider({ children }) {
   const recargar = async () => {
     setCargando(true)
     try {
-      const [prod, emp, pres, nom, mov, empr, tar, tarProd, ordProd, mat, procG] = await Promise.all([
+      const [prod, emp, pres, nom, mov, empr, tar, tarProd, ordProd, mat, procG, cli, ped, ven, col] = await Promise.all([
         cargarSiPuede(puedeLeer(['productos', 'ver'], ['nomina', 'ver']), '/productos', []),
         cargarSiPuede(
           puedeLeer(['empleados', 'ver'], ['nomina', 'ver'], ['prestamos', 'ver'], ['historial', 'ver'], ['reportes', 'ver'], ['gestion-nomina', 'ver'], ['gestion-produccion', 'ver']),
@@ -83,6 +87,10 @@ export function DataProvider({ children }) {
         cargarSiPuede(puedeLeer(['gestion-produccion', 'ver'], ['reportes', 'ver']), '/ordenes-produccion', []),
         cargarSiPuede(puedeLeer(['materiales', 'ver']), '/materiales', []),
         cargarSiPuede(puedeLeer(['productos', 'ver']), '/procesos-globales', []),
+        cargarSiPuede(puedeLeer(['clientes', 'ver'], ['ventas', 'ver'], ['pedidos', 'ver']), '/clientes', []),
+        cargarSiPuede(puedeLeer(['pedidos', 'ver'], ['ventas', 'ver']), '/pedidos', []),
+        cargarSiPuede(puedeLeer(['ventas', 'ver']), '/ventas', []),
+        cargarSiPuede(puedeLeer(['colores', 'ver'], ['materiales', 'ver'], ['productos', 'ver'], ['gestion-produccion', 'ver'], ['pedidos', 'ver'], ['ventas', 'ver']), '/colores', []),
       ])
 
       setProductos(prod)
@@ -96,6 +104,10 @@ export function DataProvider({ children }) {
       setOrdenesProduccion(ordProd)
       setMateriales(mat)
       setProcesosGlobales(procG)
+      setClientes(cli)
+      setPedidos(ped)
+      setVentas(ven)
+      setColores(col)
       setError(null)
     } catch (e) {
       setError(e.message)
@@ -129,6 +141,97 @@ export function DataProvider({ children }) {
     return actualizado
   }
   const getProductoMovimientos = (id) => http(`/productos/${id}/movimientos`)
+
+  // Variantes (colores) de un producto
+  const addVariante = async (productoId, datos) => {
+    await http(`/productos/${productoId}/variantes`, { method: 'POST', body: JSON.stringify(datos) })
+    await recargar()
+  }
+  const updateVariante = async (productoId, varId, datos) => {
+    await http(`/productos/${productoId}/variantes/${varId}`, { method: 'PUT', body: JSON.stringify(datos) })
+    await recargar()
+  }
+  const deleteVariante = async (productoId, varId) => {
+    await http(`/productos/${productoId}/variantes/${varId}`, { method: 'DELETE' })
+    await recargar()
+  }
+
+  // ---------- COLORES ----------
+  const addColor = async (color) => {
+    await http('/colores', { method: 'POST', body: JSON.stringify(color) })
+    await recargar()
+  }
+  const updateColor = async (id, color) => {
+    await http(`/colores/${id}`, { method: 'PUT', body: JSON.stringify(color) })
+    await recargar()
+  }
+  const deleteColor = async (id) => {
+    await http(`/colores/${id}`, { method: 'DELETE' })
+    await recargar()
+  }
+
+  // ---------- CLIENTES ----------
+  const addCliente = async (cliente) => {
+    const creado = await http('/clientes', { method: 'POST', body: JSON.stringify(cliente) })
+    await recargar()
+    return creado
+  }
+  const updateCliente = async (id, cliente) => {
+    const actualizado = await http(`/clientes/${id}`, { method: 'PUT', body: JSON.stringify(cliente) })
+    await recargar()
+    return actualizado
+  }
+  const deleteCliente = async (id) => {
+    await http(`/clientes/${id}`, { method: 'DELETE' })
+    await recargar()
+  }
+  const getClienteAnticipos = (id) => http(`/clientes/${id}/anticipos`)
+  const addAnticipo = async (clienteId, anticipo) => {
+    const actualizado = await http(`/clientes/${clienteId}/anticipos`, { method: 'POST', body: JSON.stringify(anticipo) })
+    await recargar()
+    return actualizado
+  }
+  const deleteAnticipo = async (clienteId, anticipoId) => {
+    await http(`/clientes/${clienteId}/anticipos/${anticipoId}`, { method: 'DELETE' })
+    await recargar()
+  }
+
+  // ---------- PEDIDOS ----------
+  const addPedido = async (pedido) => {
+    const creado = await http('/pedidos', { method: 'POST', body: JSON.stringify(pedido) })
+    await recargar()
+    return creado
+  }
+  const updatePedido = async (id, pedido) => {
+    const actualizado = await http(`/pedidos/${id}`, { method: 'PUT', body: JSON.stringify(pedido) })
+    await recargar()
+    return actualizado
+  }
+  const deletePedido = async (id) => {
+    await http(`/pedidos/${id}`, { method: 'DELETE' })
+    await recargar()
+  }
+  const convertirPedido = async (id, opciones) => {
+    const venta = await http(`/pedidos/${id}/convertir`, { method: 'POST', body: JSON.stringify(opciones || {}) })
+    await recargar()
+    return venta
+  }
+
+  // ---------- VENTAS ----------
+  const addVenta = async (venta) => {
+    const creada = await http('/ventas', { method: 'POST', body: JSON.stringify(venta) })
+    await recargar()
+    return creada
+  }
+  const deleteVenta = async (id) => {
+    await http(`/ventas/${id}`, { method: 'DELETE' })
+    await recargar()
+  }
+  const registrarPagoVenta = async (id, pago) => {
+    const actualizada = await http(`/ventas/${id}/pagos`, { method: 'POST', body: JSON.stringify(pago) })
+    await recargar()
+    return actualizada
+  }
 
   // ---------- EMPLEADOS ----------
   const addEmpleado = async (emp) => {
@@ -345,7 +448,11 @@ export function DataProvider({ children }) {
     tareasProduccion,
     ordenesProduccion,
     materiales,
+    colores,
     procesosGlobales,
+    clientes,
+    pedidos,
+    ventas,
     cargando,
     error,
     recargar,
@@ -355,6 +462,12 @@ export function DataProvider({ children }) {
     deleteProducto,
     registrarEntradaProducto,
     getProductoMovimientos,
+    addVariante,
+    updateVariante,
+    deleteVariante,
+    addColor,
+    updateColor,
+    deleteColor,
     addEmpleado,
     updateEmpleado,
     deleteEmpleado,
@@ -384,6 +497,19 @@ export function DataProvider({ children }) {
     addCosteo,
     updateCosteo,
     deleteCosteo,
+    addCliente,
+    updateCliente,
+    deleteCliente,
+    getClienteAnticipos,
+    addAnticipo,
+    deleteAnticipo,
+    addPedido,
+    updatePedido,
+    deletePedido,
+    convertirPedido,
+    addVenta,
+    deleteVenta,
+    registrarPagoVenta,
     addTarea,
     updateTarea,
     terminarTarea,

@@ -11,12 +11,12 @@ export const UNIDADES = [
   'litro', 'mililitro', 'onza', 'caja', 'rollo', 'par',
 ]
 
-const emptyForm = { nombre: '', unidad: UNIDADES[0], costoUnitario: '', stockInicial: '', stockMinimo: '' }
+const emptyForm = { nombre: '', unidad: UNIDADES[0], costoUnitario: '', stockInicial: '', stockMinimo: '', colorId: '', familia: '' }
 const emptyEntrada = { cantidad: '', costoUnitario: '', descripcion: '' }
 
 export default function Materiales() {
   const {
-    materiales, addMaterial, updateMaterial, deleteMaterial,
+    materiales, colores, addMaterial, updateMaterial, deleteMaterial,
     registrarEntradaMaterial, getMaterialMovimientos,
   } = useData()
   const { puede } = useAuth()
@@ -69,6 +69,8 @@ export default function Materiales() {
           unidad: form.unidad,
           costoUnitario: Number(form.costoUnitario) || 0,
           stockMinimo: Number(form.stockMinimo) || 0,
+          colorId: form.colorId ? Number(form.colorId) : null,
+          familia: form.familia,
         })
         notify.ok('Material actualizado')
       } else {
@@ -78,6 +80,8 @@ export default function Materiales() {
           costoUnitario: Number(form.costoUnitario) || 0,
           stockInicial: Number(form.stockInicial) || 0,
           stockMinimo: Number(form.stockMinimo) || 0,
+          colorId: form.colorId ? Number(form.colorId) : null,
+          familia: form.familia,
         })
         notify.ok('Material creado')
       }
@@ -95,6 +99,8 @@ export default function Materiales() {
       costoUnitario: String(mat.costoUnitario),
       stockInicial: '',
       stockMinimo: String(mat.stockMinimo),
+      colorId: mat.colorId ? String(mat.colorId) : '',
+      familia: mat.familia || '',
     })
     setFormAbierto(true)
   }
@@ -350,6 +356,38 @@ export default function Materiales() {
                     onChange={(e) => setField('stockMinimo', e.target.value)}
                     placeholder="Alerta si el stock baja de aquí"
                   />
+                </div>
+              </div>
+
+              <div className="row">
+                <div style={{ flex: 1 }}>
+                  <label>Familia <span className="muted small">(opcional)</span></label>
+                  <input
+                    list="familias-material"
+                    value={form.familia}
+                    onChange={(e) => setField('familia', e.target.value)}
+                    placeholder="Ej: vinilo, laca"
+                  />
+                  <datalist id="familias-material">
+                    <option value="vinilo" />
+                    <option value="laca" />
+                  </datalist>
+                  <p className="muted small" style={{ marginTop: 4 }}>
+                    Agrupa materiales que cambian según el color (vinilo, laca). Déjalo vacío para
+                    materiales comunes a todos los colores (MDF, tornillos).
+                  </p>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label>Color <span className="muted small">(opcional)</span></label>
+                  <select value={form.colorId} onChange={(e) => setField('colorId', e.target.value)}>
+                    <option value="">Sin color</option>
+                    {colores.map((c) => (
+                      <option key={c.id} value={c.id}>{c.nombre}</option>
+                    ))}
+                  </select>
+                  <p className="muted small" style={{ marginTop: 4 }}>
+                    Ej: "Vinilo negro" → familia vinilo, color Negro.
+                  </p>
                 </div>
               </div>
 

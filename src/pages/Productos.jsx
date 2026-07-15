@@ -7,9 +7,9 @@ import Vacio from '../components/Vacio.jsx'
 
 const NUEVO_PROCESO = '__nuevo__'
 const emptyProceso = () => ({ nombre: '', pago: '', materiales: [] })
-const emptyRecetaFila = () => ({ materialId: '', cantidad: '' })
+const emptyRecetaFila = () => ({ materialId: '', cantidad: '', porColor: false, familia: '' })
 const hoy = () => new Date().toISOString().slice(0, 10)
-const emptyEntrada = () => ({ cantidad: '', costoUnitario: '', fecha: hoy(), descripcion: '' })
+const emptyEntrada = () => ({ cantidad: '', costoUnitario: '', fecha: hoy(), descripcion: '', varianteId: '' })
 const TIPO_MOV_LABEL = { entrada: 'Compra', produccion: 'Producción' }
 const emptyDatos = () => ({
   descripcion: '', valorVenta: '', valorCompra: '', stockApertura: '', stockMinimo: '',
@@ -23,6 +23,7 @@ export default function Productos() {
     productos, procesosGlobales, materiales, addProducto, updateProducto, deleteProducto, addProcesoGlobal,
     registrarEntradaProducto, getProductoMovimientos,
   } = useData()
+  const { colores, addVariante, updateVariante, deleteVariante } = useData()
   const { puede } = useAuth()
   const puedeCrear = puede('productos', 'crear')
   const puedeEditar = puede('productos', 'editar')
@@ -44,6 +45,39 @@ export default function Productos() {
   // Producto cuyo detalle se muestra en el modal (id o null)
   const [detalleId, setDetalleId] = useState(null)
   const productoDetalle = productos.find((p) => p.id === detalleId)
+
+  // Alta de variante (color) dentro del modal de detalle
+  const [nuevaVarColor, setNuevaVarColor] = useState('')
+  const agregarVariante = async () => {
+    if (!nuevaVarColor) { notify.error('Elige un color'); return }
+    try {
+      await addVariante(detalleId, { colorId: Number(nuevaVarColor), stockApertura: 0, stockMinimo: 0 })
+      setNuevaVarColor('')
+      notify.ok('Color agregado al producto')
+    } catch (err) {
+      notify.error('Error: ' + err.message)
+    }
+  }
+  const guardarVariante = async (v, cambios) => {
+    try {
+      await updateVariante(detalleId, v.id, {
+        stockApertura: cambios.stockApertura != null ? cambios.stockApertura : v.stockApertura,
+        stockMinimo: cambios.stockMinimo != null ? cambios.stockMinimo : v.stockMinimo,
+      })
+      notify.ok('Variante actualizada')
+    } catch (err) {
+      notify.error('Error: ' + err.message)
+    }
+  }
+  const quitarVariante = async (v) => {
+    if (!(await confirmar(`¿Quitar el color "${v.colorNombre || 'sin color'}" de este producto?`))) return
+    try {
+      await deleteVariante(detalleId, v.id)
+      notify.ok('Color quitado')
+    } catch (err) {
+      notify.error('Error: ' + err.message)
+    }
+  }
 
   // Movimientos (compra/producción) — en su propio modal
   const [movimientos, setMovimientos] = useState([])
@@ -75,7 +109,11 @@ export default function Productos() {
 
   const abrirEntrada = (prod) => {
     setEntradaProd(prod)
-    setEntradaForm({ ...emptyEntrada(), costoUnitario: prod.valorCompra ? String(prod.valorCompra) : '' })
+    setEntradaForm({
+      ...emptyEntrada(),
+      costoUnitario: prod.valorCompra ? String(prod.valorCompra) : '',
+      varianteId: (prod.variantes && prod.variantes[0]) ? String(prod.variantes[0].id) : '',
+    })
   }
   const cerrarEntrada = () => {
     setEntradaProd(null)
@@ -92,6 +130,7 @@ export default function Productos() {
         costoUnitario: Number(entradaForm.costoUnitario) || 0,
         fecha: entradaForm.fecha,
         descripcion: entradaForm.descripcion,
+        varianteId: entradaForm.varianteId ? Number(entradaForm.varianteId) : null,
       })
       notify.ok('Entrada registrada')
       cerrarEntrada()
@@ -183,7 +222,9 @@ export default function Productos() {
       .filter((p) => p.nombre.trim())
       .map((p) => ({
         ...p,
-        materiales: p.materiales.filter((m) => m.materialId && Number(m.cantidad) > 0),
+        materiales: p.materiales.filter((m) =>
+          Number(m.cantidad) > 0 && (m.porColor ? !!m.familia : !!m.materialId)
+        ),
       }))
     if (validos.length === 0) { notify.error('Agrega al menos un proceso'); return }
 
@@ -234,7 +275,12 @@ export default function Productos() {
         id: p.id,
         nombre: p.nombre,
         pago: p.pago,
-        materiales: (p.materiales || []).map((m) => ({ materialId: String(m.materialId), cantidad: String(m.cantidad) })),
+        materiales: (p.materiales || []).map((m) => ({
+          materialId: m.materialId ? String(m.materialId) : '',
+          cantidad: String(m.cantidad),
+          porColor: !!m.porColor,
+          familia: m.familia || '',
+        })),
       }))
     )
     setFilaNuevoProceso(null)
@@ -256,6 +302,13 @@ export default function Productos() {
   }
 
   const materialesOrdenados = [...materiales].sort((a, b) => a.nombre.localeCompare(b.nombre))
+
+  // Familias de material con color definido (para las líneas de receta "por color")
+  const familiasDisponibles = [...new Set(
+    materiales.filter((m) => m.familia && m.colorId).map((m) => m.familia)
+  )].sort((a, b) => a.localeCompare(b))
+  // Unidad de una familia = la del primer material de esa familia
+  const unidadDeFamilia = (fam) => materiales.find((m) => m.familia === fam)?.unidad || ''
 
   // Filtra los productos por nombre, código o descripción (búsqueda insensible a mayúsculas)
   const q = busqueda.trim().toLowerCase()
@@ -411,35 +464,66 @@ export default function Productos() {
                 <div className="receta-materiales">
                   <span className="muted small">Materiales que consume este proceso</span>
                   {p.materiales.map((m, mi) => (
-                    <div className="row" key={mi}>
-                      <select
-                        style={{ flex: 2 }}
-                        value={m.materialId}
-                        onChange={(e) => setRecetaFila(i, mi, 'materialId', e.target.value)}
-                      >
-                        <option value="">— Material —</option>
-                        {materialesOrdenados.map((mat) => (
-                          <option key={mat.id} value={mat.id}>{mat.nombre}</option>
-                        ))}
-                      </select>
-                      <input
-                        style={{ flex: 1 }}
-                        type="number"
-                        min="0"
-                        step="any"
-                        value={m.cantidad}
-                        onChange={(e) => setRecetaFila(i, mi, 'cantidad', e.target.value)}
-                        placeholder="Cantidad"
-                      />
-                      <span className="muted small" style={{ flex: 1 }}>{unidadDeMaterial(m.materialId)}</span>
-                      <button type="button" className="btn-icon danger" onClick={() => removeRecetaFila(i, mi)}>
-                        ✕
-                      </button>
+                    <div key={mi} style={{ borderBottom: '1px dashed #e5e7eb', paddingBottom: 6, marginBottom: 6 }}>
+                      <div className="row">
+                        {m.porColor ? (
+                          <select
+                            style={{ flex: 2 }}
+                            value={m.familia}
+                            onChange={(e) => setRecetaFila(i, mi, 'familia', e.target.value)}
+                          >
+                            <option value="">— Familia (según color) —</option>
+                            {familiasDisponibles.map((f) => (
+                              <option key={f} value={f}>{f} (según color)</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <select
+                            style={{ flex: 2 }}
+                            value={m.materialId}
+                            onChange={(e) => setRecetaFila(i, mi, 'materialId', e.target.value)}
+                          >
+                            <option value="">— Material —</option>
+                            {materialesOrdenados.map((mat) => (
+                              <option key={mat.id} value={mat.id}>{mat.nombre}</option>
+                            ))}
+                          </select>
+                        )}
+                        <input
+                          style={{ flex: 1 }}
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={m.cantidad}
+                          onChange={(e) => setRecetaFila(i, mi, 'cantidad', e.target.value)}
+                          placeholder="Cantidad"
+                        />
+                        <span className="muted small" style={{ flex: 1 }}>
+                          {m.porColor ? unidadDeFamilia(m.familia) : unidadDeMaterial(m.materialId)}
+                        </span>
+                        <button type="button" className="btn-icon danger" onClick={() => removeRecetaFila(i, mi)}>
+                          ✕
+                        </button>
+                      </div>
+                      <label className="muted small" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                        <input
+                          type="checkbox"
+                          checked={!!m.porColor}
+                          onChange={(e) => setRecetaFila(i, mi, 'porColor', e.target.checked)}
+                          style={{ width: 'auto', margin: 0 }}
+                        />
+                        Depende del color (ej: vinilo/laca del color de la variante)
+                      </label>
                     </div>
                   ))}
                   <button type="button" className="btn-secondary" onClick={() => addRecetaFila(i)}>
                     + Agregar material
                   </button>
+                  {familiasDisponibles.length === 0 && (
+                    <p className="muted small" style={{ marginTop: 4 }}>
+                      Para usar materiales "según color", primero crea materiales con familia y color en 🧱 Materiales.
+                    </p>
+                  )}
                 </div>
               </>
             )}
@@ -562,7 +646,80 @@ export default function Productos() {
               <p className="muted small" style={{ marginTop: 0 }}>{productoDetalle.descripcion}</p>
             )}
 
-            <p className="muted small" style={{ marginTop: 0, marginBottom: 4 }}>
+            {/* Variantes por color: el stock del inventario vive por variante */}
+            <p className="muted small" style={{ marginTop: 8, marginBottom: 4 }}>
+              <strong>Colores y stock</strong>
+            </p>
+            <div className="table-wrap">
+              <table className="table compact">
+                <thead>
+                  <tr>
+                    <th>Color</th>
+                    <th className="num">Stock</th>
+                    <th className="num">Apertura</th>
+                    <th className="num">Mínimo</th>
+                    {puedeEditar && <th className="num">Acción</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(productoDetalle.variantes || []).map((v) => (
+                    <tr key={v.id} className={v.stockMinimo > 0 && v.stock <= v.stockMinimo ? 'fila-alerta' : ''}>
+                      <td>
+                        {v.colorHex && (
+                          <span style={{ display: 'inline-block', width: 14, height: 14, borderRadius: 4, background: v.colorHex, border: '1px solid #d1d5db', marginRight: 6, verticalAlign: 'middle' }} />
+                        )}
+                        {v.colorNombre || <span className="muted">Sin color</span>}
+                      </td>
+                      <td className="num"><strong>{v.stock}</strong></td>
+                      <td className="num">
+                        {puedeEditar ? (
+                          <input
+                            type="number" min="0" step="any" defaultValue={v.stockApertura}
+                            style={{ width: 70, textAlign: 'right' }}
+                            onBlur={(e) => { const nv = Number(e.target.value) || 0; if (nv !== v.stockApertura) guardarVariante(v, { stockApertura: nv }) }}
+                          />
+                        ) : v.stockApertura}
+                      </td>
+                      <td className="num">
+                        {puedeEditar ? (
+                          <input
+                            type="number" min="0" step="any" defaultValue={v.stockMinimo}
+                            style={{ width: 70, textAlign: 'right' }}
+                            onBlur={(e) => { const nv = Number(e.target.value) || 0; if (nv !== v.stockMinimo) guardarVariante(v, { stockMinimo: nv }) }}
+                          />
+                        ) : (v.stockMinimo || <span className="muted">—</span>)}
+                      </td>
+                      {puedeEditar && (
+                        <td className="num">
+                          {(productoDetalle.variantes || []).length > 1
+                            ? <button className="btn-danger btn-sm" onClick={() => quitarVariante(v)}>Quitar</button>
+                            : <span className="muted small">—</span>}
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {puedeEditar && (
+              <div className="row" style={{ marginTop: 6, alignItems: 'flex-end' }}>
+                <div style={{ flex: 2 }}>
+                  <label className="muted small">Agregar color</label>
+                  <select value={nuevaVarColor} onChange={(e) => setNuevaVarColor(e.target.value)}>
+                    <option value="">— Elige un color —</option>
+                    {colores
+                      .filter((c) => !(productoDetalle.variantes || []).some((v) => v.colorId === c.id))
+                      .map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                  </select>
+                </div>
+                <button type="button" className="btn-secondary" onClick={agregarVariante}>+ Agregar</button>
+              </div>
+            )}
+            <p className="muted small" style={{ marginTop: 4 }}>
+              El stock de cada color entra por producción o por "+ Entrada". La apertura y el mínimo se editan aquí mismo.
+            </p>
+
+            <p className="muted small" style={{ marginTop: 8, marginBottom: 4 }}>
               <strong>Procesos y materiales</strong>
             </p>
             {productoDetalle.procesos.length === 0 && (
@@ -679,6 +836,19 @@ export default function Productos() {
             <p className="muted small" style={{ marginTop: 0 }}>
               Para productos que compras en vez de fabricar. Suma al stock actual ({entradaProd.stock}).
             </p>
+            {(entradaProd.variantes || []).length > 1 && (
+              <>
+                <label>Color</label>
+                <select
+                  value={entradaForm.varianteId}
+                  onChange={(e) => setEntradaField('varianteId', e.target.value)}
+                >
+                  {entradaProd.variantes.map((v) => (
+                    <option key={v.id} value={v.id}>{v.colorNombre || 'Sin color'} (stock {v.stock})</option>
+                  ))}
+                </select>
+              </>
+            )}
             <div className="row">
               <div style={{ flex: 1 }}>
                 <label>Cantidad</label>

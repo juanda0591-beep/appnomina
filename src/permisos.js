@@ -13,6 +13,7 @@ export const PAGINAS = [
   { id: 'gestion-nomina', label: '📋 Gestión de Nómina', to: '/gestion-nomina', acciones: ['ver', 'crear', 'editar', 'eliminar'] },
   { id: 'productos', label: '📦 Productos', to: '/productos', acciones: ['ver', 'crear', 'editar', 'eliminar'] },
   { id: 'materiales', label: '🧱 Materiales', to: '/materiales', acciones: ['ver', 'crear', 'editar', 'eliminar'] },
+  { id: 'colores', label: '🎨 Colores', to: '/colores', acciones: ['ver', 'crear', 'editar', 'eliminar'] },
   { id: 'gestion-produccion', label: '🏭 Gestión de Producción', to: '/gestion-produccion', acciones: ['ver', 'crear', 'editar', 'eliminar'] },
   { id: 'produccion-dashboard', label: '📈 Dashboard Producción', to: '/produccion-dashboard', acciones: ['ver'] },
   { id: 'empleados', label: '👷 Empleados', to: '/empleados', acciones: ['ver', 'crear', 'editar', 'eliminar'] },
@@ -21,6 +22,9 @@ export const PAGINAS = [
   { id: 'historial', label: '📚 Historial', to: '/historial', acciones: ['ver', 'eliminar', 'exportar'] },
   { id: 'reportes', label: '📊 Reportes', to: '/reportes', acciones: ['ver', 'exportar'] },
   { id: 'costos', label: '💲 Costos', to: '/costos', acciones: ['ver', 'crear', 'editar', 'eliminar', 'exportar'] },
+  { id: 'clientes', label: '🧑‍🤝‍🧑 Clientes', to: '/clientes', acciones: ['ver', 'crear', 'editar', 'eliminar'] },
+  { id: 'pedidos', label: '📝 Pedidos', to: '/pedidos', acciones: ['ver', 'crear', 'editar', 'eliminar'] },
+  { id: 'ventas', label: '🛒 Ventas', to: '/ventas', acciones: ['ver', 'crear', 'eliminar'] },
   { id: 'empresa', label: '🏢 Empresa', to: '/empresa', acciones: ['ver', 'editar'] },
 ]
 

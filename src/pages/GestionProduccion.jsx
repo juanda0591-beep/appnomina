@@ -91,6 +91,7 @@ export default function GestionProduccion() {
   // --- Formulario: nueva orden de producción ---
   const [formOrdenAbierto, setFormOrdenAbierto] = useState(false)
   const [ordenProductoId, setOrdenProductoId] = useState('')
+  const [ordenVarianteId, setOrdenVarianteId] = useState('')
   const [ordenCantidad, setOrdenCantidad] = useState('')
   const [ordenComentario, setOrdenComentario] = useState('')
   const [ordenFechaEntrega, setOrdenFechaEntrega] = useState('')
@@ -204,6 +205,7 @@ export default function GestionProduccion() {
   // ---------- Orden de producción ----------
   const resetOrdenForm = () => {
     setOrdenProductoId('')
+    setOrdenVarianteId('')
     setOrdenCantidad('')
     setOrdenComentario('')
     setOrdenFechaEntrega('')
@@ -218,6 +220,7 @@ export default function GestionProduccion() {
     try {
       await addOrdenProduccion({
         productoId: ordenProductoId,
+        varianteId: ordenVarianteId ? Number(ordenVarianteId) : null,
         cantidad: Number(ordenCantidad),
         comentario: ordenComentario,
         fechaEntrega: ordenFechaEntrega || null,
@@ -329,12 +332,14 @@ export default function GestionProduccion() {
       setMrpOrden(null)
       return
     }
+    const variante = (prod.variantes || []).find((v) => String(v.id) === String(ordenVarianteId))
+    const colorId = variante?.colorId || null
     let cancelado = false
-    chequearMaterialOrden({ procesos: prod.procesos.map((p) => p.id), cantidad: cant })
+    chequearMaterialOrden({ procesos: prod.procesos.map((p) => p.id), cantidad: cant, colorId })
       .then((r) => { if (!cancelado) setMrpOrden(r) })
       .catch(() => { if (!cancelado) setMrpOrden(null) })
     return () => { cancelado = true }
-  }, [formOrdenAbierto, ordenProductoId, ordenCantidad, productos])
+  }, [formOrdenAbierto, ordenProductoId, ordenVarianteId, ordenCantidad, productos])
 
   // Al elegir proceso+cantidad al agregar una tarea, consulta si el stock alcanza
   // para ese proceso (su receta × cantidad).
@@ -601,7 +606,15 @@ export default function GestionProduccion() {
             <div className="row">
               <div style={{ flex: 2 }}>
                 <label>Producto</label>
-                <select value={ordenProductoId} onChange={(e) => setOrdenProductoId(e.target.value)}>
+                <select
+                  value={ordenProductoId}
+                  onChange={(e) => {
+                    setOrdenProductoId(e.target.value)
+                    // Selecciona por defecto la primera variante del producto elegido
+                    const prod = productos.find((p) => String(p.id) === String(e.target.value))
+                    setOrdenVarianteId(prod?.variantes?.[0] ? String(prod.variantes[0].id) : '')
+                  }}
+                >
                   <option value="">— Producto —</option>
                   {productos.map((p) => (
                     <option key={p.id} value={p.id}>{p.nombre}</option>
@@ -617,6 +630,24 @@ export default function GestionProduccion() {
                 />
               </div>
             </div>
+            {/* Selector de color: solo si el producto tiene más de una variante */}
+            {(() => {
+              const prod = productos.find((p) => String(p.id) === String(ordenProductoId))
+              const vars = prod?.variantes || []
+              if (vars.length <= 1) return null
+              return (
+                <div className="row" style={{ marginTop: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <label>Color a fabricar</label>
+                    <select value={ordenVarianteId} onChange={(e) => setOrdenVarianteId(e.target.value)}>
+                      {vars.map((v) => (
+                        <option key={v.id} value={v.id}>{v.colorNombre || 'Sin color'}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )
+            })()}
             <div className="row" style={{ marginTop: 10 }}>
               <div style={{ flex: 1 }}>
                 <label>Fecha de entrega (opcional)</label>
@@ -747,7 +778,10 @@ export default function GestionProduccion() {
                           ? <>{formatFecha(orden.fechaEntrega)}{atrasada && <span className="chip danger" style={{ marginLeft: 6 }}>⚠️ Atrasada</span>}</>
                           : <span className="muted">—</span>}
                       </td>
-                      <td><strong>{orden.productoNombre || '— eliminado'}</strong></td>
+                      <td>
+                        <strong>{orden.productoNombre || '— eliminado'}</strong>
+                        {orden.colorNombre && <span className="chip" style={{ marginLeft: 6 }}>{orden.colorNombre}</span>}
+                      </td>
                       <td className="num">{orden.cantidad}</td>
                       <td>
                         {actual.clase
@@ -820,7 +854,7 @@ export default function GestionProduccion() {
                     return (
                       <div className={`kanban-card${atrasada ? ' atrasada' : ''}`} key={orden.id}>
                         <div className="kanban-card-head">
-                          <strong>#{orden.id} {orden.productoNombre || '— eliminado'}</strong>
+                          <strong>#{orden.id} {orden.productoNombre || '— eliminado'}{orden.colorNombre ? ` · ${orden.colorNombre}` : ''}</strong>
                           <span className="muted small">{orden.cantidad} und</span>
                         </div>
                         <div className="muted small">{actual.texto}</div>

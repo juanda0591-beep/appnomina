@@ -761,6 +761,233 @@ export function generarPdfCosteo({ empresa, nombre, r }) {
   doc.save(`costeo_${(nombre || 'producto').replace(/\s+/g, '_')}.pdf`)
 }
 
+// Construye (sin guardar) el documento PDF de una venta / factura.
+// `venta` trae { codigo, id, clienteNombre, fecha, total, pagado, saldo, estadoPago,
+//   comentario, items:[...], pagos:[...] }. Devuelve el objeto jsPDF.
+const ESTADO_PAGO_PDF = { pagado: 'PAGADO', parcial: 'ABONADO (parcial)', pendiente: 'PENDIENTE DE PAGO' }
+export function construirDocVenta({ empresa, venta, cliente }) {
+  const doc = new jsPDF()
+  const marginX = 14
+  const pageW = doc.internal.pageSize.getWidth()
+
+  let y = drawEncabezadoEmpresa(doc, empresa, marginX)
+
+  doc.setFontSize(16)
+  doc.setTextColor(15, 23, 42)
+  doc.text(`Factura de venta ${venta.codigo || '#' + venta.id}`, marginX, y)
+  y += 8
+
+  // Datos del cliente y la fecha
+  doc.setFontSize(11)
+  doc.setTextColor(90)
+  const nombreCliente = venta.clienteNombre || (cliente ? `${cliente.nombre || ''} ${cliente.apellidos || ''}`.trim() : '') || 'Sin cliente'
+  doc.text(`Cliente: ${nombreCliente}`, marginX, y); y += 6
+  if (cliente?.telefono) { doc.text(`Teléfono: ${cliente.telefono}`, marginX, y); y += 6 }
+  if (venta.fecha) { doc.text(`Fecha: ${formatFecha(venta.fecha)}`, marginX, y); y += 6 }
+  y += 2
+
+  // Detalle de productos (con color si aplica)
+  autoTable(doc, {
+    startY: y,
+    head: [['Producto', 'Color', 'Cantidad', 'Precio', 'Subtotal']],
+    body: venta.items.map((it) => [
+      it.productoNombre || '',
+      it.colorNombre || '—',
+      String(it.cantidad),
+      formatCOP(it.precioUnitario),
+      formatCOP(it.subtotal != null ? it.subtotal : (Number(it.cantidad) || 0) * (Number(it.precioUnitario) || 0)),
+    ]),
+    styles: { fontSize: 10 },
+    headStyles: { fillColor: [37, 99, 235] },
+    columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
+    didParseCell: (data) => {
+      if ([2, 3, 4].includes(data.column.index)) data.cell.styles.halign = 'right'
+    },
+  })
+  y = doc.lastAutoTable.finalY + 8
+
+  // Resumen de pago: total, abonado, saldo
+  doc.setFontSize(11)
+  doc.setTextColor(0)
+  doc.text(`Total: ${formatCOP(venta.total)}`, pageW - marginX, y, { align: 'right' }); y += 6
+  if (venta.anticipoAplicado > 0) {
+    doc.setTextColor(90)
+    doc.text(`Anticipo aplicado: ${formatCOP(venta.anticipoAplicado)}`, pageW - marginX, y, { align: 'right' }); y += 6
+  }
+  doc.setTextColor(22, 163, 74)
+  doc.text(`Pagado: ${formatCOP(venta.pagado)}`, pageW - marginX, y, { align: 'right' }); y += 6
+  if ((venta.saldo || 0) > 0) {
+    doc.setTextColor(220, 38, 38)
+    doc.text(`Saldo pendiente: ${formatCOP(venta.saldo)}`, pageW - marginX, y, { align: 'right' }); y += 6
+  }
+  doc.setTextColor(0)
+  y += 2
+
+  // Historial de abonos (si hay más de uno o hay saldo)
+  if (venta.pagos && venta.pagos.length > 0) {
+    autoTable(doc, {
+      startY: y,
+      head: [['Fecha del pago', 'Comentario', 'Monto']],
+      body: venta.pagos.map((p) => [formatFecha(p.fecha), p.comentario || '—', formatCOP(p.monto)]),
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [100, 116, 139] },
+      columnStyles: { 2: { halign: 'right' } },
+      didParseCell: (data) => { if (data.column.index === 2) data.cell.styles.halign = 'right' },
+    })
+    y = doc.lastAutoTable.finalY + 8
+  }
+
+  // Sello del estado de pago
+  dibujarSelloEstado(doc, marginX, ESTADO_PAGO_PDF[venta.estadoPago] || '', venta.estadoPago)
+
+  // Comentario / observaciones
+  if (venta.comentario && venta.comentario.trim()) {
+    doc.setFontSize(11)
+    doc.setTextColor(15, 23, 42)
+    doc.setFont(undefined, 'bold')
+    doc.text('Observaciones:', marginX, y)
+    doc.setFont(undefined, 'normal')
+    doc.setFontSize(10)
+    doc.setTextColor(90)
+    const lineas = doc.splitTextToSize(venta.comentario.trim(), pageW - marginX * 2)
+    doc.text(lineas, marginX, y + 6)
+    y += 6 + lineas.length * 5
+  }
+
+  pieDePagina(doc, empresa, marginX)
+  return doc
+}
+
+export function generarPdfVenta({ empresa, venta, cliente }) {
+  const doc = construirDocVenta({ empresa, venta, cliente })
+  doc.save(`venta_${venta.codigo || venta.id}.pdf`)
+}
+
+export function ventaPdfFile({ empresa, venta, cliente }) {
+  const doc = construirDocVenta({ empresa, venta, cliente })
+  const blob = doc.output('blob')
+  return new File([blob], `venta_${venta.codigo || venta.id}.pdf`, { type: 'application/pdf' })
+}
+
+// Abre el PDF de la venta en una pestaña y lanza el diálogo de impresión.
+export function imprimirVenta({ empresa, venta, cliente }) {
+  const doc = construirDocVenta({ empresa, venta, cliente })
+  doc.autoPrint()
+  const url = doc.output('bloburl')
+  window.open(url, '_blank')
+}
+
+// Sello inclinado con el estado de pago (verde=pagado, ámbar=parcial, rojo=pendiente).
+function dibujarSelloEstado(doc, marginX, texto, estado) {
+  if (!texto) return
+  const pageW = doc.internal.pageSize.getWidth()
+  const cx = pageW - marginX - 26
+  const cy = 52
+  const color = estado === 'pagado' ? [22, 163, 74] : estado === 'parcial' ? [180, 83, 9] : [220, 38, 38]
+  doc.saveGraphicsState()
+  doc.setDrawColor(...color)
+  doc.setTextColor(...color)
+  doc.setLineWidth(1.4)
+  const rad = (-18 * Math.PI) / 180
+  const cos = Math.cos(rad), sin = Math.sin(rad)
+  const w = 52, h = 15
+  const pts = [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]]
+    .map(([px, py]) => [cx + px * cos - py * sin, cy + px * sin + py * cos])
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length]
+    doc.line(a[0], a[1], b[0], b[1])
+  }
+  doc.setFont(undefined, 'bold')
+  doc.setFontSize(13)
+  doc.text(texto, cx, cy + 1, { align: 'center', angle: 18 })
+  doc.setFont(undefined, 'normal')
+  doc.restoreGraphicsState()
+  doc.setTextColor(0)
+}
+
+// Construye (sin guardar) el documento PDF de un pedido / cotización.
+// `pedido` trae { id, clienteNombre, estado, fechaEntrega, comentario, total, items:[...] }.
+// `cliente` (opcional) aporta datos de contacto. Devuelve el objeto jsPDF.
+const ESTADO_PEDIDO_PDF = { pendiente: 'Pendiente', entregado: 'Entregado', anulado: 'Anulado' }
+export function construirDocPedido({ empresa, pedido, cliente }) {
+  const doc = new jsPDF()
+  const marginX = 14
+  const pageW = doc.internal.pageSize.getWidth()
+
+  let y = drawEncabezadoEmpresa(doc, empresa, marginX)
+
+  doc.setFontSize(16)
+  doc.setTextColor(15, 23, 42)
+  doc.text(`Pedido #${pedido.id}`, marginX, y)
+  // Estado a la derecha
+  doc.setFontSize(10)
+  doc.setTextColor(...(pedido.estado === 'entregado' ? [22, 163, 74] : pedido.estado === 'anulado' ? [220, 38, 38] : [180, 83, 9]))
+  doc.text(ESTADO_PEDIDO_PDF[pedido.estado] || pedido.estado, pageW - marginX, y, { align: 'right' })
+  doc.setTextColor(90)
+  y += 8
+
+  // Datos del cliente y la entrega
+  doc.setFontSize(11)
+  doc.setTextColor(90)
+  const nombreCliente = pedido.clienteNombre || (cliente ? `${cliente.nombre || ''} ${cliente.apellidos || ''}`.trim() : '') || 'Sin cliente'
+  doc.text(`Cliente: ${nombreCliente}`, marginX, y); y += 6
+  if (cliente?.telefono) { doc.text(`Teléfono: ${cliente.telefono}`, marginX, y); y += 6 }
+  if (pedido.fechaEntrega) { doc.text(`Fecha de entrega: ${formatFecha(pedido.fechaEntrega)}`, marginX, y); y += 6 }
+  y += 2
+
+  // Detalle de productos (con color si aplica)
+  autoTable(doc, {
+    startY: y,
+    head: [['Producto', 'Color', 'Cantidad', 'Precio', 'Subtotal']],
+    body: pedido.items.map((it) => [
+      it.productoNombre || '',
+      it.colorNombre || '—',
+      String(it.cantidad),
+      formatCOP(it.precioUnitario),
+      formatCOP(it.subtotal != null ? it.subtotal : (Number(it.cantidad) || 0) * (Number(it.precioUnitario) || 0)),
+    ]),
+    foot: [['', '', '', 'TOTAL', formatCOP(pedido.total)]],
+    styles: { fontSize: 10 },
+    headStyles: { fillColor: [37, 99, 235] },
+    footStyles: { fillColor: [226, 232, 240], textColor: 0, fontStyle: 'bold' },
+    columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
+    didParseCell: (data) => {
+      if ([2, 3, 4].includes(data.column.index)) data.cell.styles.halign = 'right'
+    },
+  })
+  y = doc.lastAutoTable.finalY + 10
+
+  // Comentario / observaciones
+  if (pedido.comentario && pedido.comentario.trim()) {
+    doc.setFontSize(11)
+    doc.setTextColor(15, 23, 42)
+    doc.setFont(undefined, 'bold')
+    doc.text('Observaciones:', marginX, y)
+    doc.setFont(undefined, 'normal')
+    doc.setFontSize(10)
+    doc.setTextColor(90)
+    const lineas = doc.splitTextToSize(pedido.comentario.trim(), pageW - marginX * 2)
+    doc.text(lineas, marginX, y + 6)
+    y += 6 + lineas.length * 5
+  }
+
+  pieDePagina(doc, empresa, marginX)
+  return doc
+}
+
+// Descarga el PDF del pedido.
+export function generarPdfPedido({ empresa, pedido, cliente }) {
+  const doc = construirDocPedido({ empresa, pedido, cliente })
+  doc.save(`pedido_${pedido.id}.pdf`)
+}
+
+// Devuelve el PDF del pedido como File (para compartir por Web Share API / WhatsApp).
+export function pedidoPdfFile({ empresa, pedido, cliente }) {
+  const doc = construirDocPedido({ empresa, pedido, cliente })
+  const blob = doc.output('blob')
+  return new File([blob], `pedido_${pedido.id}.pdf`, { type: 'application/pdf' })
+}
+
 // Arma un CSV a partir de filas (array de arrays) y lo descarga.
 // Se abre directo en Excel. Usa ; como separador (locale es-CO) y BOM para acentos.
 export function descargarCSV(nombreArchivo, filas) {

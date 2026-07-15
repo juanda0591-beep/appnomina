@@ -3,6 +3,7 @@ import { NavLink, Route, Routes, useLocation, Navigate } from 'react-router-dom'
 import Dashboard from './pages/Dashboard.jsx'
 import Productos from './pages/Productos.jsx'
 import Materiales from './pages/Materiales.jsx'
+import Colores from './pages/Colores.jsx'
 import Empleados from './pages/Empleados.jsx'
 import Prestamos from './pages/Prestamos.jsx'
 import Nomina from './pages/Nomina.jsx'
@@ -13,6 +14,9 @@ import ControlDinero from './pages/ControlDinero.jsx'
 import Historial from './pages/Historial.jsx'
 import Reportes from './pages/Reportes.jsx'
 import Costos from './pages/Costos.jsx'
+import Clientes from './pages/Clientes.jsx'
+import Pedidos from './pages/Pedidos.jsx'
+import Ventas from './pages/Ventas.jsx'
 import Empresa from './pages/Empresa.jsx'
 import Usuarios from './pages/Usuarios.jsx'
 import Cuenta from './pages/Cuenta.jsx'
@@ -39,8 +43,18 @@ const links = [
     label: '🏭 Fabricación',
     items: [
       { to: '/materiales', label: '🧱 Materiales', pagina: 'materiales' },
+      { to: '/colores', label: '🎨 Colores', pagina: 'colores' },
       { to: '/gestion-produccion', label: '🏭 Producción', pagina: 'gestion-produccion' },
       { to: '/produccion-dashboard', label: '📈 Panel Producción', pagina: 'produccion-dashboard' },
+    ],
+  },
+  {
+    group: 'comercial',
+    label: '🛒 Comercial',
+    items: [
+      { to: '/clientes', label: '🧑‍🤝‍🧑 Clientes', pagina: 'clientes' },
+      { to: '/pedidos', label: '📝 Pedidos', pagina: 'pedidos' },
+      { to: '/ventas', label: '🛒 Ventas', pagina: 'ventas' },
     ],
   },
   { to: '/control-dinero', label: '💰 Control de Dinero', pagina: 'control-dinero' },
@@ -198,7 +212,11 @@ export default function App() {
           <Route path="/nomina" element={protegida('nomina', <Nomina />)} />
           <Route path="/gestion-nomina" element={protegida('gestion-nomina', <GestionNomina />)} />
           <Route path="/productos" element={protegida('productos', <Productos />)} />
+          <Route path="/clientes" element={protegida('clientes', <Clientes />)} />
+          <Route path="/pedidos" element={protegida('pedidos', <Pedidos />)} />
+          <Route path="/ventas" element={protegida('ventas', <Ventas />)} />
           <Route path="/materiales" element={protegida('materiales', <Materiales />)} />
+          <Route path="/colores" element={protegida('colores', <Colores />)} />
           <Route path="/gestion-produccion" element={protegida('gestion-produccion', <GestionProduccion />)} />
           <Route path="/produccion-dashboard" element={protegida('produccion-dashboard', <ProduccionDashboard />)} />
           <Route path="/empleados" element={protegida('empleados', <Empleados />)} />

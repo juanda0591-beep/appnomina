@@ -180,21 +180,73 @@ app.get('/api/dashboard', permisoRequired('inicio', 'ver'), (req, res) => {
 
 // ---------- Helpers para armar objetos anidados ----------
 const procesoMaterialesStmt = db.prepare(`
-  SELECT pm.id, pm.material_id, pm.cantidad, m.nombre AS material_nombre, m.unidad
+  SELECT pm.id, pm.material_id, pm.cantidad, pm.por_color, pm.familia,
+         m.nombre AS material_nombre, m.unidad
   FROM proceso_materiales pm
-  JOIN materiales m ON m.id = pm.material_id
+  LEFT JOIN materiales m ON m.id = pm.material_id
   WHERE pm.proceso_id = ?
-  ORDER BY m.nombre
+  ORDER BY pm.por_color, m.nombre
 `)
 
 function materialesDeProceso(procesoId) {
   return procesoMaterialesStmt.all(procesoId).map((m) => ({
     id: m.id,
     materialId: m.material_id,
-    materialNombre: m.material_nombre,
-    unidad: m.unidad,
+    materialNombre: m.por_color ? `${m.familia} (según color)` : m.material_nombre,
+    unidad: m.unidad || '',
     cantidad: m.cantidad,
+    porColor: !!m.por_color,
+    familia: m.familia || '',
   }))
+}
+
+// Variantes de un producto (con nombre de color resuelto). El stock del inventario
+// vive en producto_variantes; productos.stock es una suma cacheada.
+const variantesStmt = db.prepare(`
+  SELECT v.*, c.nombre AS color_nombre, c.hex AS color_hex
+  FROM producto_variantes v
+  LEFT JOIN colores c ON c.id = v.color_id
+  WHERE v.producto_id = ? AND v.activo = 1
+  ORDER BY v.id
+`)
+function variantesDeProducto(productoId) {
+  return variantesStmt.all(productoId).map((v) => ({
+    id: v.id,
+    productoId: v.producto_id,
+    colorId: v.color_id,
+    colorNombre: v.color_nombre || '',
+    colorHex: v.color_hex || '',
+    codigo: v.codigo || '',
+    stock: v.stock || 0,
+    stockApertura: v.stock_apertura || 0,
+    stockMinimo: v.stock_minimo || 0,
+  }))
+}
+
+// Recalcula productos.stock = suma del stock de sus variantes activas (cache para
+// que el dashboard y lecturas del total sigan funcionando sin cambios).
+const recalcStockStmt = db.prepare(
+  `UPDATE productos SET stock = (
+     SELECT COALESCE(SUM(stock), 0) FROM producto_variantes WHERE producto_id = ? AND activo = 1
+   ) WHERE id = ?`
+)
+function recalcularStockProducto(productoId) {
+  recalcStockStmt.run(productoId, productoId)
+}
+
+// Devuelve la variante "por defecto" de un producto (la primera / única sin color).
+// Sirve para operaciones que aún no especifican variante (compatibilidad Fase 1).
+function variantePorDefecto(productoId) {
+  return db
+    .prepare('SELECT * FROM producto_variantes WHERE producto_id = ? AND activo = 1 ORDER BY (color_id IS NOT NULL), id LIMIT 1')
+    .get(productoId)
+}
+
+// Resuelve el material concreto de una línea de receta dependiente de color:
+// el material de esa familia cuyo color coincide con el de la variante.
+function resolverMaterialPorColor(familia, colorId) {
+  if (!familia || !colorId) return null
+  return db.prepare('SELECT * FROM materiales WHERE familia = ? AND color_id = ? LIMIT 1').get(familia, colorId)
 }
 
 function productoConProcesos(prod) {
@@ -202,6 +254,9 @@ function productoConProcesos(prod) {
     .prepare('SELECT * FROM procesos WHERE producto_id = ?')
     .all(prod.id)
     .map((p) => ({ ...p, materiales: materialesDeProceso(p.id) }))
+  const variantes = variantesDeProducto(prod.id)
+  const stockTotal = variantes.reduce((s, v) => s + (v.stock || 0), 0)
+  const aperturaTotal = variantes.reduce((s, v) => s + (v.stockApertura || 0), 0)
   return {
     id: prod.id,
     nombre: prod.nombre,
@@ -209,11 +264,13 @@ function productoConProcesos(prod) {
     descripcion: prod.descripcion || '',
     valorVenta: prod.valor_venta || 0,
     valorCompra: prod.valor_compra || 0,
-    stockApertura: prod.stock_apertura || 0,
-    stock: prod.stock || 0,
-    stockMinimo: prod.stock_minimo || 0,
-    // valor del stock inicial = stock de apertura × valor de compra (se calcula, no se guarda)
-    valorStockInicial: (prod.stock_apertura || 0) * (prod.valor_compra || 0),
+    stockApertura: aperturaTotal,
+    stock: stockTotal,
+    // mínimo del producto = el mayor mínimo entre sus variantes (referencia global)
+    stockMinimo: variantes.reduce((s, v) => Math.max(s, v.stockMinimo || 0), 0),
+    // valor del stock inicial = apertura total × valor de compra (se calcula, no se guarda)
+    valorStockInicial: aperturaTotal * (prod.valor_compra || 0),
+    variantes,
     procesos,
   }
 }
@@ -222,16 +279,24 @@ function productoConProcesos(prod) {
 // dentro de la transacción de crear/editar. Se reutiliza en POST y PUT.
 const insertProceso = db.prepare('INSERT INTO procesos (producto_id, nombre, pago) VALUES (?, ?, ?)')
 const insertProcesoMaterial = db.prepare(
-  'INSERT INTO proceso_materiales (proceso_id, material_id, cantidad) VALUES (?, ?, ?)'
+  'INSERT INTO proceso_materiales (proceso_id, material_id, cantidad, por_color, familia) VALUES (?, ?, ?, ?, ?)'
 )
 function insertarProcesosConReceta(productoId, procesos) {
   for (const p of procesos) {
     const r = insertProceso.run(productoId, p.nombre.trim(), Number(p.pago) || 0)
     const procesoId = r.lastInsertRowid
     for (const m of p.materiales || []) {
-      const materialId = Number(m.materialId)
       const cantidad = Number(m.cantidad) || 0
-      if (materialId && cantidad > 0) insertProcesoMaterial.run(procesoId, materialId, cantidad)
+      if (cantidad <= 0) continue
+      if (m.porColor) {
+        // Línea dependiente del color: se guarda la familia; el material concreto se
+        // resuelve en producción según el color de la variante. material_id queda 0.
+        const familia = (m.familia || '').trim()
+        if (familia) insertProcesoMaterial.run(procesoId, null, cantidad, 1, familia)
+      } else {
+        const materialId = Number(m.materialId)
+        if (materialId) insertProcesoMaterial.run(procesoId, materialId, cantidad, 0, null)
+      }
     }
   }
 }
@@ -244,6 +309,21 @@ const insertMovimiento = db.prepare(
 function registrarGasto({ fecha, categoria, monto, descripcion, origen = 'manual', refId = null }) {
   return insertMovimiento.run({
     tipo: 'gasto',
+    fecha,
+    categoria: categoria || '',
+    monto: Number(monto) || 0,
+    descripcion: descripcion || '',
+    comprobante: null,
+    comprobante_tipo: null,
+    origen,
+    ref_id: refId,
+  })
+}
+
+// Registra un movimiento de ingreso a caja (usado por ventas y anticipos de clientes)
+function registrarIngreso({ fecha, categoria, monto, descripcion, origen = 'manual', refId = null }) {
+  return insertMovimiento.run({
+    tipo: 'ingreso',
     fecha,
     categoria: categoria || '',
     monto: Number(monto) || 0,
@@ -285,6 +365,7 @@ app.post('/api/productos', permisoRequired('productos', 'crear'), (req, res) => 
     stockApertura, stockMinimo,
   } = req.body
   const apertura = Number(stockApertura) || 0
+  const minimo = Number(stockMinimo) || 0
   const insert = db.transaction(() => {
     const r = db.prepare(
       `INSERT INTO productos (nombre, descripcion, valor_venta, valor_compra, stock_apertura, stock, stock_minimo)
@@ -292,11 +373,17 @@ app.post('/api/productos', permisoRequired('productos', 'crear'), (req, res) => 
     ).run(
       nombre.trim(), String(descripcion || ''),
       Number(valorVenta) || 0, Number(valorCompra) || 0,
-      apertura, apertura, Number(stockMinimo) || 0,
+      apertura, apertura, minimo,
     )
     const pid = r.lastInsertRowid
     // Código correlativo automático basado en el id (PRD-0001)
-    db.prepare('UPDATE productos SET codigo = ? WHERE id = ?').run(`PRD-${String(pid).padStart(4, '0')}`, pid)
+    const codigo = `PRD-${String(pid).padStart(4, '0')}`
+    db.prepare('UPDATE productos SET codigo = ? WHERE id = ?').run(codigo, pid)
+    // Variante por defecto (sin color): aquí vive el stock del inventario.
+    db.prepare(
+      `INSERT INTO producto_variantes (producto_id, color_id, codigo, stock, stock_apertura, stock_minimo, activo)
+       VALUES (?, NULL, ?, ?, ?, ?, 1)`
+    ).run(pid, codigo, apertura, apertura, minimo)
     insertarProcesosConReceta(pid, procesos)
     return pid
   })
@@ -312,20 +399,26 @@ app.put('/api/productos/:id', permisoRequired('productos', 'editar'), (req, res)
   } = req.body
   const actual = db.prepare('SELECT * FROM productos WHERE id = ?').get(id)
   if (!actual) return res.status(404).json({ error: 'Producto no encontrado' })
-  // Al cambiar el stock de apertura, se ajusta el stock actual por la diferencia,
-  // para no perder lo ya abastecido por producción (stock actual = apertura + producido).
   const aperturaNueva = Number(stockApertura) || 0
-  const diffApertura = aperturaNueva - (actual.stock_apertura || 0)
-  const stockNuevo = (actual.stock || 0) + diffApertura
+  const minimoNuevo = Number(stockMinimo) || 0
   const update = db.transaction(() => {
     db.prepare(
-      `UPDATE productos SET nombre = ?, descripcion = ?, valor_venta = ?, valor_compra = ?,
-       stock_apertura = ?, stock = ?, stock_minimo = ? WHERE id = ?`
+      `UPDATE productos SET nombre = ?, descripcion = ?, valor_venta = ?, valor_compra = ? WHERE id = ?`
     ).run(
       nombre.trim(), String(descripcion || ''),
-      Number(valorVenta) || 0, Number(valorCompra) || 0,
-      aperturaNueva, stockNuevo, Number(stockMinimo) || 0, id,
+      Number(valorVenta) || 0, Number(valorCompra) || 0, id,
     )
+    // Ajusta la variante por defecto: al cambiar la apertura, mueve el stock por la
+    // diferencia (para no perder lo abastecido por producción). Si el producto tiene
+    // varias variantes (Fase 2), solo se toca la variante sin color como referencia.
+    const def = variantePorDefecto(id)
+    if (def) {
+      const diff = aperturaNueva - (def.stock_apertura || 0)
+      db.prepare(
+        'UPDATE producto_variantes SET stock_apertura = ?, stock = ?, stock_minimo = ? WHERE id = ?'
+      ).run(aperturaNueva, (def.stock || 0) + diff, minimoNuevo, def.id)
+    }
+    recalcularStockProducto(id)
     db.prepare('DELETE FROM procesos WHERE producto_id = ?').run(id)
     insertarProcesosConReceta(id, procesos)
   })
@@ -338,10 +431,63 @@ app.delete('/api/productos/:id', permisoRequired('productos', 'eliminar'), (req,
   res.json({ ok: true })
 })
 
+// ---- Variantes de un producto (colores). El stock vive por variante. ----
+// Agrega una variante de color a un producto.
+app.post('/api/productos/:id/variantes', permisoRequired('productos', 'editar'), (req, res) => {
+  const { id } = req.params
+  const { colorId, stockApertura = 0, stockMinimo = 0 } = req.body
+  const producto = db.prepare('SELECT * FROM productos WHERE id = ?').get(id)
+  if (!producto) return res.status(404).json({ error: 'Producto no encontrado' })
+  if (!colorId) return res.status(400).json({ error: 'Elige un color para la variante' })
+  const yaExiste = db.prepare('SELECT id FROM producto_variantes WHERE producto_id = ? AND color_id = ? AND activo = 1').get(id, colorId)
+  if (yaExiste) return res.status(400).json({ error: 'Ese color ya existe para este producto' })
+  const color = db.prepare('SELECT * FROM colores WHERE id = ?').get(colorId)
+  const apertura = Number(stockApertura) || 0
+  const sufijo = (color?.nombre || '').slice(0, 3).toUpperCase()
+  const codigo = `${producto.codigo || 'PRD'}-${sufijo}`
+  db.transaction(() => {
+    db.prepare(
+      `INSERT INTO producto_variantes (producto_id, color_id, codigo, stock, stock_apertura, stock_minimo, activo)
+       VALUES (?, ?, ?, ?, ?, ?, 1)`
+    ).run(id, colorId, codigo, apertura, apertura, Number(stockMinimo) || 0)
+    recalcularStockProducto(id)
+  })()
+  res.json(productoConProcesos(db.prepare('SELECT * FROM productos WHERE id = ?').get(id)))
+})
+
+// Edita una variante (stock de apertura / mínimo). Ajusta stock por diferencia de apertura.
+app.put('/api/productos/:id/variantes/:varId', permisoRequired('productos', 'editar'), (req, res) => {
+  const { id, varId } = req.params
+  const { stockApertura, stockMinimo } = req.body
+  const v = db.prepare('SELECT * FROM producto_variantes WHERE id = ? AND producto_id = ?').get(varId, id)
+  if (!v) return res.status(404).json({ error: 'Variante no encontrada' })
+  const aperturaNueva = Number(stockApertura) || 0
+  const diff = aperturaNueva - (v.stock_apertura || 0)
+  db.transaction(() => {
+    db.prepare('UPDATE producto_variantes SET stock_apertura = ?, stock = ?, stock_minimo = ? WHERE id = ?')
+      .run(aperturaNueva, (v.stock || 0) + diff, Number(stockMinimo) || 0, varId)
+    recalcularStockProducto(id)
+  })()
+  res.json(productoConProcesos(db.prepare('SELECT * FROM productos WHERE id = ?').get(id)))
+})
+
+// Desactiva una variante (no se borra para conservar histórico de movimientos).
+app.delete('/api/productos/:id/variantes/:varId', permisoRequired('productos', 'editar'), (req, res) => {
+  const { id, varId } = req.params
+  const activas = db.prepare('SELECT COUNT(*) n FROM producto_variantes WHERE producto_id = ? AND activo = 1').get(id).n
+  if (activas <= 1) return res.status(400).json({ error: 'El producto debe conservar al menos una variante' })
+  db.transaction(() => {
+    db.prepare('UPDATE producto_variantes SET activo = 0 WHERE id = ? AND producto_id = ?').run(varId, id)
+    recalcularStockProducto(id)
+  })()
+  res.json(productoConProcesos(db.prepare('SELECT * FROM productos WHERE id = ?').get(id)))
+})
+
 function movimientoProductoSalida(m) {
   return {
     id: m.id,
     tipo: m.tipo,
+    varianteId: m.variante_id || null,
     cantidad: m.cantidad,
     costoUnitario: m.costo_unitario,
     fecha: m.fecha,
@@ -354,7 +500,7 @@ function movimientoProductoSalida(m) {
 // el valor de compra. Queda registrada como movimiento tipo 'entrada'.
 app.post('/api/productos/:id/entrada', permisoRequired('productos', 'crear'), (req, res) => {
   const { id } = req.params
-  const { cantidad, costoUnitario, fecha, descripcion } = req.body
+  const { cantidad, costoUnitario, fecha, descripcion, varianteId } = req.body
   const cant = Number(cantidad) || 0
   if (cant <= 0) return res.status(400).json({ error: 'La cantidad debe ser mayor a 0' })
   const costo = Number(costoUnitario) || 0
@@ -362,17 +508,20 @@ app.post('/api/productos/:id/entrada', permisoRequired('productos', 'crear'), (r
   const producto = db.prepare('SELECT * FROM productos WHERE id = ?').get(id)
   if (!producto) return res.status(404).json({ error: 'Producto no encontrado' })
 
+  // Variante destino: la indicada, o la por defecto (Fase 1 / productos sin color).
+  const variante = varianteId
+    ? db.prepare('SELECT * FROM producto_variantes WHERE id = ? AND producto_id = ?').get(varianteId, id)
+    : variantePorDefecto(id)
+  if (!variante) return res.status(400).json({ error: 'El producto no tiene una variante para recibir stock' })
+
   const update = db.transaction(() => {
     db.prepare(
-      `INSERT INTO producto_movimientos (producto_id, tipo, cantidad, costo_unitario, fecha, descripcion)
-       VALUES (?, 'entrada', ?, ?, ?, ?)`
-    ).run(id, cant, costo, fecha || new Date().toISOString(), (descripcion || '').trim())
-    // Suma al stock; si dieron un costo de compra > 0, lo actualiza como valor de compra
-    if (costo > 0) {
-      db.prepare('UPDATE productos SET stock = stock + ?, valor_compra = ? WHERE id = ?').run(cant, costo, id)
-    } else {
-      db.prepare('UPDATE productos SET stock = stock + ? WHERE id = ?').run(cant, id)
-    }
+      `INSERT INTO producto_movimientos (producto_id, variante_id, tipo, cantidad, costo_unitario, fecha, descripcion)
+       VALUES (?, ?, 'entrada', ?, ?, ?, ?)`
+    ).run(id, variante.id, cant, costo, fecha || new Date().toISOString(), (descripcion || '').trim())
+    db.prepare('UPDATE producto_variantes SET stock = stock + ? WHERE id = ?').run(cant, variante.id)
+    if (costo > 0) db.prepare('UPDATE productos SET valor_compra = ? WHERE id = ?').run(costo, id)
+    recalcularStockProducto(id)
   })
   update()
   res.json(productoConProcesos(db.prepare('SELECT * FROM productos WHERE id = ?').get(id)))
@@ -394,6 +543,8 @@ function materialSalida(m) {
     stock: m.stock,
     costoUnitario: m.costo_unitario,
     stockMinimo: m.stock_minimo,
+    colorId: m.color_id || null,
+    familia: m.familia || '',
   }
 }
 
@@ -409,13 +560,42 @@ function movimientoMaterialSalida(m) {
   }
 }
 
+// ============ COLORES (catálogo) ============
+function colorSalida(c) {
+  return { id: c.id, nombre: c.nombre, hex: c.hex || '', activo: !!c.activo }
+}
+app.get('/api/colores', permisoAnyRequired([
+  ['colores', 'ver'], ['materiales', 'ver'], ['productos', 'ver'],
+  ['gestion-produccion', 'ver'], ['pedidos', 'ver'], ['ventas', 'ver'],
+]), (req, res) => {
+  const rows = db.prepare('SELECT * FROM colores ORDER BY nombre').all()
+  res.json(rows.map(colorSalida))
+})
+app.post('/api/colores', permisoRequired('colores', 'crear'), (req, res) => {
+  const { nombre, hex = '' } = req.body
+  if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'El nombre es obligatorio' })
+  const r = db.prepare('INSERT INTO colores (nombre, hex, activo) VALUES (?, ?, 1)').run(nombre.trim(), (hex || '').trim())
+  res.json(colorSalida(db.prepare('SELECT * FROM colores WHERE id = ?').get(r.lastInsertRowid)))
+})
+app.put('/api/colores/:id', permisoRequired('colores', 'editar'), (req, res) => {
+  const { nombre, hex = '', activo = true } = req.body
+  if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'El nombre es obligatorio' })
+  db.prepare('UPDATE colores SET nombre = ?, hex = ?, activo = ? WHERE id = ?')
+    .run(nombre.trim(), (hex || '').trim(), activo ? 1 : 0, req.params.id)
+  res.json(colorSalida(db.prepare('SELECT * FROM colores WHERE id = ?').get(req.params.id)))
+})
+app.delete('/api/colores/:id', permisoRequired('colores', 'eliminar'), (req, res) => {
+  db.prepare('DELETE FROM colores WHERE id = ?').run(req.params.id)
+  res.json({ ok: true })
+})
+
 app.get('/api/materiales', permisoRequired('materiales', 'ver'), (req, res) => {
   const materiales = db.prepare('SELECT * FROM materiales ORDER BY nombre').all()
   res.json(materiales.map(materialSalida))
 })
 
 app.post('/api/materiales', permisoRequired('materiales', 'crear'), (req, res) => {
-  const { nombre, unidad, costoUnitario = 0, stockInicial = 0, stockMinimo = 0 } = req.body
+  const { nombre, unidad, costoUnitario = 0, stockInicial = 0, stockMinimo = 0, colorId = null, familia = '' } = req.body
   if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'El nombre es obligatorio' })
   if (!unidad || !unidad.trim()) return res.status(400).json({ error: 'La unidad es obligatoria' })
 
@@ -424,8 +604,8 @@ app.post('/api/materiales', permisoRequired('materiales', 'crear'), (req, res) =
     const costo = Number(costoUnitario) || 0
     const minimo = Number(stockMinimo) || 0
     const r = db
-      .prepare('INSERT INTO materiales (nombre, unidad, stock, costo_unitario, stock_minimo) VALUES (?, ?, ?, ?, ?)')
-      .run(nombre.trim(), unidad.trim(), stock, costo, minimo)
+      .prepare('INSERT INTO materiales (nombre, unidad, stock, costo_unitario, stock_minimo, color_id, familia) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(nombre.trim(), unidad.trim(), stock, costo, minimo, colorId || null, (familia || '').trim() || null)
     const mid = r.lastInsertRowid
     if (stock > 0) {
       db.prepare(
@@ -441,15 +621,17 @@ app.post('/api/materiales', permisoRequired('materiales', 'crear'), (req, res) =
 
 app.put('/api/materiales/:id', permisoRequired('materiales', 'editar'), (req, res) => {
   const { id } = req.params
-  const { nombre, unidad, costoUnitario, stockMinimo } = req.body
+  const { nombre, unidad, costoUnitario, stockMinimo, colorId = null, familia = '' } = req.body
   if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'El nombre es obligatorio' })
   if (!unidad || !unidad.trim()) return res.status(400).json({ error: 'La unidad es obligatoria' })
 
-  db.prepare('UPDATE materiales SET nombre = ?, unidad = ?, costo_unitario = ?, stock_minimo = ? WHERE id = ?').run(
+  db.prepare('UPDATE materiales SET nombre = ?, unidad = ?, costo_unitario = ?, stock_minimo = ?, color_id = ?, familia = ? WHERE id = ?').run(
     nombre.trim(),
     unidad.trim(),
     Number(costoUnitario) || 0,
     Number(stockMinimo) || 0,
+    colorId || null,
+    (familia || '').trim() || null,
     id
   )
   res.json(materialSalida(db.prepare('SELECT * FROM materiales WHERE id = ?').get(id)))
@@ -1070,6 +1252,8 @@ function ordenProduccionSalida(o) {
     id: o.id,
     productoId: o.producto_id,
     productoNombre: o.producto_nombre || '',
+    varianteId: o.variante_id || null,
+    colorNombre: o.color_nombre || '',
     cantidad: o.cantidad,
     estado: o.estado,
     comentario: o.comentario || '',
@@ -1101,13 +1285,16 @@ function abastecerStockProducto(orden) {
   const previo = Number(orden.stock_abastecido) || 0
   const nuevo = cantidadAbastecerOrden(orden.id)
   const delta = nuevo - previo
-  if (delta !== 0) {
-    db.prepare('UPDATE productos SET stock = stock + ? WHERE id = ?').run(delta, orden.producto_id)
+  // Variante que produce esta orden: la indicada, o la por defecto (Fase 1 / sin color)
+  const varId = orden.variante_id || variantePorDefecto(orden.producto_id)?.id
+  if (delta !== 0 && varId) {
+    db.prepare('UPDATE producto_variantes SET stock = stock + ? WHERE id = ?').run(delta, varId)
+    recalcularStockProducto(orden.producto_id)
     // Registra el abastecimiento por producción en el historial del producto
     db.prepare(
-      `INSERT INTO producto_movimientos (producto_id, tipo, cantidad, costo_unitario, fecha, descripcion, orden_produccion_id)
-       VALUES (?, 'produccion', ?, 0, ?, ?, ?)`
-    ).run(orden.producto_id, delta, new Date().toISOString(), `Producción: orden #${orden.id}`, orden.id)
+      `INSERT INTO producto_movimientos (producto_id, variante_id, tipo, cantidad, costo_unitario, fecha, descripcion, orden_produccion_id)
+       VALUES (?, ?, 'produccion', ?, 0, ?, ?, ?)`
+    ).run(orden.producto_id, varId, delta, new Date().toISOString(), `Producción: orden #${orden.id}`, orden.id)
   }
   db.prepare('UPDATE ordenes_produccion SET stock_abastecido = ? WHERE id = ?').run(nuevo, orden.id)
 }
@@ -1117,12 +1304,16 @@ function abastecerStockProducto(orden) {
 function revertirStockProducto(orden) {
   const previo = Number(orden.stock_abastecido) || 0
   if (previo !== 0 && orden.producto_id) {
-    db.prepare('UPDATE productos SET stock = stock - ? WHERE id = ?').run(previo, orden.producto_id)
+    const varId = orden.variante_id || variantePorDefecto(orden.producto_id)?.id
+    if (varId) {
+      db.prepare('UPDATE producto_variantes SET stock = stock - ? WHERE id = ?').run(previo, varId)
+      recalcularStockProducto(orden.producto_id)
+    }
     // Registra la reversa (cantidad negativa) para dejar rastro en el historial
     db.prepare(
-      `INSERT INTO producto_movimientos (producto_id, tipo, cantidad, costo_unitario, fecha, descripcion, orden_produccion_id)
-       VALUES (?, 'produccion', ?, 0, ?, ?, ?)`
-    ).run(orden.producto_id, -previo, new Date().toISOString(), `Reversa producción: orden #${orden.id} reabierta/eliminada`, orden.id)
+      `INSERT INTO producto_movimientos (producto_id, variante_id, tipo, cantidad, costo_unitario, fecha, descripcion, orden_produccion_id)
+       VALUES (?, ?, 'produccion', ?, 0, ?, ?, ?)`
+    ).run(orden.producto_id, orden.variante_id || variantePorDefecto(orden.producto_id)?.id || null, -previo, new Date().toISOString(), `Reversa producción: orden #${orden.id} reabierta/eliminada`, orden.id)
   }
   db.prepare('UPDATE ordenes_produccion SET stock_abastecido = 0 WHERE id = ?').run(orden.id)
 }
@@ -1148,16 +1339,23 @@ app.get('/api/ordenes-produccion', permisoAnyRequired([
 })
 
 app.post('/api/ordenes-produccion', permisoRequired('gestion-produccion', 'crear'), (req, res) => {
-  const { productoId, cantidad, comentario, fechaEntrega } = req.body
+  const { productoId, cantidad, comentario, fechaEntrega, varianteId } = req.body
   const cant = Number(cantidad) || 0
   if (!(cant > 0)) return res.status(400).json({ error: 'Indica una cantidad mayor a 0' })
 
   const producto = productoId ? db.prepare('SELECT * FROM productos WHERE id = ?').get(productoId) : null
+  // Variante (color) que fabrica la orden: la indicada o la por defecto del producto.
+  const variante = varianteId
+    ? db.prepare('SELECT * FROM producto_variantes WHERE id = ? AND producto_id = ?').get(varianteId, productoId)
+    : (productoId ? variantePorDefecto(productoId) : null)
+  const colorNombre = variante?.color_id
+    ? (db.prepare('SELECT nombre FROM colores WHERE id = ?').get(variante.color_id)?.nombre || '')
+    : ''
   const ahora = new Date().toISOString()
   const r = db.prepare(
-    `INSERT INTO ordenes_produccion (producto_id, producto_nombre, cantidad, estado, comentario, fecha_entrega, creado, actualizado)
-     VALUES (?, ?, ?, 'pendiente', ?, ?, ?, ?)`
-  ).run(productoId || null, producto?.nombre || '', cant, comentario || '', fechaEntrega || null, ahora, ahora)
+    `INSERT INTO ordenes_produccion (producto_id, producto_nombre, variante_id, color_nombre, cantidad, estado, comentario, fecha_entrega, creado, actualizado)
+     VALUES (?, ?, ?, ?, ?, 'pendiente', ?, ?, ?, ?)`
+  ).run(productoId || null, producto?.nombre || '', variante?.id || null, colorNombre, cant, comentario || '', fechaEntrega || null, ahora, ahora)
   res.json(ordenProduccionSalida(db.prepare('SELECT * FROM ordenes_produccion WHERE id = ?').get(r.lastInsertRowid)))
 })
 
@@ -1235,7 +1433,7 @@ app.post('/api/produccion/chequeo-material', permisoAnyRequired([
   ['gestion-produccion', 'ver'],
   ['gestion-produccion', 'crear'],
 ]), (req, res) => {
-  const { procesos, procesoId, cantidad } = req.body
+  const { procesos, procesoId, cantidad, colorId } = req.body
   const cant = Number(cantidad) || 0
   const ids = procesos && Array.isArray(procesos) ? procesos : (procesoId ? [procesoId] : [])
   if (ids.length === 0 || !(cant > 0)) {
@@ -1243,12 +1441,25 @@ app.post('/api/produccion/chequeo-material', permisoAnyRequired([
   }
 
   // Acumula el requerido por material sumando la receta de todos los procesos.
+  // Las líneas dependientes de color se resuelven al material concreto del color dado.
   const requeridoPorMaterial = new Map()
+  const avisosColor = []
   for (const pid of ids) {
     for (const item of materialesDeProceso(pid)) {
-      const prev = requeridoPorMaterial.get(item.materialId) || { materialNombre: item.materialNombre, unidad: item.unidad, requerido: 0 }
+      let materialId = item.materialId
+      let materialNombre = item.materialNombre
+      let unidad = item.unidad
+      if (item.porColor) {
+        const mat = resolverMaterialPorColor(item.familia, colorId)
+        if (!mat) {
+          avisosColor.push(`Falta definir el material de "${item.familia}" para el color elegido`)
+          continue
+        }
+        materialId = mat.id; materialNombre = mat.nombre; unidad = mat.unidad
+      }
+      const prev = requeridoPorMaterial.get(materialId) || { materialNombre, unidad, requerido: 0 }
       prev.requerido += (Number(item.cantidad) || 0) * cant
-      requeridoPorMaterial.set(item.materialId, prev)
+      requeridoPorMaterial.set(materialId, prev)
     }
   }
 
@@ -1259,7 +1470,7 @@ app.post('/api/produccion/chequeo-material', permisoAnyRequired([
     return { materialId, materialNombre: r.materialNombre, unidad: r.unidad, requerido: r.requerido, stockActual, faltante }
   }).sort((a, b) => a.materialNombre.localeCompare(b.materialNombre))
 
-  res.json({ items, hayFaltantes: items.some((i) => i.faltante > 0) })
+  res.json({ items, hayFaltantes: items.some((i) => i.faltante > 0), avisosColor })
 })
 
 app.delete('/api/ordenes-produccion/:id', permisoRequired('gestion-produccion', 'eliminar'), (req, res) => {
@@ -1341,13 +1552,26 @@ app.post('/api/tareas-produccion', permisoRequired('gestion-produccion', 'crear'
       db.prepare("UPDATE ordenes_produccion SET estado = 'en_progreso', actualizado = ? WHERE id = ?").run(ahora, orden.id)
     }
 
-    // Descuenta stock según la receta del proceso (si tiene una definida)
+    // Descuenta stock según la receta del proceso (si tiene una definida).
+    // Las líneas dependientes de color usan el material del color de la orden.
     if (proceso) {
+      const colorOrdenId = orden?.variante_id
+        ? db.prepare('SELECT color_id FROM producto_variantes WHERE id = ?').get(orden.variante_id)?.color_id
+        : null
       const receta = materialesDeProceso(proceso.id)
       for (const item of receta) {
-        const cantidadRequerida = item.cantidad * cant
-        const material = db.prepare('SELECT * FROM materiales WHERE id = ?').get(item.materialId)
+        let material
+        if (item.porColor) {
+          material = resolverMaterialPorColor(item.familia, colorOrdenId)
+          if (!material) {
+            avisos.push(`No hay material de "${item.familia}" para el color de la orden; no se descontó`)
+            continue
+          }
+        } else {
+          material = db.prepare('SELECT * FROM materiales WHERE id = ?').get(item.materialId)
+        }
         if (!material) continue
+        const cantidadRequerida = item.cantidad * cant
         const nuevoStock = material.stock - cantidadRequerida
         db.prepare('UPDATE materiales SET stock = ? WHERE id = ?').run(nuevoStock, material.id)
         db.prepare(
@@ -1707,6 +1931,499 @@ app.put('/api/costeos/:id', permisoRequired('costos', 'editar'), (req, res) => {
 
 app.delete('/api/costeos/:id', permisoRequired('costos', 'eliminar'), (req, res) => {
   db.prepare('DELETE FROM costeos WHERE id = ?').run(req.params.id)
+  res.json({ ok: true })
+})
+
+// ============ CLIENTES (directorio) ============
+// El saldo a favor del cliente se calcula sumando sus anticipos: abonos suman,
+// aplicados/devueltos restan. Se deriva, no se cachea, para no desincronizar.
+function saldoFavorCliente(clienteId) {
+  const rows = db.prepare('SELECT tipo, monto FROM cliente_anticipos WHERE cliente_id = ?').all(clienteId)
+  let saldo = 0
+  for (const r of rows) {
+    const m = Number(r.monto) || 0
+    if (r.tipo === 'abono') saldo += m
+    else saldo -= m // 'aplicado' o 'devuelto' restan del saldo a favor
+  }
+  return saldo
+}
+
+function clienteSalida(c) {
+  return {
+    id: c.id,
+    nombre: c.nombre,
+    apellidos: c.apellidos || '',
+    cedula: c.cedula || '',
+    correo: c.correo || '',
+    direccion: c.direccion || '',
+    municipio: c.municipio || '',
+    telefono: c.telefono || '',
+    tipo: c.tipo || 'cliente',
+    saldoFavor: saldoFavorCliente(c.id),
+    creado: c.creado,
+    actualizado: c.actualizado,
+  }
+}
+
+// Clientes se leen también desde Pedidos y Ventas (necesitan el selector).
+app.get('/api/clientes', permisoAnyRequired([
+  ['clientes', 'ver'],
+  ['ventas', 'ver'],
+  ['pedidos', 'ver'],
+]), (req, res) => {
+  const clientes = db.prepare('SELECT * FROM clientes ORDER BY nombre, apellidos').all()
+  res.json(clientes.map(clienteSalida))
+})
+
+app.post('/api/clientes', permisoRequired('clientes', 'crear'), (req, res) => {
+  const { nombre, apellidos, cedula, correo, direccion, municipio, telefono, tipo } = req.body
+  if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'El nombre es obligatorio' })
+  const ahora = new Date().toISOString()
+  const r = db.prepare(
+    `INSERT INTO clientes (nombre, apellidos, cedula, correo, direccion, municipio, telefono, tipo, creado, actualizado)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    nombre.trim(), (apellidos || '').trim(), (cedula || '').trim(), (correo || '').trim(),
+    (direccion || '').trim(), (municipio || '').trim(), (telefono || '').trim(),
+    tipo === 'proveedor' ? 'proveedor' : 'cliente', ahora, ahora
+  )
+  res.json(clienteSalida(db.prepare('SELECT * FROM clientes WHERE id = ?').get(r.lastInsertRowid)))
+})
+
+app.put('/api/clientes/:id', permisoRequired('clientes', 'editar'), (req, res) => {
+  const cliente = db.prepare('SELECT * FROM clientes WHERE id = ?').get(req.params.id)
+  if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' })
+  const { nombre, apellidos, cedula, correo, direccion, municipio, telefono, tipo } = req.body
+  if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'El nombre es obligatorio' })
+  db.prepare(
+    `UPDATE clientes SET nombre = ?, apellidos = ?, cedula = ?, correo = ?, direccion = ?,
+     municipio = ?, telefono = ?, tipo = ?, actualizado = ? WHERE id = ?`
+  ).run(
+    nombre.trim(), (apellidos || '').trim(), (cedula || '').trim(), (correo || '').trim(),
+    (direccion || '').trim(), (municipio || '').trim(), (telefono || '').trim(),
+    tipo === 'proveedor' ? 'proveedor' : 'cliente', new Date().toISOString(), cliente.id
+  )
+  res.json(clienteSalida(db.prepare('SELECT * FROM clientes WHERE id = ?').get(cliente.id)))
+})
+
+app.delete('/api/clientes/:id', permisoRequired('clientes', 'eliminar'), (req, res) => {
+  const cliente = db.prepare('SELECT id FROM clientes WHERE id = ?').get(req.params.id)
+  if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' })
+  const ventas = db.prepare('SELECT COUNT(*) c FROM ventas WHERE cliente_id = ?').get(cliente.id)
+  if (ventas.c > 0) return res.status(400).json({ error: 'No se puede eliminar: el cliente tiene ventas registradas.' })
+  // Cada anticipo (abono) generó un ingreso real en caja; borrar el cliente dejaría
+  // ese ingreso huérfano en Control de Dinero. Se bloquea para no descuadrar la caja.
+  const anticipos = db.prepare('SELECT COUNT(*) c FROM cliente_anticipos WHERE cliente_id = ?').get(cliente.id)
+  if (anticipos.c > 0) return res.status(400).json({ error: 'No se puede eliminar: el cliente tiene anticipos registrados.' })
+  db.prepare('DELETE FROM clientes WHERE id = ?').run(cliente.id) // pedidos (sin venta) caen por quedar sueltos
+  res.json({ ok: true })
+})
+
+// ---- Anticipos (abonos del cliente a cuenta) ----
+function anticipoSalida(a) {
+  return {
+    id: a.id,
+    clienteId: a.cliente_id,
+    monto: a.monto,
+    tipo: a.tipo,
+    ventaId: a.venta_id,
+    fecha: a.fecha,
+    descripcion: a.descripcion || '',
+  }
+}
+
+app.get('/api/clientes/:id/anticipos', permisoAnyRequired([
+  ['clientes', 'ver'],
+  ['ventas', 'ver'],
+]), (req, res) => {
+  const rows = db.prepare('SELECT * FROM cliente_anticipos WHERE cliente_id = ? ORDER BY fecha DESC, id DESC').all(req.params.id)
+  res.json(rows.map(anticipoSalida))
+})
+
+app.post('/api/clientes/:id/anticipos', permisoRequired('clientes', 'crear'), (req, res) => {
+  const cliente = db.prepare('SELECT * FROM clientes WHERE id = ?').get(req.params.id)
+  if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' })
+  const monto = Number(req.body.monto) || 0
+  if (!(monto > 0)) return res.status(400).json({ error: 'Indica un monto mayor a 0' })
+  const fecha = req.body.fecha || new Date().toISOString()
+  const descripcion = (req.body.descripcion || '').trim()
+  const registrar = db.transaction(() => {
+    const r = db.prepare(
+      `INSERT INTO cliente_anticipos (cliente_id, monto, tipo, fecha, descripcion) VALUES (?, ?, 'abono', ?, ?)`
+    ).run(cliente.id, monto, fecha, descripcion)
+    // El abono entra a caja como ingreso
+    registrarIngreso({
+      fecha,
+      categoria: 'Anticipo de cliente',
+      monto,
+      descripcion: `Anticipo de ${cliente.nombre}${descripcion ? ' — ' + descripcion : ''}`,
+      origen: 'anticipo',
+      refId: r.lastInsertRowid,
+    })
+  })
+  registrar()
+  res.json(clienteSalida(db.prepare('SELECT * FROM clientes WHERE id = ?').get(cliente.id)))
+})
+
+app.delete('/api/clientes/:clienteId/anticipos/:anticipoId', permisoRequired('clientes', 'eliminar'), (req, res) => {
+  const ant = db.prepare('SELECT * FROM cliente_anticipos WHERE id = ? AND cliente_id = ?')
+    .get(req.params.anticipoId, req.params.clienteId)
+  if (!ant) return res.status(404).json({ error: 'Anticipo no encontrado' })
+  if (ant.tipo === 'aplicado') return res.status(400).json({ error: 'No se puede borrar un anticipo ya aplicado a una venta.' })
+  const borrar = db.transaction(() => {
+    // Revierte el ingreso a caja que generó el abono
+    db.prepare("DELETE FROM movimientos WHERE origen = 'anticipo' AND ref_id = ?").run(ant.id)
+    db.prepare('DELETE FROM cliente_anticipos WHERE id = ?').run(ant.id)
+  })
+  borrar()
+  res.json({ ok: true })
+})
+
+// ============ PEDIDOS (encargos del cliente) ============
+function pedidoSalida(p) {
+  const items = db.prepare('SELECT * FROM pedido_items WHERE pedido_id = ? ORDER BY id ASC').all(p.id).map((it) => ({
+    id: it.id,
+    productoId: it.producto_id,
+    productoNombre: it.producto_nombre || '',
+    varianteId: it.variante_id || null,
+    colorNombre: it.color_nombre || '',
+    cantidad: it.cantidad,
+    precioUnitario: it.precio_unitario,
+    subtotal: (Number(it.cantidad) || 0) * (Number(it.precio_unitario) || 0),
+  }))
+  return {
+    id: p.id,
+    clienteId: p.cliente_id,
+    clienteNombre: p.cliente_nombre || '',
+    estado: p.estado,
+    fechaEntrega: p.fecha_entrega || '',
+    comentario: p.comentario || '',
+    total: p.total,
+    ventaId: p.venta_id,
+    creado: p.creado,
+    actualizado: p.actualizado,
+    items,
+  }
+}
+
+// Inserta los ítems de un pedido/venta y devuelve el total. Reutilizable.
+function insertarItems(tabla, fkCampo, parentId, items) {
+  const stmt = db.prepare(
+    `INSERT INTO ${tabla} (${fkCampo}, producto_id, producto_nombre, variante_id, color_nombre, cantidad, precio_unitario)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  )
+  let total = 0
+  for (const it of items || []) {
+    const cantidad = Number(it.cantidad) || 0
+    const precio = Number(it.precioUnitario) || 0
+    if (cantidad <= 0) continue
+    const prod = it.productoId ? db.prepare('SELECT nombre FROM productos WHERE id = ?').get(it.productoId) : null
+    // Nombre de color: el que venga, o el de la variante indicada
+    let colorNombre = it.colorNombre || ''
+    if (!colorNombre && it.varianteId) {
+      const v = db.prepare('SELECT c.nombre FROM producto_variantes pv LEFT JOIN colores c ON c.id = pv.color_id WHERE pv.id = ?').get(it.varianteId)
+      colorNombre = v?.nombre || ''
+    }
+    stmt.run(parentId, it.productoId || null, prod?.nombre || it.productoNombre || '', it.varianteId || null, colorNombre, cantidad, precio)
+    total += cantidad * precio
+  }
+  return total
+}
+
+app.get('/api/pedidos', permisoAnyRequired([
+  ['pedidos', 'ver'],
+  ['ventas', 'ver'],
+]), (req, res) => {
+  const rows = db.prepare('SELECT * FROM pedidos ORDER BY creado DESC, id DESC').all()
+  res.json(rows.map(pedidoSalida))
+})
+
+app.post('/api/pedidos', permisoRequired('pedidos', 'crear'), (req, res) => {
+  const { clienteId, fechaEntrega, comentario, items } = req.body
+  const cliente = clienteId ? db.prepare('SELECT * FROM clientes WHERE id = ?').get(clienteId) : null
+  const itemsValidos = (items || []).filter((it) => (Number(it.cantidad) || 0) > 0)
+  if (itemsValidos.length === 0) return res.status(400).json({ error: 'Agrega al menos un producto al pedido' })
+  const ahora = new Date().toISOString()
+  let pedidoId
+  const crear = db.transaction(() => {
+    const r = db.prepare(
+      `INSERT INTO pedidos (cliente_id, cliente_nombre, estado, fecha_entrega, comentario, total, creado, actualizado)
+       VALUES (?, ?, 'pendiente', ?, ?, 0, ?, ?)`
+    ).run(clienteId || null, cliente?.nombre || '', fechaEntrega || null, (comentario || '').trim(), ahora, ahora)
+    pedidoId = r.lastInsertRowid
+    const total = insertarItems('pedido_items', 'pedido_id', pedidoId, itemsValidos)
+    db.prepare('UPDATE pedidos SET total = ? WHERE id = ?').run(total, pedidoId)
+  })
+  crear()
+  res.json(pedidoSalida(db.prepare('SELECT * FROM pedidos WHERE id = ?').get(pedidoId)))
+})
+
+app.put('/api/pedidos/:id', permisoRequired('pedidos', 'editar'), (req, res) => {
+  const pedido = db.prepare('SELECT * FROM pedidos WHERE id = ?').get(req.params.id)
+  if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' })
+  if (pedido.estado === 'entregado') return res.status(400).json({ error: 'Un pedido ya convertido en venta no se puede editar.' })
+  const { clienteId, fechaEntrega, comentario, items } = req.body
+  const cliente = clienteId ? db.prepare('SELECT * FROM clientes WHERE id = ?').get(clienteId) : null
+  const itemsValidos = (items || []).filter((it) => (Number(it.cantidad) || 0) > 0)
+  if (itemsValidos.length === 0) return res.status(400).json({ error: 'Agrega al menos un producto al pedido' })
+  const ahora = new Date().toISOString()
+  const actualizar = db.transaction(() => {
+    db.prepare('DELETE FROM pedido_items WHERE pedido_id = ?').run(pedido.id)
+    const total = insertarItems('pedido_items', 'pedido_id', pedido.id, itemsValidos)
+    db.prepare('UPDATE pedidos SET cliente_id = ?, cliente_nombre = ?, fecha_entrega = ?, comentario = ?, total = ?, actualizado = ? WHERE id = ?')
+      .run(clienteId || null, cliente?.nombre || '', fechaEntrega || null, (comentario || '').trim(), total, ahora, pedido.id)
+  })
+  actualizar()
+  res.json(pedidoSalida(db.prepare('SELECT * FROM pedidos WHERE id = ?').get(pedido.id)))
+})
+
+app.delete('/api/pedidos/:id', permisoRequired('pedidos', 'eliminar'), (req, res) => {
+  const pedido = db.prepare('SELECT * FROM pedidos WHERE id = ?').get(req.params.id)
+  if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' })
+  if (pedido.estado === 'entregado') return res.status(400).json({ error: 'Un pedido ya convertido en venta no se puede eliminar.' })
+  db.prepare('DELETE FROM pedidos WHERE id = ?').run(pedido.id) // items caen por FK
+  res.json({ ok: true })
+})
+
+// ============ VENTAS (descuenta stock + registra ingreso) ============
+function ventaSalida(v) {
+  const items = db.prepare('SELECT * FROM venta_items WHERE venta_id = ? ORDER BY id ASC').all(v.id).map((it) => ({
+    id: it.id,
+    productoId: it.producto_id,
+    productoNombre: it.producto_nombre || '',
+    varianteId: it.variante_id || null,
+    colorNombre: it.color_nombre || '',
+    cantidad: it.cantidad,
+    precioUnitario: it.precio_unitario,
+    subtotal: (Number(it.cantidad) || 0) * (Number(it.precio_unitario) || 0),
+  }))
+  // Abonos registrados + estado de pago derivado del saldo
+  const pagos = db.prepare('SELECT * FROM venta_pagos WHERE venta_id = ? ORDER BY fecha ASC, id ASC').all(v.id).map((p) => ({
+    id: p.id,
+    monto: p.monto,
+    fecha: p.fecha,
+    comentario: p.comentario || '',
+  }))
+  const total = Number(v.total) || 0
+  const pagado = Number(v.pagado) || 0
+  const saldo = Math.max(0, total - pagado)
+  const estadoPago = saldo <= 0.009 ? 'pagado' : (pagado > 0 ? 'parcial' : 'pendiente')
+  return {
+    id: v.id,
+    codigo: v.codigo || `VTA-${String(v.id).padStart(4, '0')}`,
+    clienteId: v.cliente_id,
+    clienteNombre: v.cliente_nombre || '',
+    pedidoId: v.pedido_id,
+    total,
+    anticipoAplicado: v.anticipo_aplicado,
+    pagado,
+    saldo,
+    estadoPago,
+    pagos,
+    fecha: v.fecha,
+    comentario: v.comentario || '',
+    creado: v.creado,
+    items,
+  }
+}
+
+// Núcleo de una venta: crea la venta + ítems, descuenta stock, aplica anticipo y
+// registra el ingreso. Se usa tanto en la venta directa como al convertir un pedido.
+// Devuelve { ventaId, avisos }.
+function crearVentaCore({ clienteId, items, comentario, aplicarAnticipo, pedidoId, pagoInicial, fecha }) {
+  const cliente = clienteId ? db.prepare('SELECT * FROM clientes WHERE id = ?').get(clienteId) : null
+  const itemsValidos = (items || []).filter((it) => (Number(it.cantidad) || 0) > 0)
+  if (itemsValidos.length === 0) throw new Error('La venta no tiene productos')
+  const ahora = new Date().toISOString()
+  const fechaVenta = fecha || ahora
+  const avisos = []
+
+  const r = db.prepare(
+    `INSERT INTO ventas (codigo, cliente_id, cliente_nombre, pedido_id, total, anticipo_aplicado, pagado, fecha, comentario, creado)
+     VALUES (?, ?, ?, ?, 0, 0, 0, ?, ?, ?)`
+  ).run(null, clienteId || null, cliente?.nombre || '', pedidoId || null, fechaVenta, (comentario || '').trim(), ahora)
+  const ventaId = r.lastInsertRowid
+  // Código legible VTA-####
+  db.prepare('UPDATE ventas SET codigo = ? WHERE id = ?').run(`VTA-${String(ventaId).padStart(4, '0')}`, ventaId)
+
+  // Ítems + descuento de stock (por variante)
+  const total = insertarItems('venta_items', 'venta_id', ventaId, itemsValidos)
+  for (const it of itemsValidos) {
+    if (!it.productoId) continue
+    const cantidad = Number(it.cantidad) || 0
+    const producto = db.prepare('SELECT * FROM productos WHERE id = ?').get(it.productoId)
+    if (!producto) continue
+    // Variante a descontar: la indicada, o la por defecto (Fase 1 / sin color)
+    const variante = it.varianteId
+      ? db.prepare('SELECT * FROM producto_variantes WHERE id = ? AND producto_id = ?').get(it.varianteId, producto.id)
+      : variantePorDefecto(producto.id)
+    if (!variante) { avisos.push(`${producto.nombre}: sin variante para descontar stock`); continue }
+    const nuevoStock = (Number(variante.stock) || 0) - cantidad
+    db.prepare('UPDATE producto_variantes SET stock = ? WHERE id = ?').run(nuevoStock, variante.id)
+    recalcularStockProducto(producto.id)
+    const etiqueta = variante.color_id
+      ? `${producto.nombre} (${db.prepare('SELECT nombre FROM colores WHERE id = ?').get(variante.color_id)?.nombre || ''})`
+      : producto.nombre
+    db.prepare(
+      `INSERT INTO producto_movimientos (producto_id, variante_id, tipo, cantidad, costo_unitario, fecha, descripcion)
+       VALUES (?, ?, 'venta', ?, ?, ?, ?)`
+    ).run(producto.id, variante.id, cantidad, producto.valor_compra || 0, ahora, `Venta #${ventaId}${cliente ? ' — ' + cliente.nombre : ''}`)
+    if (nuevoStock < 0) avisos.push(`${etiqueta}: stock insuficiente, quedó en ${nuevoStock}`)
+  }
+
+  // Aplicar saldo a favor del cliente (anticipo), sin exceder el saldo ni el total
+  let anticipoAplicado = 0
+  if (aplicarAnticipo && cliente) {
+    const saldo = saldoFavorCliente(cliente.id)
+    anticipoAplicado = Math.min(saldo, total)
+    if (anticipoAplicado > 0) {
+      db.prepare(
+        `INSERT INTO cliente_anticipos (cliente_id, monto, tipo, venta_id, fecha, descripcion)
+         VALUES (?, ?, 'aplicado', ?, ?, ?)`
+      ).run(cliente.id, anticipoAplicado, ventaId, ahora, `Aplicado a venta #${ventaId}`)
+    }
+  }
+
+  // Saldo tras aplicar el anticipo. El pago en efectivo de ahora ("pagoInicial")
+  // por defecto salda todo (venta de contado); si se indica menor, la venta queda
+  // a crédito (parcial o pendiente). No puede exceder el saldo.
+  const saldoTrasAnticipo = Math.max(0, total - anticipoAplicado)
+  const abonoInicial = pagoInicial == null
+    ? saldoTrasAnticipo
+    : Math.max(0, Math.min(Number(pagoInicial) || 0, saldoTrasAnticipo))
+  const pagado = anticipoAplicado + abonoInicial
+  db.prepare('UPDATE ventas SET total = ?, anticipo_aplicado = ?, pagado = ? WHERE id = ?')
+    .run(total, anticipoAplicado, pagado, ventaId)
+
+  // Registra el abono inicial en efectivo y su ingreso a caja (el anticipo ya entró en su día)
+  if (abonoInicial > 0) {
+    db.prepare('INSERT INTO venta_pagos (venta_id, monto, fecha, comentario, creado) VALUES (?, ?, ?, ?, ?)')
+      .run(ventaId, abonoInicial, fechaVenta, 'Pago inicial', ahora)
+    registrarIngreso({
+      fecha: fechaVenta,
+      categoria: 'Venta',
+      monto: abonoInicial,
+      descripcion: `Venta #${ventaId}${cliente ? ' — ' + cliente.nombre : ''}`,
+      origen: 'venta',
+      refId: ventaId,
+    })
+  }
+
+  return { ventaId, avisos }
+}
+
+app.get('/api/ventas', permisoRequired('ventas', 'ver'), (req, res) => {
+  const rows = db.prepare('SELECT * FROM ventas ORDER BY creado DESC, id DESC').all()
+  res.json(rows.map(ventaSalida))
+})
+
+app.post('/api/ventas', permisoRequired('ventas', 'crear'), (req, res) => {
+  const { clienteId, items, comentario, aplicarAnticipo, pagoInicial, fecha } = req.body
+  const itemsValidos = (items || []).filter((it) => (Number(it.cantidad) || 0) > 0)
+  if (itemsValidos.length === 0) return res.status(400).json({ error: 'Agrega al menos un producto a la venta' })
+  let resultado
+  const crear = db.transaction(() => {
+    resultado = crearVentaCore({ clienteId, items: itemsValidos, comentario, aplicarAnticipo, pagoInicial, fecha })
+  })
+  crear()
+  const venta = ventaSalida(db.prepare('SELECT * FROM ventas WHERE id = ?').get(resultado.ventaId))
+  res.json({ ...venta, avisos: resultado.avisos })
+})
+
+// Convierte un pedido en venta: crea la venta con los ítems del pedido, descuenta
+// stock e ingresa la plata; marca el pedido como entregado y lo liga a la venta.
+app.post('/api/pedidos/:id/convertir', permisoRequired('ventas', 'crear'), (req, res) => {
+  const pedido = db.prepare('SELECT * FROM pedidos WHERE id = ?').get(req.params.id)
+  if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' })
+  if (pedido.estado === 'entregado') return res.status(400).json({ error: 'Este pedido ya fue convertido en venta.' })
+  const items = db.prepare('SELECT * FROM pedido_items WHERE pedido_id = ?').all(pedido.id).map((it) => ({
+    productoId: it.producto_id,
+    productoNombre: it.producto_nombre,
+    varianteId: it.variante_id || null,
+    colorNombre: it.color_nombre || '',
+    cantidad: it.cantidad,
+    precioUnitario: it.precio_unitario,
+  }))
+  if (items.length === 0) return res.status(400).json({ error: 'El pedido no tiene productos' })
+  let resultado
+  const convertir = db.transaction(() => {
+    resultado = crearVentaCore({
+      clienteId: pedido.cliente_id,
+      items,
+      comentario: `Pedido #${pedido.id}`,
+      aplicarAnticipo: req.body.aplicarAnticipo,
+      pedidoId: pedido.id,
+    })
+    db.prepare("UPDATE pedidos SET estado = 'entregado', venta_id = ?, actualizado = ? WHERE id = ?")
+      .run(resultado.ventaId, new Date().toISOString(), pedido.id)
+  })
+  convertir()
+  const venta = ventaSalida(db.prepare('SELECT * FROM ventas WHERE id = ?').get(resultado.ventaId))
+  res.json({ ...venta, avisos: resultado.avisos })
+})
+
+// Registra un abono (pago recibido) a una venta a crédito. Suma a `pagado`,
+// ingresa la plata a caja y recalcula el estado de pago.
+app.post('/api/ventas/:id/pagos', permisoRequired('ventas', 'editar'), (req, res) => {
+  const venta = db.prepare('SELECT * FROM ventas WHERE id = ?').get(req.params.id)
+  if (!venta) return res.status(404).json({ error: 'Venta no encontrada' })
+  const monto = Number(req.body.monto) || 0
+  if (monto <= 0) return res.status(400).json({ error: 'El monto del abono debe ser mayor a 0' })
+  const saldo = Math.max(0, (Number(venta.total) || 0) - (Number(venta.pagado) || 0))
+  if (saldo <= 0.009) return res.status(400).json({ error: 'Esta venta ya está pagada por completo' })
+  if (monto > saldo + 0.009) return res.status(400).json({ error: `El abono (${monto}) supera el saldo pendiente (${saldo})` })
+
+  const ahora = new Date().toISOString()
+  const fecha = req.body.fecha || ahora
+  const comentario = (req.body.comentario || '').trim() || 'Abono'
+  const registrar = db.transaction(() => {
+    db.prepare('INSERT INTO venta_pagos (venta_id, monto, fecha, comentario, creado) VALUES (?, ?, ?, ?, ?)')
+      .run(venta.id, monto, fecha, comentario, ahora)
+    db.prepare('UPDATE ventas SET pagado = pagado + ? WHERE id = ?').run(monto, venta.id)
+    registrarIngreso({
+      fecha,
+      categoria: 'Venta',
+      monto,
+      descripcion: `Abono venta ${venta.codigo || '#' + venta.id}${venta.cliente_nombre ? ' — ' + venta.cliente_nombre : ''}`,
+      origen: 'venta',
+      refId: venta.id,
+    })
+  })
+  registrar()
+  res.json(ventaSalida(db.prepare('SELECT * FROM ventas WHERE id = ?').get(venta.id)))
+})
+
+app.delete('/api/ventas/:id', permisoRequired('ventas', 'eliminar'), (req, res) => {
+  const venta = db.prepare('SELECT * FROM ventas WHERE id = ?').get(req.params.id)
+  if (!venta) return res.status(404).json({ error: 'Venta no encontrada' })
+  const ahora = new Date().toISOString()
+  const anular = db.transaction(() => {
+    // Devuelve el stock de cada ítem
+    const items = db.prepare('SELECT * FROM venta_items WHERE venta_id = ?').all(venta.id)
+    for (const it of items) {
+      if (!it.producto_id) continue
+      // Devuelve a la variante original (o la por defecto si la venta es antigua sin variante)
+      const varId = it.variante_id || variantePorDefecto(it.producto_id)?.id
+      if (varId) {
+        db.prepare('UPDATE producto_variantes SET stock = stock + ? WHERE id = ?').run(it.cantidad, varId)
+        recalcularStockProducto(it.producto_id)
+      }
+      db.prepare(
+        `INSERT INTO producto_movimientos (producto_id, variante_id, tipo, cantidad, costo_unitario, fecha, descripcion)
+         VALUES (?, ?, 'venta', ?, 0, ?, ?)`
+      ).run(it.producto_id, varId || null, -it.cantidad, ahora, `Anulación venta #${venta.id}`)
+    }
+    // Revierte el ingreso a caja de la venta
+    db.prepare("DELETE FROM movimientos WHERE origen = 'venta' AND ref_id = ?").run(venta.id)
+    // Devuelve el anticipo aplicado al saldo a favor del cliente (borra la fila 'aplicado')
+    db.prepare("DELETE FROM cliente_anticipos WHERE tipo = 'aplicado' AND venta_id = ?").run(venta.id)
+    // Si venía de un pedido, lo reabre
+    if (venta.pedido_id) {
+      db.prepare("UPDATE pedidos SET estado = 'pendiente', venta_id = NULL, actualizado = ? WHERE id = ?").run(ahora, venta.pedido_id)
+    }
+    db.prepare('DELETE FROM ventas WHERE id = ?').run(venta.id) // venta_items caen por FK
+  })
+  anular()
   res.json({ ok: true })
 })
 

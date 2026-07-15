@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP } from '../utils/format.js'
 import { calcularCosteo, costeoVacio } from '../utils/costeo.js'
 import { generarPdfCosteo, descargarCSV } from '../utils/pdf.js'
-import { confirmar } from '../utils/notify.js'
+import { notify, confirmar } from '../utils/notify.js'
 import Vacio from '../components/Vacio.jsx'
 
 // Colores para las porciones del gráfico de torta (uno por categoría de costo)
@@ -67,7 +67,7 @@ function PieChart({ datos, size = 180 }) {
 }
 
 export default function Costos() {
-  const { getCosteos, addCosteo, updateCosteo, deleteCosteo, empresa, productos } = useData()
+  const { getCosteos, addCosteo, updateCosteo, deleteCosteo, empresa, productos, materiales } = useData()
   const { puede } = useAuth()
 
   const puedeCrear = puede('costos', 'crear')
@@ -128,6 +128,65 @@ export default function Costos() {
     setDatos({ ...costeoVacio(), ...c.datos })
     setMsg(null)
     window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  // Construye insumos + mano de obra a partir de los procesos del producto:
+  // - Cada material de la receta (de todos los procesos) se vuelve un insumo. Se
+  //   consolidan los repetidos sumando cantidades; el precio unitario sale del
+  //   costo actual del material en inventario.
+  // - Cada proceso con pago > 0 se vuelve una línea de mano de obra (valor fijo/unidad).
+  const datosDesdeProducto = (prod) => {
+    const insumosMap = {}
+    const manoObra = []
+    for (const proc of prod.procesos || []) {
+      for (const m of proc.materiales || []) {
+        const mat = materiales.find((x) => String(x.id) === String(m.materialId))
+        const key = String(m.materialId)
+        if (!insumosMap[key]) {
+          insumosMap[key] = {
+            key: uid(),
+            nombre: m.materialNombre || mat?.nombre || 'Material',
+            cantidad: 0,
+            unidad: m.unidad || mat?.unidad || '',
+            precioUnitario: mat?.costoUnitario || 0,
+          }
+        }
+        insumosMap[key].cantidad += Number(m.cantidad) || 0
+      }
+      if (Number(proc.pago) > 0) {
+        manoObra.push({ key: uid(), nombre: proc.nombre, tipo: 'fijo', horas: '', valor: Number(proc.pago) })
+      }
+    }
+    return { insumos: Object.values(insumosMap), manoObra }
+  }
+
+  // Al elegir un producto en el selector: lo vincula y ofrece precargar sus
+  // materiales y mano de obra configurados (para no re-escribir lo mismo).
+  const seleccionarProducto = async (prodIdStr) => {
+    setProductoId(prodIdStr)
+    if (!prodIdStr) return
+    const prod = productos.find((p) => String(p.id) === String(prodIdStr))
+    if (!prod) return
+
+    const cargados = datosDesdeProducto(prod)
+    if (cargados.insumos.length === 0 && cargados.manoObra.length === 0) {
+      notify.error('Este producto no tiene materiales ni procesos con pago configurados')
+      return
+    }
+
+    // Si ya hay datos escritos, pedir confirmación antes de reemplazarlos
+    const hayDatos = datos.insumos.length > 0 || datos.manoObra.length > 0
+    if (hayDatos) {
+      const ok = await confirmar(
+        'Se reemplazarán los materiales y la mano de obra actuales con los del producto. ¿Continuar?',
+        { titulo: 'Cargar datos del producto', textoOk: 'Sí, cargar', peligro: false }
+      )
+      if (!ok) return
+    }
+
+    setDatos((d) => ({ ...d, insumos: cargados.insumos, manoObra: cargados.manoObra }))
+    if (!nombre.trim()) setNombre(prod.nombre)
+    notify.ok(`Cargados ${cargados.insumos.length} material(es) y ${cargados.manoObra.length} proceso(s) de "${prod.nombre}"`)
   }
 
   const guardar = async () => {
@@ -253,7 +312,7 @@ export default function Costos() {
           </div>
           <div style={{ flex: 1 }}>
             <label>Producto vinculado (opcional)</label>
-            <select value={productoId} onChange={(e) => setProductoId(e.target.value)}>
+            <select value={productoId} onChange={(e) => seleccionarProducto(e.target.value)}>
               <option value="">— Sin vincular —</option>
               {productos.map((p) => (
                 <option key={p.id} value={p.id}>{p.nombre}</option>
@@ -262,7 +321,8 @@ export default function Costos() {
           </div>
         </div>
         <p className="muted small">
-          Vincula el costeo a un producto para comparar este costo estimado contra el costo real de sus órdenes de producción.
+          Al vincular un producto se cargan sus materiales y mano de obra ya configurados (puedes ajustarlos aquí).
+          Además permite comparar este costo estimado contra el costo real de sus órdenes de producción.
         </p>
       </div>
 
