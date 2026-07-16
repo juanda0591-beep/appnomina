@@ -2155,7 +2155,7 @@ app.post('/api/pedidos', permisoRequired('pedidos', 'crear'), (req, res) => {
     const r = db.prepare(
       `INSERT INTO pedidos (cliente_id, cliente_nombre, estado, fecha_entrega, comentario, total, creado, actualizado)
        VALUES (?, ?, 'pendiente', ?, ?, 0, ?, ?)`
-    ).run(clienteId || null, cliente?.nombre || '', fechaEntrega || null, (comentario || '').trim(), ahora, ahora)
+    ).run(clienteId || null, cliente ? `${cliente.nombre || ''} ${cliente.apellidos || ''}`.trim() : '', fechaEntrega || null, (comentario || '').trim(), ahora, ahora)
     pedidoId = r.lastInsertRowid
     const total = insertarItems('pedido_items', 'pedido_id', pedidoId, itemsValidos)
     db.prepare('UPDATE pedidos SET total = ? WHERE id = ?').run(total, pedidoId)
@@ -2177,7 +2177,7 @@ app.put('/api/pedidos/:id', permisoRequired('pedidos', 'editar'), (req, res) => 
     db.prepare('DELETE FROM pedido_items WHERE pedido_id = ?').run(pedido.id)
     const total = insertarItems('pedido_items', 'pedido_id', pedido.id, itemsValidos)
     db.prepare('UPDATE pedidos SET cliente_id = ?, cliente_nombre = ?, fecha_entrega = ?, comentario = ?, total = ?, actualizado = ? WHERE id = ?')
-      .run(clienteId || null, cliente?.nombre || '', fechaEntrega || null, (comentario || '').trim(), total, ahora, pedido.id)
+      .run(clienteId || null, cliente ? `${cliente.nombre || ''} ${cliente.apellidos || ''}`.trim() : '', fechaEntrega || null, (comentario || '').trim(), total, ahora, pedido.id)
   })
   actualizar()
   res.json(pedidoSalida(db.prepare('SELECT * FROM pedidos WHERE id = ?').get(pedido.id)))
@@ -2244,6 +2244,7 @@ function ventaSalida(v) {
 // Devuelve { ventaId, avisos }.
 function crearVentaCore({ clienteId, items, comentario, aplicarAnticipo, pedidoId, pagoInicial, fecha, descuentoTipo, descuentoPct, metodoPago }) {
   const cliente = clienteId ? db.prepare('SELECT * FROM clientes WHERE id = ?').get(clienteId) : null
+  if (!cliente) throw new Error('La venta requiere un cliente')
   const itemsValidos = (items || []).filter((it) => (Number(it.cantidad) || 0) > 0)
   if (itemsValidos.length === 0) throw new Error('La venta no tiene productos')
   const ahora = new Date().toISOString()
@@ -2258,7 +2259,7 @@ function crearVentaCore({ clienteId, items, comentario, aplicarAnticipo, pedidoI
   const r = db.prepare(
     `INSERT INTO ventas (codigo, cliente_id, cliente_nombre, pedido_id, total, anticipo_aplicado, pagado, descuento_pct, fecha, comentario, creado)
      VALUES (?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?)`
-  ).run(null, clienteId || null, cliente?.nombre || '', pedidoId || null, descGlobalPct, fechaVenta, (comentario || '').trim(), ahora)
+  ).run(null, clienteId || null, cliente ? `${cliente.nombre || ''} ${cliente.apellidos || ''}`.trim() : '', pedidoId || null, descGlobalPct, fechaVenta, (comentario || '').trim(), ahora)
   const ventaId = r.lastInsertRowid
   // Código legible VTA-####
   db.prepare('UPDATE ventas SET codigo = ? WHERE id = ?').run(`VTA-${String(ventaId).padStart(4, '0')}`, ventaId)
@@ -2373,7 +2374,8 @@ app.post('/api/pedidos/:id/convertir', permisoRequired('ventas', 'crear'), (req,
   let resultado
   const convertir = db.transaction(() => {
     resultado = crearVentaCore({
-      clienteId: pedido.cliente_id,
+      // Usa el cliente elegido en el formulario de venta si viene; si no, el del pedido
+      clienteId: req.body.clienteId || pedido.cliente_id,
       items,
       comentario: (req.body.comentario || '').trim() || `Pedido #${pedido.id}`,
       aplicarAnticipo: req.body.aplicarAnticipo,

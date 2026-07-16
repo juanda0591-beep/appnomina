@@ -62,6 +62,13 @@ export default function Ventas() {
   const clienteSel = clientes.find((c) => String(c.id) === String(clienteId))
   const saldoCliente = clienteSel?.saldoFavor || 0
   const clienteDeVenta = (v) => clientes.find((c) => String(c.id) === String(v?.clienteId)) || null
+  // Nombre completo del cliente de una venta: se arma desde el cliente actual
+  // (nombre + apellidos) y, si no existe, cae al nombre guardado en la venta.
+  const nombreClienteVenta = (v) => {
+    const c = clienteDeVenta(v)
+    const completo = c ? `${c.nombre || ''} ${c.apellidos || ''}`.trim() : ''
+    return completo || v?.clienteNombre || ''
+  }
 
   const resetForm = () => {
     setClienteId(''); setComentario(''); setItems([emptyItem()])
@@ -126,10 +133,7 @@ export default function Ventas() {
     e.preventDefault()
     const itemsValidos = items.filter((it) => it.productoId && Number(it.cantidad) > 0)
     if (itemsValidos.length === 0) { notify.error('Agrega al menos un producto'); return }
-    if (ventaCredito && quedaDebiendo > 0 && !clienteId) {
-      notify.error('Una venta a crédito necesita un cliente para registrar la deuda')
-      return
-    }
+    if (!clienteId) { notify.error('Selecciona un cliente para la venta'); return }
     // Confirmación con el resumen de la venta antes de registrarla
     const metodoTxt = metodoPago === 'transferencia' ? 'transferencia (no entra a caja)' : 'efectivo (entra a caja)'
     const partes = [`Total: ${formatCOP(totalForm)}`]
@@ -260,10 +264,10 @@ export default function Ventas() {
     return ventas.filter((v) => {
       if (!enPeriodo(v)) return false
       if (filtroEstado && v.estadoPago !== filtroEstado) return false
-      if (q && !(v.clienteNombre || '').toLowerCase().includes(q) && !(v.codigo || '').toLowerCase().includes(q)) return false
+      if (q && !nombreClienteVenta(v).toLowerCase().includes(q) && !(v.codigo || '').toLowerCase().includes(q)) return false
       return true
     })
-  }, [ventas, periodo, mes, anio, desde, hasta, filtroEstado, busqueda])
+  }, [ventas, clientes, periodo, mes, anio, desde, hasta, filtroEstado, busqueda])
 
   const totales = useMemo(() => ventasFiltradas.reduce((acc, v) => ({
     cantidad: acc.cantidad + 1,
@@ -382,7 +386,7 @@ export default function Ventas() {
                   <tr key={v.id} className="chip-clicable" onClick={() => setDetalleId(v.id)}>
                     <td><strong>{v.codigo || '#' + v.id}</strong>{v.pedidoId ? <span className="muted small"> (ped. #{v.pedidoId})</span> : null}</td>
                     <td className="small">{formatFecha(v.fecha)}</td>
-                    <td>{v.clienteNombre || <span className="muted">— sin cliente</span>}</td>
+                    <td>{nombreClienteVenta(v) || <span className="muted">— sin cliente</span>}</td>
                     <td className="num">{formatCOP(v.total)}</td>
                     <td className="num">{formatCOP(v.pagado)}</td>
                     <td className="num">{v.saldo > 0 ? <span className="texto-salida">{formatCOP(v.saldo)}</span> : '—'}</td>
@@ -426,9 +430,9 @@ export default function Ventas() {
             <h3>{pedidoOrigenId ? `Convertir pedido #${pedidoOrigenId} en venta` : 'Nueva venta'}</h3>
             <div className="row">
               <div style={{ flex: 2 }}>
-                <label>Cliente</label>
-                <select value={clienteId} onChange={(e) => { setClienteId(e.target.value); setAplicarAnticipo(false) }}>
-                  <option value="">— Sin cliente —</option>
+                <label>Cliente *</label>
+                <select value={clienteId} onChange={(e) => { setClienteId(e.target.value); setAplicarAnticipo(false) }} required>
+                  <option value="">— Selecciona un cliente —</option>
                   {clientes.filter((c) => c.tipo !== 'proveedor').map((c) => (
                     <option key={c.id} value={c.id}>{c.nombre} {c.apellidos}</option>
                   ))}
@@ -587,7 +591,7 @@ export default function Ventas() {
               {(() => { const e = ESTADO_PAGO[ventaDetalle.estadoPago] || ESTADO_PAGO.pendiente; return <span className={`chip ${e.chip}`}>{e.label}</span> })()}
             </h3>
             <p className="muted small" style={{ marginTop: 0 }}>
-              {ventaDetalle.clienteNombre || 'Sin cliente'} · {formatFecha(ventaDetalle.fecha)}
+              {nombreClienteVenta(ventaDetalle) || 'Sin cliente'} · {formatFecha(ventaDetalle.fecha)}
               {ventaDetalle.pedidoId && <> · Pedido #{ventaDetalle.pedidoId}</>}
               {ventaDetalle.comentario && <> · 💬 {ventaDetalle.comentario}</>}
             </p>
@@ -663,7 +667,7 @@ export default function Ventas() {
           <form className="modal" onSubmit={handleRegistrarPago}>
             <h3>Registrar abono · {ventaPago.codigo || '#' + ventaPago.id}</h3>
             <p className="muted small" style={{ marginTop: 0 }}>
-              {ventaPago.clienteNombre || 'Sin cliente'} · Saldo pendiente: <strong>{formatCOP(ventaPago.saldo)}</strong>
+              {nombreClienteVenta(ventaPago) || 'Sin cliente'} · Saldo pendiente: <strong>{formatCOP(ventaPago.saldo)}</strong>
             </p>
             <div className="row">
               <div style={{ flex: 1 }}>

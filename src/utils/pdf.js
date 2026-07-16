@@ -914,9 +914,12 @@ export function construirDocVenta({ empresa, venta, cliente }) {
   // Datos del cliente y la fecha
   doc.setFontSize(11)
   doc.setTextColor(90)
-  const nombreCliente = venta.clienteNombre || (cliente ? `${cliente.nombre || ''} ${cliente.apellidos || ''}`.trim() : '') || 'Sin cliente'
+  const nombreCliente = (cliente ? `${cliente.nombre || ''} ${cliente.apellidos || ''}`.trim() : '') || venta.clienteNombre || 'Sin cliente'
   doc.text(`Cliente: ${nombreCliente}`, marginX, y); y += 6
+  if (cliente?.cedula) { doc.text(`Cédula/NIT: ${cliente.cedula}`, marginX, y); y += 6 }
   if (cliente?.telefono) { doc.text(`Teléfono: ${cliente.telefono}`, marginX, y); y += 6 }
+  if (cliente?.direccion) { doc.text(`Dirección: ${cliente.direccion}`, marginX, y); y += 6 }
+  if (cliente?.municipio) { doc.text(`Municipio: ${cliente.municipio}`, marginX, y); y += 6 }
   if (venta.fecha) { doc.text(`Fecha: ${formatFecha(venta.fecha)}`, marginX, y); y += 6 }
   y += 2
 
