@@ -223,6 +223,11 @@ export function DataProvider({ children }) {
     await recargar()
     return creada
   }
+  const updateVenta = async (id, venta) => {
+    const actualizada = await http(`/ventas/${id}`, { method: 'PUT', body: JSON.stringify(venta) })
+    await recargar()
+    return actualizada
+  }
   const deleteVenta = async (id) => {
     await http(`/ventas/${id}`, { method: 'DELETE' })
     await recargar()
@@ -286,6 +291,11 @@ export function DataProvider({ children }) {
     await http(`/movimientos/${id}`, { method: 'DELETE' })
     await recargar()
   }
+  const addComprobanteMovimiento = async (id, datos) => {
+    const actualizado = await http(`/movimientos/${id}/comprobante`, { method: 'PUT', body: JSON.stringify(datos) })
+    await recargar()
+    return actualizado
+  }
   const getBalance = () => http('/movimientos/balance')
   const getMovimientos = (desde, hasta) =>
     http(`/movimientos?desde=${desde}&hasta=${hasta}`)
@@ -300,6 +310,8 @@ export function DataProvider({ children }) {
   // ---------- REPORTES ----------
   const getReporte = (desde, hasta) =>
     http(`/reportes?desde=${desde}&hasta=${hasta}`)
+  const getReporteVentas = (desde, hasta) =>
+    http(`/reportes/ventas?desde=${desde}&hasta=${hasta}`)
   const getReporteMateriales = (desde, hasta) =>
     http(`/reportes/materiales?desde=${desde}&hasta=${hasta}`)
 
@@ -481,9 +493,11 @@ export function DataProvider({ children }) {
     deleteNomina,
     addMovimiento,
     deleteMovimiento,
+    addComprobanteMovimiento,
     getBalance,
     getMovimientos,
     getReporte,
+    getReporteVentas,
     getReporteMateriales,
     getDashboard,
     getProduccionDashboard,
@@ -508,6 +522,7 @@ export function DataProvider({ children }) {
     deletePedido,
     convertirPedido,
     addVenta,
+    updateVenta,
     deleteVenta,
     registrarPagoVenta,
     addTarea,

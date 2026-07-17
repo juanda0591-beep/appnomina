@@ -528,6 +528,8 @@ addCol('ventas', 'codigo', 'codigo TEXT')
 addCol('ventas', 'descuento_pct', 'descuento_pct REAL NOT NULL DEFAULT 0')
 // Método de pago del abono: 'efectivo' (entra a caja) o 'transferencia' (no entra a caja)
 addCol('venta_pagos', 'metodo', "metodo TEXT NOT NULL DEFAULT 'efectivo'")
+// Fecha límite de pago para ventas a crédito (opcional); si pasa y queda saldo, la venta se marca "vencida"
+addCol('ventas', 'fecha_vencimiento', 'fecha_vencimiento TEXT')
 
 // Backfill de ventas existentes: asigna código VTA-#### y registra el "pagado"
 // histórico como un abono inicial (sin volver a mover caja, ya se movió en su día).

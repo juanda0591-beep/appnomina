@@ -955,7 +955,7 @@ export function construirDocVenta({ empresa, venta, cliente }) {
   const bruto = venta.subtotalBruto != null ? venta.subtotalBruto : venta.total
   if (bruto > venta.total + 0.5) {
     lineasTot.push({ etiqueta: 'Subtotal', valor: formatCOP(bruto) })
-    lineasTot.push({ etiqueta: descPct > 0 ? `Descuento (${descPct}%)` : 'Descuento', valor: `−${formatCOP(bruto - venta.total)}` })
+    lineasTot.push({ etiqueta: descPct > 0 ? `Descuento (${descPct}%)` : 'Descuento', valor: `-${formatCOP(bruto - venta.total)}` })
   }
   lineasTot.push({ etiqueta: 'Total', valor: formatCOP(venta.total), destacado: true })
   if (venta.anticipoAplicado > 0) lineasTot.push({ etiqueta: 'Anticipo aplicado', valor: formatCOP(venta.anticipoAplicado) })

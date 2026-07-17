@@ -11,7 +11,7 @@ function inicioDeMes() {
 }
 
 export default function Reportes() {
-  const { getReporte, getReporteMateriales, getMovimientos, empresa, ordenesProduccion, productos } = useData()
+  const { getReporte, getReporteVentas, getReporteMateriales, getMovimientos, empresa, ordenesProduccion, productos } = useData()
   const { puede } = useAuth()
   const puedeExportar = puede('reportes', 'exportar')
   const hoy = hoyISO()
@@ -20,6 +20,7 @@ export default function Reportes() {
   const [hasta, setHasta] = useState(hoy)
   const [reporte, setReporte] = useState(null)
   const [movs, setMovs] = useState(null) // reporte de movimientos del periodo
+  const [repVentas, setRepVentas] = useState(null)
   const [repMateriales, setRepMateriales] = useState(null)
   const [materialAbierto, setMaterialAbierto] = useState(null) // materialId con detalle expandido
   const [cargando, setCargando] = useState(false)
@@ -80,11 +81,12 @@ export default function Reportes() {
     if (desde > hasta) { notify.error('La fecha "desde" no puede ser mayor que "hasta"'); return }
     setCargando(true)
     try {
-      const [r, m, rm] = await Promise.all([getReporte(desde, hasta), getMovimientos(desde, hasta), getReporteMateriales(desde, hasta)])
+      const [r, m, rv, rm] = await Promise.all([getReporte(desde, hasta), getMovimientos(desde, hasta), getReporteVentas(desde, hasta), getReporteMateriales(desde, hasta)])
       setReporte(r)
       const ingresos = m.filter((x) => x.tipo === 'ingreso').reduce((s, x) => s + x.monto, 0)
       const gastos = m.filter((x) => x.tipo === 'gasto').reduce((s, x) => s + x.monto, 0)
       setMovs({ lista: m, ingresos, gastos, balance: ingresos - gastos })
+      setRepVentas(rv)
       setRepMateriales(rm)
     } catch (e) {
       notify.error('Error al generar el reporte: ' + e.message)
@@ -126,6 +128,17 @@ export default function Reportes() {
       (lineas || 'Sin movimientos en el periodo.')
 
     window.open(`https://wa.me/${telefono}?text=${encodeURIComponent(mensaje)}`, '_blank')
+  }
+
+  // --- Exportaciones del reporte de ventas por producto ---
+  const exportarVentasExcel = () => {
+    if (!repVentas || repVentas.porProducto.length === 0) return
+    const filas = [['Producto', 'Unidades vendidas', 'N° de ventas', 'Ingresos']]
+    for (const p of repVentas.porProducto) {
+      filas.push([p.nombre, p.unidades, p.ventas, p.ingresos])
+    }
+    filas.push(['TOTALES', repVentas.totalUnidades, repVentas.cantidadVentas, repVentas.totalIngresos])
+    descargarCSV(`reporte_ventas_${desde}_a_${hasta}.csv`, filas)
   }
 
   // --- Exportaciones del reporte de fabricación (producción) ---
@@ -349,6 +362,78 @@ export default function Reportes() {
           </>
         )}
       </div>
+
+      {/* ===== Ventas por producto ===== */}
+      {repVentas && (
+        <div className="card">
+          <div className="card-head">
+            <h3>🛒 Ventas por producto</h3>
+            {repVentas.porProducto.length > 0 && puedeExportar && (
+              <button className="btn-secondary" onClick={exportarVentasExcel}>📊 Excel</button>
+            )}
+          </div>
+          <p className="muted small">
+            Periodo: {formatFecha(desde)} — {formatFecha(hasta)} · {repVentas.cantidadVentas} ventas registradas.
+          </p>
+
+          {repVentas.porProducto.length === 0 && <p className="muted">No hay ventas en este periodo.</p>}
+          {repVentas.porProducto.length > 0 && (
+            <>
+              <div className="cards-grid">
+                <div className="stat-card">
+                  <span className="stat-label">Productos vendidos</span>
+                  <span className="stat-value">{repVentas.porProducto.length}</span>
+                </div>
+                <div className="stat-card">
+                  <span className="stat-label">Unidades totales</span>
+                  <span className="stat-value">{repVentas.totalUnidades}</span>
+                </div>
+                <div className="stat-card highlight">
+                  <span className="stat-label">Ingresos totales</span>
+                  <span className="stat-value">{formatCOP(repVentas.totalIngresos)}</span>
+                </div>
+              </div>
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Producto</th>
+                      <th className="num">Unidades</th>
+                      <th className="num">N° ventas</th>
+                      <th className="num">Ingresos</th>
+                      <th className="num">% del total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {repVentas.porProducto.map((p, i) => (
+                      <tr key={p.productoId || p.nombre}>
+                        <td className="muted small">{i + 1}</td>
+                        <td><strong>{p.nombre}</strong></td>
+                        <td className="num">{p.unidades}</td>
+                        <td className="num">{p.ventas}</td>
+                        <td className="num"><strong>{formatCOP(p.ingresos)}</strong></td>
+                        <td className="num muted small">
+                          {repVentas.totalIngresos > 0 ? ((p.ingresos / repVentas.totalIngresos) * 100).toFixed(1) + '%' : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colSpan={2}><strong>TOTALES</strong></td>
+                      <td className="num"><strong>{repVentas.totalUnidades}</strong></td>
+                      <td className="num"><strong>{repVentas.cantidadVentas}</strong></td>
+                      <td className="num"><strong>{formatCOP(repVentas.totalIngresos)}</strong></td>
+                      <td></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* ===== Materiales: entradas, salidas y stock disponible ===== */}
       {repMateriales && (

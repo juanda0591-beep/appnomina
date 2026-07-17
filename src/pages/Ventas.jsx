@@ -15,10 +15,11 @@ const ESTADO_PAGO = {
   pagado: { label: 'Pagado', chip: 'ok' },
   parcial: { label: 'Parcial', chip: 'warn' },
   pendiente: { label: 'Debe', chip: 'danger' },
+  vencida: { label: 'Vencida', chip: 'danger' },
 }
 
 export default function Ventas() {
-  const { ventas, clientes, productos, empresa, addVenta, deleteVenta, registrarPagoVenta, convertirPedido } = useData()
+  const { ventas, clientes, productos, empresa, addVenta, updateVenta, deleteVenta, registrarPagoVenta, convertirPedido } = useData()
   const { puede } = useAuth()
   const puedeCrear = puede('ventas', 'crear')
   const puedeEditar = puede('ventas', 'editar')
@@ -28,8 +29,11 @@ export default function Ventas() {
 
   const [formAbierto, setFormAbierto] = useState(false)
   const [pedidoOrigenId, setPedidoOrigenId] = useState(null) // si la venta viene de convertir un pedido
+  const [editandoId, setEditandoId] = useState(null) // id de la venta que se está editando (null = venta nueva)
   const [clienteId, setClienteId] = useState('')
   const [comentario, setComentario] = useState('')
+  const [fechaVenta, setFechaVenta] = useState(hoy())
+  const [fechaVencimiento, setFechaVencimiento] = useState('') // fecha límite de pago (ventas a crédito)
   const [items, setItems] = useState([emptyItem()])
   const [aplicarAnticipo, setAplicarAnticipo] = useState(false)
   const [ventaCredito, setVentaCredito] = useState(false) // si true, se cobra parcial (o nada) ahora
@@ -59,6 +63,7 @@ export default function Ventas() {
 
   const ventaDetalle = ventas.find((v) => v.id === detalleId)
   const ventaPago = ventas.find((v) => v.id === pagoVentaId)
+  const ventaEditando = ventas.find((v) => v.id === editandoId)
   const clienteSel = clientes.find((c) => String(c.id) === String(clienteId))
   const saldoCliente = clienteSel?.saldoFavor || 0
   const clienteDeVenta = (v) => clientes.find((c) => String(c.id) === String(v?.clienteId)) || null
@@ -74,6 +79,30 @@ export default function Ventas() {
     setClienteId(''); setComentario(''); setItems([emptyItem()])
     setAplicarAnticipo(false); setVentaCredito(false); setPagoInicial(''); setFormAbierto(false)
     setMetodoPago('efectivo'); setDescuentoTipo('ninguno'); setDescuentoGlobal(''); setPedidoOrigenId(null)
+    setEditandoId(null); setFechaVenta(hoy()); setFechaVencimiento('')
+  }
+
+  // Abre el formulario cargado con los datos de una venta ya registrada para corregirlos.
+  // No se pueden editar los abonos ya recibidos (evita descuadrar caja); solo cliente,
+  // productos, fecha, vencimiento, comentario y descuento.
+  const abrirEdicion = (v) => {
+    setEditandoId(v.id)
+    setPedidoOrigenId(null)
+    setClienteId(v.clienteId ? String(v.clienteId) : '')
+    setComentario(v.comentario || '')
+    setFechaVenta((v.fecha || '').slice(0, 10) || hoy())
+    setFechaVencimiento((v.fechaVencimiento || '').slice(0, 10) || '')
+    setDescuentoTipo(v.descuentoPct > 0 ? 'global' : (v.items.some((it) => it.descuentoPct > 0) ? 'producto' : 'ninguno'))
+    setDescuentoGlobal(v.descuentoPct > 0 ? String(v.descuentoPct) : '')
+    setItems(v.items.map((it) => ({
+      productoId: it.productoId ? String(it.productoId) : '',
+      varianteId: it.varianteId ? String(it.varianteId) : '',
+      cantidad: String(it.cantidad),
+      precioUnitario: String(it.precioUnitario),
+      descuentoPct: it.descuentoPct > 0 ? String(it.descuentoPct) : '',
+    })))
+    setAplicarAnticipo(false); setVentaCredito(false); setPagoInicial(''); setMetodoPago('efectivo')
+    setFormAbierto(true)
   }
 
   // Cuando se llega desde Pedidos → "Convertir en venta": abre el formulario
@@ -134,6 +163,43 @@ export default function Ventas() {
     const itemsValidos = items.filter((it) => it.productoId && Number(it.cantidad) > 0)
     if (itemsValidos.length === 0) { notify.error('Agrega al menos un producto'); return }
     if (!clienteId) { notify.error('Selecciona un cliente para la venta'); return }
+    const itemsPayload = itemsValidos.map((it) => ({
+      productoId: Number(it.productoId),
+      varianteId: it.varianteId ? Number(it.varianteId) : null,
+      cantidad: Number(it.cantidad),
+      precioUnitario: Number(it.precioUnitario) || 0,
+      descuentoPct: descuentoTipo === 'producto' ? clamp(it.descuentoPct) : 0,
+    }))
+
+    if (editandoId) {
+      // Edición: no toca abonos, solo cliente/productos/fecha/comentario/descuento
+      const okConfirm = await confirmar(
+        `Total actualizado: ${formatCOP(totalForm)}. Los abonos ya recibidos no se modifican.`,
+        { titulo: `Editar venta ${ventas.find((v) => v.id === editandoId)?.codigo || ''}`, textoOk: 'Sí, guardar', textoCancelar: 'Revisar', peligro: false }
+      )
+      if (!okConfirm) return
+      setGuardando(true)
+      try {
+        const venta = await updateVenta(editandoId, {
+          clienteId: clienteId || null,
+          comentario,
+          fecha: fechaVenta,
+          fechaVencimiento: fechaVencimiento || null,
+          descuentoTipo: descuentoTipo === 'ninguno' ? undefined : descuentoTipo,
+          descuentoPct: descuentoTipo === 'global' ? clamp(descuentoGlobal) : undefined,
+          items: itemsPayload,
+        })
+        notify.ok('Venta actualizada')
+        for (const aviso of venta?.avisos || []) notify.error(`⚠️ ${aviso}`)
+        resetForm()
+      } catch (err) {
+        notify.error('Error al actualizar la venta: ' + err.message)
+      } finally {
+        setGuardando(false)
+      }
+      return
+    }
+
     // Confirmación con el resumen de la venta antes de registrarla
     const metodoTxt = metodoPago === 'transferencia' ? 'transferencia (no entra a caja)' : 'efectivo (entra a caja)'
     const partes = [`Total: ${formatCOP(totalForm)}`]
@@ -150,19 +216,15 @@ export default function Ventas() {
       const payloadVenta = {
         clienteId: clienteId || null,
         comentario,
+        fecha: fechaVenta,
+        fechaVencimiento: (ventaCredito && quedaDebiendo > 0) ? (fechaVencimiento || null) : null,
         aplicarAnticipo,
         // Si es contado, no mandamos pagoInicial (el backend salda todo por defecto)
         pagoInicial: ventaCredito ? pagaAhora : undefined,
         metodoPago,
         descuentoTipo: descuentoTipo === 'ninguno' ? undefined : descuentoTipo,
         descuentoPct: descuentoTipo === 'global' ? clamp(descuentoGlobal) : undefined,
-        items: itemsValidos.map((it) => ({
-          productoId: Number(it.productoId),
-          varianteId: it.varianteId ? Number(it.varianteId) : null,
-          cantidad: Number(it.cantidad),
-          precioUnitario: Number(it.precioUnitario) || 0,
-          descuentoPct: descuentoTipo === 'producto' ? clamp(it.descuentoPct) : 0,
-        })),
+        items: itemsPayload,
       }
       // Si viene de un pedido, se convierte (marca el pedido como entregado y lo liga);
       // si no, es una venta normal. Ambos comparten el mismo payload.
@@ -323,6 +385,7 @@ export default function Ventas() {
               <option value="pagado">Pagadas</option>
               <option value="pendiente">No pagadas (debe)</option>
               <option value="parcial">Abono parcial</option>
+              <option value="vencida">Vencidas</option>
             </select>
           </div>
           <div style={{ flex: 1, minWidth: 180 }}>
@@ -396,10 +459,13 @@ export default function Ventas() {
                         {puedeEditar && v.saldo > 0 && (
                           <button className="btn-primary btn-sm" onClick={() => abrirPago(v)}>💵 Abonar</button>
                         )}
+                        {puedeEditar && v.estadoPago !== 'pagado' && (
+                          <button className="btn-secondary btn-sm" onClick={() => abrirEdicion(v)} title="Editar venta">✏️</button>
+                        )}
                         <button className="btn-secondary btn-sm" onClick={() => handlePdf(v)} title="Descargar PDF">📄</button>
                         <button className="btn-secondary btn-sm" onClick={() => handleImprimir(v)} title="Imprimir">🖨️</button>
                         <button className="btn-secondary btn-sm" onClick={() => handleWhatsApp(v)} title="Enviar por WhatsApp">🟢</button>
-                        {puedeEliminar && (
+                        {puedeEliminar && v.estadoPago !== 'pagado' && (
                           <button className="btn-danger btn-sm" onClick={() => handleAnular(v)}>Anular</button>
                         )}
                       </div>
@@ -427,7 +493,7 @@ export default function Ventas() {
         <>
           <div className="overlay" onClick={resetForm} />
           <form className="modal modal-lg" onSubmit={handleSubmit}>
-            <h3>{pedidoOrigenId ? `Convertir pedido #${pedidoOrigenId} en venta` : 'Nueva venta'}</h3>
+            <h3>{editandoId ? `Editar venta ${ventas.find((v) => v.id === editandoId)?.codigo || ''}` : pedidoOrigenId ? `Convertir pedido #${pedidoOrigenId} en venta` : 'Nueva venta'}</h3>
             <div className="row">
               <div style={{ flex: 2 }}>
                 <label>Cliente *</label>
@@ -437,6 +503,10 @@ export default function Ventas() {
                     <option key={c.id} value={c.id}>{c.nombre} {c.apellidos}</option>
                   ))}
                 </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label>Fecha de la venta</label>
+                <input type="date" value={fechaVenta} onChange={(e) => setFechaVenta(e.target.value)} />
               </div>
             </div>
 
@@ -524,32 +594,47 @@ export default function Ventas() {
               )}
             </div>
 
-            {clienteSel && saldoCliente > 0 && (
+            {!editandoId && clienteSel && saldoCliente > 0 && (
               <label className="small" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontWeight: 400 }}>
                 <input type="checkbox" checked={aplicarAnticipo} onChange={(e) => setAplicarAnticipo(e.target.checked)} style={{ width: 'auto' }} />
                 Aplicar saldo a favor de {clienteSel.nombre}: <strong>{formatCOP(saldoCliente)}</strong>
               </label>
             )}
 
-            <label className="small" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontWeight: 400 }}>
-              <input type="checkbox" checked={ventaCredito} onChange={(e) => { setVentaCredito(e.target.checked); setPagoInicial('') }} style={{ width: 'auto' }} />
-              Venta a crédito (el cliente paga después o abona una parte)
-            </label>
-            {ventaCredito && (
-              <div style={{ marginTop: 8 }}>
-                <label>¿Cuánto paga ahora? (0 si queda debiendo todo)</label>
-                <input
-                  type="number" min="0" step="any" placeholder="0"
-                  value={pagoInicial}
-                  max={saldoTrasAnticipo}
-                  onChange={(e) => setPagoInicial(e.target.value)}
-                  style={{ maxWidth: 220 }}
-                />
+            {!editandoId && (
+              <label className="small" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontWeight: 400 }}>
+                <input type="checkbox" checked={ventaCredito} onChange={(e) => { setVentaCredito(e.target.checked); setPagoInicial('') }} style={{ width: 'auto' }} />
+                Venta a crédito (el cliente paga después o abona una parte)
+              </label>
+            )}
+            {!editandoId && ventaCredito && (
+              <div className="row" style={{ marginTop: 8, alignItems: 'flex-end' }}>
+                <div style={{ flex: 1, maxWidth: 220 }}>
+                  <label>¿Cuánto paga ahora? (0 si queda debiendo todo)</label>
+                  <input
+                    type="number" min="0" step="any" placeholder="0"
+                    value={pagoInicial}
+                    max={saldoTrasAnticipo}
+                    onChange={(e) => setPagoInicial(e.target.value)}
+                  />
+                </div>
+                {quedaDebiendo > 0 && (
+                  <div style={{ flex: 1, maxWidth: 220 }}>
+                    <label>Fecha límite de pago (opcional)</label>
+                    <input type="date" value={fechaVencimiento} onChange={(e) => setFechaVencimiento(e.target.value)} />
+                  </div>
+                )}
+              </div>
+            )}
+            {editandoId && (totalForm - (ventaEditando?.pagado || 0)) > 0.009 && (
+              <div style={{ marginTop: 12, maxWidth: 220 }}>
+                <label>Fecha límite de pago (opcional)</label>
+                <input type="date" value={fechaVencimiento} onChange={(e) => setFechaVencimiento(e.target.value)} />
               </div>
             )}
 
             {/* Método de pago de lo que se cobra ahora */}
-            {pagaAhora > 0 && (
+            {!editandoId && pagaAhora > 0 && (
               <div style={{ marginTop: 10 }}>
                 <label>Método de pago (de lo que se paga ahora)</label>
                 <select value={metodoPago} onChange={(e) => setMetodoPago(e.target.value)} style={{ maxWidth: 260 }}>
@@ -563,9 +648,20 @@ export default function Ventas() {
               {descuentoValor > 0 && <span className="muted">Subtotal: {formatCOP(subtotalBruto)}</span>}
               {descuentoValor > 0 && <span className="muted">Descuento{descGlobalPct > 0 ? ` (${descGlobalPct}%)` : ' por producto'}: −{formatCOP(descuentoValor)}</span>}
               <span>Total: <strong>{formatCOP(totalForm)}</strong></span>
-              {anticipoUsado > 0 && <span className="muted">Anticipo aplicado: −{formatCOP(anticipoUsado)}</span>}
-              <span>Paga ahora: <strong>{formatCOP(pagaAhora)}</strong></span>
-              {quedaDebiendo > 0 && <span className="texto-salida">Queda debiendo: <strong>{formatCOP(quedaDebiendo)}</strong></span>}
+              {editandoId ? (
+                <>
+                  <span className="muted">Ya pagado: {formatCOP(ventaEditando?.pagado || 0)}</span>
+                  {totalForm - (ventaEditando?.pagado || 0) > 0 && (
+                    <span className="texto-salida">Saldo pendiente tras el cambio: <strong>{formatCOP(Math.max(0, totalForm - (ventaEditando?.pagado || 0)))}</strong></span>
+                  )}
+                </>
+              ) : (
+                <>
+                  {anticipoUsado > 0 && <span className="muted">Anticipo aplicado: −{formatCOP(anticipoUsado)}</span>}
+                  <span>Paga ahora: <strong>{formatCOP(pagaAhora)}</strong></span>
+                  {quedaDebiendo > 0 && <span className="texto-salida">Queda debiendo: <strong>{formatCOP(quedaDebiendo)}</strong></span>}
+                </>
+              )}
             </div>
 
             <label style={{ marginTop: 10 }}>Comentario (opcional)</label>
@@ -573,7 +669,7 @@ export default function Ventas() {
 
             <div className="form-actions">
               <button type="submit" className="btn-primary" disabled={guardando}>
-                {guardando ? 'Guardando…' : 'Registrar venta'}
+                {guardando ? 'Guardando…' : editandoId ? 'Guardar cambios' : 'Registrar venta'}
               </button>
               <button type="button" className="btn-secondary" onClick={resetForm}>Cancelar</button>
             </div>
@@ -593,6 +689,7 @@ export default function Ventas() {
             <p className="muted small" style={{ marginTop: 0 }}>
               {nombreClienteVenta(ventaDetalle) || 'Sin cliente'} · {formatFecha(ventaDetalle.fecha)}
               {ventaDetalle.pedidoId && <> · Pedido #{ventaDetalle.pedidoId}</>}
+              {ventaDetalle.saldo > 0 && ventaDetalle.fechaVencimiento && <> · Vence: {formatFecha(ventaDetalle.fechaVencimiento)}</>}
               {ventaDetalle.comentario && <> · 💬 {ventaDetalle.comentario}</>}
             </p>
             <div className="table-wrap">
@@ -631,13 +728,14 @@ export default function Ventas() {
                 <div className="table-wrap" style={{ marginTop: 4 }}>
                   <table className="table compact">
                     <thead>
-                      <tr><th>Fecha</th><th>Comentario</th><th className="num">Monto</th></tr>
+                      <tr><th>Fecha</th><th>Comentario</th><th>Método</th><th className="num">Monto</th></tr>
                     </thead>
                     <tbody>
                       {ventaDetalle.pagos.map((p) => (
                         <tr key={p.id}>
                           <td className="small">{formatFecha(p.fecha)}</td>
                           <td>{p.comentario || '—'}</td>
+                          <td>{p.metodo === 'transferencia' ? 'Transferencia' : 'Efectivo'}</td>
                           <td className="num">{formatCOP(p.monto)}</td>
                         </tr>
                       ))}

@@ -1785,6 +1785,19 @@ app.post('/api/movimientos', permisoRequired('control-dinero', 'crear'), (req, r
   res.json(movimientoSalida(db.prepare('SELECT * FROM movimientos WHERE id = ?').get(r.lastInsertRowid)))
 })
 
+// Adjunta (o reemplaza) el comprobante de un movimiento ya registrado
+app.put('/api/movimientos/:id/comprobante', permisoRequired('control-dinero', 'crear'), (req, res) => {
+  const m = db.prepare('SELECT * FROM movimientos WHERE id = ?').get(req.params.id)
+  if (!m) return res.status(404).json({ error: 'Movimiento no encontrado' })
+  const { comprobante, comprobanteTipo } = req.body
+  if (!comprobante || !/^data:(.+?);base64,(.+)$/s.test(comprobante)) {
+    return res.status(400).json({ error: 'Comprobante inválido' })
+  }
+  db.prepare('UPDATE movimientos SET comprobante = ?, comprobante_tipo = ? WHERE id = ?')
+    .run(comprobante, comprobanteTipo || null, m.id)
+  res.json(movimientoSalida(db.prepare('SELECT * FROM movimientos WHERE id = ?').get(m.id)))
+})
+
 app.delete('/api/movimientos/:id', permisoRequired('control-dinero', 'eliminar'), (req, res) => {
   const m = db.prepare('SELECT origen FROM movimientos WHERE id = ?').get(req.params.id)
   if (m && m.origen !== 'manual') {
@@ -1843,6 +1856,49 @@ app.get('/api/reportes', permisoRequired('reportes', 'ver'), (req, res) => {
   }))
 
   res.json({ desde, hasta, totalBruto, totalDescuentos, totalPagado, cantidad: nominas.length, porEmpleado, nominas })
+})
+
+// Reporte de ventas por producto: unidades vendidas, ingresos brutos/netos
+// (con descuento aplicado) y número de ventas en que aparece cada producto.
+app.get('/api/reportes/ventas', permisoAnyRequired([
+  ['reportes', 'ver'],
+  ['ventas', 'ver'],
+]), (req, res) => {
+  const { desde, hasta } = req.query
+  if (!desde || !hasta) return res.status(400).json({ error: 'desde y hasta son requeridos' })
+
+  const ventas = db.prepare('SELECT * FROM ventas WHERE substr(fecha, 1, 10) BETWEEN ? AND ?').all(desde, hasta)
+  const ventaIds = new Set(ventas.map((v) => v.id))
+  const items = ventaIds.size
+    ? db.prepare(`SELECT * FROM venta_items WHERE venta_id IN (${[...ventaIds].map(() => '?').join(',')})`).all(...ventaIds)
+    : []
+
+  const descGlobalPorVenta = {}
+  for (const v of ventas) descGlobalPorVenta[v.id] = Number(v.descuento_pct) || 0
+
+  const porProductoMap = {}
+  for (const it of items) {
+    const key = it.producto_id || `__${it.producto_nombre}`
+    if (!porProductoMap[key]) {
+      porProductoMap[key] = { productoId: it.producto_id, nombre: it.producto_nombre || '— (eliminado)', unidades: 0, ingresos: 0, ventas: new Set() }
+    }
+    // Descuento de línea (modo "por producto") y descuento global de la venta (modo "global")
+    // son excluyentes entre sí, así que aplicar ambos siempre da el subtotal real cobrado.
+    const descGlobal = descGlobalPorVenta[it.venta_id] || 0
+    const subtotal = (Number(it.cantidad) || 0) * (Number(it.precio_unitario) || 0)
+      * (1 - (Number(it.descuento_pct) || 0) / 100) * (1 - descGlobal / 100)
+    porProductoMap[key].unidades += Number(it.cantidad) || 0
+    porProductoMap[key].ingresos += subtotal
+    porProductoMap[key].ventas.add(it.venta_id)
+  }
+  const porProducto = Object.values(porProductoMap)
+    .map((p) => ({ ...p, ventas: p.ventas.size }))
+    .sort((a, b) => b.ingresos - a.ingresos)
+
+  const totalUnidades = porProducto.reduce((s, p) => s + p.unidades, 0)
+  const totalIngresos = ventas.reduce((s, v) => s + (Number(v.total) || 0), 0)
+
+  res.json({ desde, hasta, cantidadVentas: ventas.length, totalUnidades, totalIngresos, porProducto })
 })
 
 // Reporte de materiales: entradas/salidas del periodo y stock disponible actual
@@ -2216,7 +2272,9 @@ function ventaSalida(v) {
   const total = Number(v.total) || 0
   const pagado = Number(v.pagado) || 0
   const saldo = Math.max(0, total - pagado)
-  const estadoPago = saldo <= 0.009 ? 'pagado' : (pagado > 0 ? 'parcial' : 'pendiente')
+  const hoyISO = new Date().toISOString().slice(0, 10)
+  const vencida = saldo > 0.009 && !!v.fecha_vencimiento && v.fecha_vencimiento.slice(0, 10) < hoyISO
+  const estadoPago = saldo <= 0.009 ? 'pagado' : vencida ? 'vencida' : (pagado > 0 ? 'parcial' : 'pendiente')
   return {
     id: v.id,
     codigo: v.codigo || `VTA-${String(v.id).padStart(4, '0')}`,
@@ -2233,6 +2291,7 @@ function ventaSalida(v) {
     estadoPago,
     pagos,
     fecha: v.fecha,
+    fechaVencimiento: v.fecha_vencimiento || '',
     comentario: v.comentario || '',
     creado: v.creado,
     items,
@@ -2242,7 +2301,7 @@ function ventaSalida(v) {
 // Núcleo de una venta: crea la venta + ítems, descuenta stock, aplica anticipo y
 // registra el ingreso. Se usa tanto en la venta directa como al convertir un pedido.
 // Devuelve { ventaId, avisos }.
-function crearVentaCore({ clienteId, items, comentario, aplicarAnticipo, pedidoId, pagoInicial, fecha, descuentoTipo, descuentoPct, metodoPago }) {
+function crearVentaCore({ clienteId, items, comentario, aplicarAnticipo, pedidoId, pagoInicial, fecha, fechaVencimiento, descuentoTipo, descuentoPct, metodoPago }) {
   const cliente = clienteId ? db.prepare('SELECT * FROM clientes WHERE id = ?').get(clienteId) : null
   if (!cliente) throw new Error('La venta requiere un cliente')
   const itemsValidos = (items || []).filter((it) => (Number(it.cantidad) || 0) > 0)
@@ -2257,9 +2316,9 @@ function crearVentaCore({ clienteId, items, comentario, aplicarAnticipo, pedidoI
   const metodo = metodoPago === 'transferencia' ? 'transferencia' : 'efectivo'
 
   const r = db.prepare(
-    `INSERT INTO ventas (codigo, cliente_id, cliente_nombre, pedido_id, total, anticipo_aplicado, pagado, descuento_pct, fecha, comentario, creado)
-     VALUES (?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?)`
-  ).run(null, clienteId || null, cliente ? `${cliente.nombre || ''} ${cliente.apellidos || ''}`.trim() : '', pedidoId || null, descGlobalPct, fechaVenta, (comentario || '').trim(), ahora)
+    `INSERT INTO ventas (codigo, cliente_id, cliente_nombre, pedido_id, total, anticipo_aplicado, pagado, descuento_pct, fecha, fecha_vencimiento, comentario, creado)
+     VALUES (?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?)`
+  ).run(null, clienteId || null, cliente ? `${cliente.nombre || ''} ${cliente.apellidos || ''}`.trim() : '', pedidoId || null, descGlobalPct, fechaVenta, fechaVencimiento || null, (comentario || '').trim(), ahora)
   const ventaId = r.lastInsertRowid
   // Código legible VTA-####
   db.prepare('UPDATE ventas SET codigo = ? WHERE id = ?').run(`VTA-${String(ventaId).padStart(4, '0')}`, ventaId)
@@ -2342,12 +2401,12 @@ app.get('/api/ventas', permisoRequired('ventas', 'ver'), (req, res) => {
 })
 
 app.post('/api/ventas', permisoRequired('ventas', 'crear'), (req, res) => {
-  const { clienteId, items, comentario, aplicarAnticipo, pagoInicial, fecha, descuentoTipo, descuentoPct, metodoPago } = req.body
+  const { clienteId, items, comentario, aplicarAnticipo, pagoInicial, fecha, fechaVencimiento, descuentoTipo, descuentoPct, metodoPago } = req.body
   const itemsValidos = (items || []).filter((it) => (Number(it.cantidad) || 0) > 0)
   if (itemsValidos.length === 0) return res.status(400).json({ error: 'Agrega al menos un producto a la venta' })
   let resultado
   const crear = db.transaction(() => {
-    resultado = crearVentaCore({ clienteId, items: itemsValidos, comentario, aplicarAnticipo, pagoInicial, fecha, descuentoTipo, descuentoPct, metodoPago })
+    resultado = crearVentaCore({ clienteId, items: itemsValidos, comentario, aplicarAnticipo, pagoInicial, fecha, fechaVencimiento, descuentoTipo, descuentoPct, metodoPago })
   })
   crear()
   const venta = ventaSalida(db.prepare('SELECT * FROM ventas WHERE id = ?').get(resultado.ventaId))
@@ -2381,6 +2440,7 @@ app.post('/api/pedidos/:id/convertir', permisoRequired('ventas', 'crear'), (req,
       aplicarAnticipo: req.body.aplicarAnticipo,
       pedidoId: pedido.id,
       pagoInicial: req.body.pagoInicial,
+      fechaVencimiento: req.body.fechaVencimiento,
       descuentoTipo: req.body.descuentoTipo,
       descuentoPct: req.body.descuentoPct,
       metodoPago: req.body.metodoPago,
@@ -2428,9 +2488,95 @@ app.post('/api/ventas/:id/pagos', permisoRequired('ventas', 'editar'), (req, res
   res.json(ventaSalida(db.prepare('SELECT * FROM ventas WHERE id = ?').get(venta.id)))
 })
 
+// Edita una venta ya registrada: cliente, productos, fecha, vencimiento, comentario
+// y descuento. No toca los abonos ya registrados (evita descuadrar caja); recalcula
+// el total y ajusta el stock (revierte el de los ítems viejos y aplica el de los nuevos).
+app.put('/api/ventas/:id', permisoRequired('ventas', 'editar'), (req, res) => {
+  const venta = db.prepare('SELECT * FROM ventas WHERE id = ?').get(req.params.id)
+  if (!venta) return res.status(404).json({ error: 'Venta no encontrada' })
+  if (ventaSalida(venta).estadoPago === 'pagado') {
+    return res.status(400).json({ error: 'La factura ya está pagada y no se puede modificar' })
+  }
+  const { clienteId, items, comentario, fecha, fechaVencimiento, descuentoTipo, descuentoPct } = req.body
+  const itemsValidos = (items || []).filter((it) => (Number(it.cantidad) || 0) > 0)
+  if (itemsValidos.length === 0) return res.status(400).json({ error: 'La venta debe tener al menos un producto' })
+  const cliente = clienteId ? db.prepare('SELECT * FROM clientes WHERE id = ?').get(clienteId) : null
+  if (!cliente) return res.status(400).json({ error: 'La venta requiere un cliente' })
+
+  const ahora = new Date().toISOString()
+  const avisos = []
+  const esGlobal = descuentoTipo === 'global'
+  const descGlobalPct = esGlobal ? Math.max(0, Math.min(100, Number(descuentoPct) || 0)) : 0
+
+  const editar = db.transaction(() => {
+    // Revierte el stock de los ítems actuales antes de reemplazarlos
+    const itemsViejos = db.prepare('SELECT * FROM venta_items WHERE venta_id = ?').all(venta.id)
+    for (const it of itemsViejos) {
+      if (!it.producto_id) continue
+      const varId = it.variante_id || variantePorDefecto(it.producto_id)?.id
+      if (varId) {
+        db.prepare('UPDATE producto_variantes SET stock = stock + ? WHERE id = ?').run(it.cantidad, varId)
+        recalcularStockProducto(it.producto_id)
+      }
+      db.prepare(
+        `INSERT INTO producto_movimientos (producto_id, variante_id, tipo, cantidad, costo_unitario, fecha, descripcion)
+         VALUES (?, ?, 'venta', ?, 0, ?, ?)`
+      ).run(it.producto_id, varId || null, -it.cantidad, ahora, `Edición venta #${venta.id} (revierte)`)
+    }
+    db.prepare('DELETE FROM venta_items WHERE venta_id = ?').run(venta.id)
+
+    // Inserta los ítems nuevos y descuenta stock
+    const itemsInsertar = esGlobal ? itemsValidos.map((it) => ({ ...it, descuentoPct: 0 })) : itemsValidos
+    const subtotal = insertarItems('venta_items', 'venta_id', venta.id, itemsInsertar, true)
+    const total = Math.round(subtotal * (1 - descGlobalPct / 100))
+
+    for (const it of itemsValidos) {
+      if (!it.productoId) continue
+      const cantidad = Number(it.cantidad) || 0
+      const producto = db.prepare('SELECT * FROM productos WHERE id = ?').get(it.productoId)
+      if (!producto) continue
+      const variante = it.varianteId
+        ? db.prepare('SELECT * FROM producto_variantes WHERE id = ? AND producto_id = ?').get(it.varianteId, producto.id)
+        : variantePorDefecto(producto.id)
+      if (!variante) { avisos.push(`${producto.nombre}: sin variante para descontar stock`); continue }
+      const nuevoStock = (Number(variante.stock) || 0) - cantidad
+      db.prepare('UPDATE producto_variantes SET stock = ? WHERE id = ?').run(nuevoStock, variante.id)
+      recalcularStockProducto(producto.id)
+      db.prepare(
+        `INSERT INTO producto_movimientos (producto_id, variante_id, tipo, cantidad, costo_unitario, fecha, descripcion)
+         VALUES (?, ?, 'venta', ?, ?, ?, ?)`
+      ).run(producto.id, variante.id, cantidad, producto.valor_compra || 0, ahora, `Edición venta #${venta.id}`)
+      if (nuevoStock < 0) avisos.push(`${producto.nombre}: stock insuficiente, quedó en ${nuevoStock}`)
+    }
+
+    db.prepare(
+      `UPDATE ventas SET cliente_id = ?, cliente_nombre = ?, total = ?, descuento_pct = ?, fecha = ?, fecha_vencimiento = ?, comentario = ? WHERE id = ?`
+    ).run(
+      clienteId, `${cliente.nombre || ''} ${cliente.apellidos || ''}`.trim(), total, descGlobalPct,
+      fecha || venta.fecha, fechaVencimiento || null, (comentario || '').trim(), venta.id
+    )
+
+    // El total bajó por debajo de lo ya pagado (quitaste productos o subiste el
+    // descuento): el cliente queda con un pago de más. No lo perdemos, avisamos
+    // para que se registre manualmente como saldo a favor si corresponde.
+    const pagadoActual = Number(venta.pagado) || 0
+    if (pagadoActual > total + 0.009) {
+      avisos.push(
+        `El nuevo total (${total}) quedó por debajo de lo ya pagado (${pagadoActual}). ` +
+        `Diferencia de ${Math.round(pagadoActual - total)} a favor del cliente: regístrala como saldo a favor si corresponde.`
+      )
+    }
+  })
+  editar()
+  res.json({ ...ventaSalida(db.prepare('SELECT * FROM ventas WHERE id = ?').get(venta.id)), avisos })
+})
+
 app.delete('/api/ventas/:id', permisoRequired('ventas', 'eliminar'), (req, res) => {
   const venta = db.prepare('SELECT * FROM ventas WHERE id = ?').get(req.params.id)
   if (!venta) return res.status(404).json({ error: 'Venta no encontrada' })
+  if (ventaSalida(venta).estadoPago === 'pagado') {
+    return res.status(400).json({ error: 'La factura ya está pagada y no se puede anular' })
+  }
   const ahora = new Date().toISOString()
   const anular = db.transaction(() => {
     // Devuelve el stock de cada ítem

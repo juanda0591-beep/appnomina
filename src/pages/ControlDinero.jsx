@@ -15,7 +15,7 @@ const formVacio = () => ({ fecha: hoy(), categoria: '', monto: '', descripcion: 
 const ORIGEN_LABEL = { nomina: 'Pago de nómina', prestamo: 'Adelanto' }
 
 export default function ControlDinero() {
-  const { movimientos, addMovimiento, deleteMovimiento } = useData()
+  const { movimientos, addMovimiento, deleteMovimiento, addComprobanteMovimiento } = useData()
   const { puede } = useAuth()
   const puedeCrear = puede('control-dinero', 'crear')
   const puedeEliminar = puede('control-dinero', 'eliminar')
@@ -24,6 +24,7 @@ export default function ControlDinero() {
   const [form, setForm] = useState(formVacio())
   const [formAbierto, setFormAbierto] = useState(false)
   const [guardando, setGuardando] = useState(false)
+  const [subiendoId, setSubiendoId] = useState(null) // id del movimiento al que se le sube comprobante
   const [balance, setBalance] = useState({ ingresos: 0, gastos: 0, balance: 0 })
 
   // Balance recalculado en memoria a partir de los movimientos cargados
@@ -35,25 +36,48 @@ export default function ControlDinero() {
 
   const setField = (field, val) => setForm((f) => ({ ...f, [field]: val }))
 
-  const onComprobante = (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+  // Valida un archivo y devuelve una promesa con { comprobante (dataURL), comprobanteTipo }.
+  // Devuelve null (y avisa) si el tipo o tamaño no son válidos.
+  const leerComprobante = (file) => {
+    if (!file) return Promise.resolve(null)
     if (!/(application\/pdf|image\/(jpeg|jpg|png))/.test(file.type)) {
       notify.error('El comprobante debe ser PDF, JPG o PNG')
-      e.target.value = ''
-      return
+      return Promise.resolve(null)
     }
     if (file.size > 5 * 1024 * 1024) {
       notify.error('El comprobante es muy pesado (máx 5 MB). Usa un archivo más liviano.')
-      e.target.value = ''
-      return
+      return Promise.resolve(null)
     }
-    const reader = new FileReader()
-    reader.onload = () => {
-      setField('comprobante', reader.result) // dataURL base64
-      setField('comprobanteTipo', file.type)
+    return new Promise((resolve) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve({ comprobante: reader.result, comprobanteTipo: file.type })
+      reader.onerror = () => { notify.error('No se pudo leer el archivo'); resolve(null) }
+      reader.readAsDataURL(file)
+    })
+  }
+
+  const onComprobante = async (e) => {
+    const datos = await leerComprobante(e.target.files?.[0])
+    e.target.value = ''
+    if (!datos) return
+    setField('comprobante', datos.comprobante)
+    setField('comprobanteTipo', datos.comprobanteTipo)
+  }
+
+  // Sube un comprobante a un movimiento ya registrado (desde el historial)
+  const onSubirComprobante = async (movId, e) => {
+    const datos = await leerComprobante(e.target.files?.[0])
+    e.target.value = ''
+    if (!datos) return
+    setSubiendoId(movId)
+    try {
+      await addComprobanteMovimiento(movId, datos)
+      notify.ok('Comprobante adjuntado')
+    } catch (err) {
+      notify.error('Error al subir el comprobante: ' + err.message)
+    } finally {
+      setSubiendoId(null)
     }
-    reader.readAsDataURL(file)
   }
 
   const resetForm = () => {
@@ -190,6 +214,17 @@ export default function ControlDinero() {
                     <td>
                       {m.tieneComprobante ? (
                         <button className="btn-secondary" onClick={() => verComprobante(m.id)}>📎 Ver</button>
+                      ) : (tab !== 'balance' && puedeCrear) ? (
+                        <label className={`btn-secondary btn-sm ${subiendoId === m.id ? 'disabled' : ''}`} style={{ cursor: 'pointer', margin: 0 }}>
+                          {subiendoId === m.id ? 'Subiendo…' : '⬆️ Subir'}
+                          <input
+                            type="file"
+                            accept="application/pdf,image/jpeg,image/png"
+                            style={{ display: 'none' }}
+                            disabled={subiendoId === m.id}
+                            onChange={(e) => onSubirComprobante(m.id, e)}
+                          />
+                        </label>
                       ) : (
                         <span className="muted small">—</span>
                       )}
