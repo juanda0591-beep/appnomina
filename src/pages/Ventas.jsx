@@ -19,7 +19,7 @@ const ESTADO_PAGO = {
 }
 
 export default function Ventas() {
-  const { ventas, clientes, productos, empresa, addVenta, updateVenta, deleteVenta, registrarPagoVenta, convertirPedido } = useData()
+  const { ventas, clientes, productos, empresa, addVenta, updateVenta, deleteVenta, registrarPagoVenta, registrarAbonoGlobal, convertirPedido } = useData()
   const { puede } = useAuth()
   const puedeCrear = puede('ventas', 'crear')
   const puedeEditar = puede('ventas', 'editar')
@@ -60,6 +60,16 @@ export default function Ventas() {
   const [pagoComentario, setPagoComentario] = useState('')
   const [pagoMetodo, setPagoMetodo] = useState('efectivo')
   const [guardandoPago, setGuardandoPago] = useState(false)
+
+  // Modal de abono global (un pago que se reparte entre todas las facturas
+  // pendientes de un cliente, empezando por las vencidas)
+  const [abonoGlobalAbierto, setAbonoGlobalAbierto] = useState(false)
+  const [agClienteId, setAgClienteId] = useState('')
+  const [agMonto, setAgMonto] = useState('')
+  const [agFecha, setAgFecha] = useState(hoy())
+  const [agMetodo, setAgMetodo] = useState('efectivo')
+  const [agComentario, setAgComentario] = useState('')
+  const [guardandoAg, setGuardandoAg] = useState(false)
 
   const ventaDetalle = ventas.find((v) => v.id === detalleId)
   const ventaPago = ventas.find((v) => v.id === pagoVentaId)
@@ -284,6 +294,67 @@ export default function Ventas() {
     }
   }
 
+  // --- Abono global (reparte un pago entre todas las facturas pendientes de un cliente) ---
+  // Mismo orden que usa el backend: vencidas primero (la más atrasada), luego el resto por fecha.
+  const facturasPendientesCliente = (cId) => {
+    if (!cId) return []
+    return ventas
+      .filter((v) => String(v.clienteId) === String(cId) && v.saldo > 0.009)
+      .sort((a, b) => {
+        const aVenc = a.estadoPago === 'vencida'
+        const bVenc = b.estadoPago === 'vencida'
+        if (aVenc && !bVenc) return -1
+        if (bVenc && !aVenc) return 1
+        if (aVenc && bVenc) return (a.fechaVencimiento || '').localeCompare(b.fechaVencimiento || '')
+        return (a.fecha || '').localeCompare(b.fecha || '')
+      })
+  }
+  const agFacturas = facturasPendientesCliente(agClienteId)
+  const agDeudaTotal = agFacturas.reduce((s, v) => s + v.saldo, 0)
+  // Vista previa del reparto: misma lógica que el backend, para mostrarla antes de confirmar
+  const agPreview = useMemo(() => {
+    let restante = Number(agMonto) || 0
+    const filas = []
+    for (const v of agFacturas) {
+      if (restante <= 0.009) break
+      const aplicado = Math.min(restante, v.saldo)
+      filas.push({ venta: v, aplicado, saldoDespues: Math.max(0, v.saldo - aplicado) })
+      restante -= aplicado
+    }
+    return { filas, sobrante: Math.max(0, restante) }
+  }, [agFacturas, agMonto])
+
+  const abrirAbonoGlobal = () => {
+    setAgClienteId(''); setAgMonto(''); setAgFecha(hoy()); setAgMetodo('efectivo'); setAgComentario('')
+    setAbonoGlobalAbierto(true)
+  }
+  const cerrarAbonoGlobal = () => setAbonoGlobalAbierto(false)
+  const handleAbonoGlobal = async (e) => {
+    e.preventDefault()
+    const monto = Number(agMonto) || 0
+    if (!agClienteId) { notify.error('Selecciona un cliente'); return }
+    if (monto <= 0) { notify.error('Indica un monto mayor a 0'); return }
+    const clienteNombre = clientes.find((c) => String(c.id) === String(agClienteId))
+    const nombreTxt = clienteNombre ? `${clienteNombre.nombre} ${clienteNombre.apellidos || ''}`.trim() : ''
+    const metodoTxt = agMetodo === 'transferencia' ? 'transferencia (no entra a caja)' : 'efectivo (entra a caja)'
+    const partes = [`Cliente: ${nombreTxt}`, `Monto: ${formatCOP(monto)} en ${metodoTxt}`, `Facturas afectadas: ${agPreview.filas.length}`]
+    if (agPreview.sobrante > 0.009) partes.push(`Sobrante como saldo a favor: ${formatCOP(agPreview.sobrante)}`)
+    const okConfirm = await confirmar(partes.join('\n'), {
+      titulo: 'Registrar abono global', textoOk: 'Sí, registrar', textoCancelar: 'Revisar', peligro: false,
+    })
+    if (!okConfirm) return
+    setGuardandoAg(true)
+    try {
+      await registrarAbonoGlobal(agClienteId, { monto, fecha: agFecha, metodo: agMetodo, comentario: agComentario })
+      notify.ok('Abono global registrado')
+      cerrarAbonoGlobal()
+    } catch (err) {
+      notify.error('Error al registrar el abono global: ' + err.message)
+    } finally {
+      setGuardandoAg(false)
+    }
+  }
+
   // --- PDF / WhatsApp / Imprimir ---
   const handlePdf = (v) => {
     try { generarPdfVenta({ empresa, venta: v, cliente: clienteDeVenta(v) }) }
@@ -351,6 +422,11 @@ export default function Ventas() {
           <button type="button" className="btn-primary" onClick={() => { resetForm(); setFormAbierto(true) }}>
             + Nueva venta
           </button>
+          {puedeEditar && (
+            <button type="button" className="btn-secondary" onClick={abrirAbonoGlobal}>
+              💰 Abono global por cliente
+            </button>
+          )}
         </div>
       )}
 
@@ -789,6 +865,108 @@ export default function Ventas() {
                 {guardandoPago ? 'Guardando…' : 'Registrar abono'}
               </button>
               <button type="button" className="btn-secondary" onClick={cerrarPago}>Cancelar</button>
+            </div>
+          </form>
+        </>
+      )}
+
+      {/* Modal abono global por cliente */}
+      {abonoGlobalAbierto && (
+        <>
+          <div className="overlay" onClick={cerrarAbonoGlobal} />
+          <form className="modal" onSubmit={handleAbonoGlobal}>
+            <h3>💰 Abono global por cliente</h3>
+            <p className="muted small" style={{ marginTop: 0 }}>
+              Reparte un solo pago entre todas las facturas pendientes del cliente. Se cubren primero
+              las vencidas (la más atrasada primero) y luego las demás por fecha.
+            </p>
+            <label>Cliente *</label>
+            <select value={agClienteId} onChange={(e) => setAgClienteId(e.target.value)} required autoFocus>
+              <option value="">— Selecciona un cliente —</option>
+              {clientes.filter((c) => c.tipo !== 'proveedor').map((c) => (
+                <option key={c.id} value={c.id}>{c.nombre} {c.apellidos}</option>
+              ))}
+            </select>
+
+            {agClienteId && agFacturas.length === 0 && (
+              <p className="muted" style={{ marginTop: 10 }}>Este cliente no tiene facturas pendientes.</p>
+            )}
+
+            {agFacturas.length > 0 && (
+              <>
+                <div className="table-wrap" style={{ marginTop: 10 }}>
+                  <table className="table compact">
+                    <thead>
+                      <tr><th>Factura</th><th>Fecha</th><th>Estado</th><th className="num">Saldo</th></tr>
+                    </thead>
+                    <tbody>
+                      {agFacturas.map((v) => (
+                        <tr key={v.id}>
+                          <td>{v.codigo || '#' + v.id}</td>
+                          <td className="small">{formatFecha(v.fecha)}</td>
+                          <td><span className={`chip ${(ESTADO_PAGO[v.estadoPago] || ESTADO_PAGO.pendiente).chip}`}>{(ESTADO_PAGO[v.estadoPago] || ESTADO_PAGO.pendiente).label}</span></td>
+                          <td className="num">{formatCOP(v.saldo)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr><td colSpan={3}><strong>Total pendiente</strong></td><td className="num"><strong>{formatCOP(agDeudaTotal)}</strong></td></tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                <div className="row" style={{ marginTop: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <label>Monto recibido</label>
+                    <input type="number" min="0" step="any" value={agMonto} onChange={(e) => setAgMonto(e.target.value)} placeholder="0" />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label>Fecha</label>
+                    <input type="date" value={agFecha} onChange={(e) => setAgFecha(e.target.value)} />
+                  </div>
+                </div>
+                <label style={{ marginTop: 10 }}>Método de pago</label>
+                <select value={agMetodo} onChange={(e) => setAgMetodo(e.target.value)}>
+                  <option value="efectivo">Efectivo (entra a caja)</option>
+                  <option value="transferencia">Transferencia bancaria (no entra a caja)</option>
+                </select>
+                <label style={{ marginTop: 10 }}>Comentario (opcional)</label>
+                <input value={agComentario} onChange={(e) => setAgComentario(e.target.value)} placeholder="Ej: abono global efectivo" />
+
+                {Number(agMonto) > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <strong className="small">Cómo se repartirá</strong>
+                    <div className="table-wrap" style={{ marginTop: 4 }}>
+                      <table className="table compact">
+                        <thead>
+                          <tr><th>Factura</th><th className="num">Se aplica</th><th className="num">Saldo después</th></tr>
+                        </thead>
+                        <tbody>
+                          {agPreview.filas.map(({ venta, aplicado, saldoDespues }) => (
+                            <tr key={venta.id}>
+                              <td>{venta.codigo || '#' + venta.id}</td>
+                              <td className="num">{formatCOP(aplicado)}</td>
+                              <td className="num">{saldoDespues > 0 ? formatCOP(saldoDespues) : <span className="chip ok">Pagada</span>}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {agPreview.sobrante > 0.009 && (
+                      <p className="muted small" style={{ marginTop: 6 }}>
+                        Sobrante de {formatCOP(agPreview.sobrante)}: quedará como saldo a favor del cliente.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+
+            <div className="form-actions">
+              <button type="submit" className="btn-primary" disabled={guardandoAg || agFacturas.length === 0}>
+                {guardandoAg ? 'Guardando…' : 'Registrar abono global'}
+              </button>
+              <button type="button" className="btn-secondary" onClick={cerrarAbonoGlobal}>Cancelar</button>
             </div>
           </form>
         </>

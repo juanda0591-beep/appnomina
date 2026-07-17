@@ -2147,11 +2147,16 @@ function pedidoSalida(p) {
     precioUnitario: it.precio_unitario,
     subtotal: (Number(it.cantidad) || 0) * (Number(it.precio_unitario) || 0),
   }))
+  // Atrasado: sigue pendiente y la fecha de entrega ya pasó (no es un estado real
+  // en BD, se deriva igual que "vencida" en ventas, para no desincronizar).
+  const hoyISO = new Date().toISOString().slice(0, 10)
+  const atrasado = p.estado === 'pendiente' && !!p.fecha_entrega && p.fecha_entrega.slice(0, 10) < hoyISO
   return {
     id: p.id,
     clienteId: p.cliente_id,
     clienteNombre: p.cliente_nombre || '',
     estado: p.estado,
+    atrasado,
     fechaEntrega: p.fecha_entrega || '',
     comentario: p.comentario || '',
     total: p.total,
@@ -2486,6 +2491,86 @@ app.post('/api/ventas/:id/pagos', permisoRequired('ventas', 'editar'), (req, res
   })
   registrar()
   res.json(ventaSalida(db.prepare('SELECT * FROM ventas WHERE id = ?').get(venta.id)))
+})
+
+// Abono global: reparte un solo pago entre todas las facturas pendientes de un
+// cliente. Orden de reparto: primero las vencidas (la más atrasada primero),
+// luego el resto por fecha (la más vieja primero) — criterio FIFO de deuda.
+// Si el monto sobra tras cubrir todo lo pendiente, el excedente queda como
+// saldo a favor del cliente (cliente_anticipos).
+app.post('/api/clientes/:id/abono-global', permisoRequired('ventas', 'editar'), (req, res) => {
+  const cliente = db.prepare('SELECT * FROM clientes WHERE id = ?').get(req.params.id)
+  if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' })
+  const monto = Number(req.body.monto) || 0
+  if (monto <= 0) return res.status(400).json({ error: 'Indica un monto mayor a 0' })
+  const fecha = req.body.fecha || new Date().toISOString()
+  const comentario = (req.body.comentario || '').trim() || 'Abono global'
+  // Solo el efectivo entra a caja; la transferencia salda las facturas pero no ingresa a caja
+  const metodo = req.body.metodo === 'transferencia' ? 'transferencia' : 'efectivo'
+
+  const facturasPendientes = db.prepare('SELECT * FROM ventas WHERE cliente_id = ?').all(cliente.id)
+    .map(ventaSalida)
+    .filter((v) => v.saldo > 0.009)
+  facturasPendientes.sort((a, b) => {
+    const aVencida = a.estadoPago === 'vencida'
+    const bVencida = b.estadoPago === 'vencida'
+    if (aVencida && !bVencida) return -1
+    if (bVencida && !aVencida) return 1
+    if (aVencida && bVencida) return (a.fechaVencimiento || '').localeCompare(b.fechaVencimiento || '')
+    return (a.fecha || '').localeCompare(b.fecha || '')
+  })
+  if (facturasPendientes.length === 0) {
+    return res.status(400).json({ error: 'Este cliente no tiene facturas pendientes' })
+  }
+
+  const ahora = new Date().toISOString()
+  const distribucion = []
+  let restante = monto
+
+  const registrar = db.transaction(() => {
+    for (const v of facturasPendientes) {
+      if (restante <= 0.009) break
+      const aplicado = Math.min(restante, v.saldo)
+      db.prepare('INSERT INTO venta_pagos (venta_id, monto, fecha, comentario, metodo, creado) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(v.id, aplicado, fecha, comentario, metodo, ahora)
+      db.prepare('UPDATE ventas SET pagado = pagado + ? WHERE id = ?').run(aplicado, v.id)
+      distribucion.push({ ventaId: v.id, codigo: v.codigo, aplicado, saldoDespues: Math.max(0, v.saldo - aplicado) })
+      restante -= aplicado
+      if (metodo === 'efectivo') {
+        registrarIngreso({
+          fecha,
+          categoria: 'Venta',
+          monto: aplicado,
+          descripcion: `Abono global — ${v.codigo || '#' + v.id} — ${cliente.nombre}${cliente.apellidos ? ' ' + cliente.apellidos : ''}`,
+          origen: 'venta',
+          refId: v.id,
+        })
+      }
+    }
+    // Sobrante: no se pierde, queda como saldo a favor del cliente para su próxima compra
+    if (restante > 0.009) {
+      const r = db.prepare(
+        `INSERT INTO cliente_anticipos (cliente_id, monto, tipo, fecha, descripcion) VALUES (?, ?, 'abono', ?, ?)`
+      ).run(cliente.id, restante, fecha, `Sobrante de abono global (${comentario})`)
+      if (metodo === 'efectivo') {
+        registrarIngreso({
+          fecha,
+          categoria: 'Anticipo de cliente',
+          monto: restante,
+          descripcion: `Sobrante de abono global de ${cliente.nombre}${cliente.apellidos ? ' ' + cliente.apellidos : ''}`,
+          origen: 'anticipo',
+          refId: r.lastInsertRowid,
+        })
+      }
+    }
+  })
+  registrar()
+
+  res.json({
+    cliente: clienteSalida(db.prepare('SELECT * FROM clientes WHERE id = ?').get(cliente.id)),
+    distribucion,
+    sobrante: Math.max(0, restante),
+  })
 })
 
 // Edita una venta ya registrada: cliente, productos, fecha, vencimiento, comentario

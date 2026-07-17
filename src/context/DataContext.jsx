@@ -237,6 +237,12 @@ export function DataProvider({ children }) {
     await recargar()
     return actualizada
   }
+  // Abono global: reparte un pago entre todas las facturas pendientes de un cliente
+  const registrarAbonoGlobal = async (clienteId, abono) => {
+    const resultado = await http(`/clientes/${clienteId}/abono-global`, { method: 'POST', body: JSON.stringify(abono) })
+    await recargar()
+    return resultado
+  }
 
   // ---------- EMPLEADOS ----------
   const addEmpleado = async (emp) => {
@@ -525,6 +531,7 @@ export function DataProvider({ children }) {
     updateVenta,
     deleteVenta,
     registrarPagoVenta,
+    registrarAbonoGlobal,
     addTarea,
     updateTarea,
     terminarTarea,

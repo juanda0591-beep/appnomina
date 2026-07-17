@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
-import { formatCOP, formatFecha } from '../utils/format.js'
+import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
 import { notify, confirmar } from '../utils/notify.js'
 import Vacio from '../components/Vacio.jsx'
 import { generarPdfPedido, pedidoPdfFile } from '../utils/pdf.js'
@@ -31,6 +31,10 @@ export default function Pedidos() {
   const [items, setItems] = useState([emptyItem()])
   const [guardando, setGuardando] = useState(false)
   const [detalleId, setDetalleId] = useState(null)
+
+  // Filtros de la lista
+  const [filtroEstado, setFiltroEstado] = useState('') // '' | pendiente | atrasado | entregado | anulado
+  const [busqueda, setBusqueda] = useState('')
 
   const pedidoDetalle = pedidos.find((p) => p.id === detalleId)
 
@@ -197,6 +201,17 @@ export default function Pedidos() {
 
   const nombreCliente = (p) => p.clienteNombre || '— sin cliente'
 
+  // --- Filtrado de la lista (estado + búsqueda por cliente/código) ---
+  const pedidosFiltrados = useMemo(() => {
+    const q = busqueda.trim().toLowerCase()
+    return pedidos.filter((p) => {
+      if (filtroEstado === 'atrasado' && !p.atrasado) return false
+      if (filtroEstado && filtroEstado !== 'atrasado' && p.estado !== filtroEstado) return false
+      if (q && !nombreCliente(p).toLowerCase().includes(q) && !String(p.id).includes(q)) return false
+      return true
+    })
+  }, [pedidos, filtroEstado, busqueda])
+
   return (
     <div>
       <h2>📝 Pedidos</h2>
@@ -213,14 +228,39 @@ export default function Pedidos() {
         </div>
       )}
 
+      {/* Barra de filtros */}
+      {pedidos.length > 0 && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <div className="row" style={{ gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            <div>
+              <label>Estado</label>
+              <select value={filtroEstado} onChange={(e) => setFiltroEstado(e.target.value)}>
+                <option value="">Todos los pedidos</option>
+                <option value="pendiente">Pendientes</option>
+                <option value="atrasado">Atrasados</option>
+                <option value="entregado">Entregados</option>
+                <option value="anulado">Anulados</option>
+              </select>
+            </div>
+            <div style={{ flex: 1, minWidth: 180 }}>
+              <label>Buscar cliente o # de pedido</label>
+              <input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Ej: Juan / 12" />
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="card">
-        <h3>Pedidos ({pedidos.length})</h3>
+        <h3>Pedidos ({pedidosFiltrados.length})</h3>
         {pedidos.length === 0 && (
           <Vacio icono="📝" titulo="Aún no hay pedidos">
             Crea el primero con el botón "+ Nuevo pedido".
           </Vacio>
         )}
-        {pedidos.length > 0 && (
+        {pedidos.length > 0 && pedidosFiltrados.length === 0 && (
+          <p className="muted">No hay pedidos que coincidan con los filtros.</p>
+        )}
+        {pedidosFiltrados.length > 0 && (
           <div className="table-wrap">
             <table className="table">
               <thead>
@@ -234,16 +274,20 @@ export default function Pedidos() {
                 </tr>
               </thead>
               <tbody>
-                {pedidos.map((p) => (
+                {pedidosFiltrados.map((p) => (
                   <tr key={p.id} className="chip-clicable" onClick={() => setDetalleId(p.id)}>
                     <td>#{p.id}</td>
                     <td>{nombreCliente(p)}</td>
                     <td className="small">{p.fechaEntrega ? formatFecha(p.fechaEntrega) : <span className="muted">—</span>}</td>
                     <td className="num">{formatCOP(p.total)}</td>
                     <td>
-                      <span className={`chip ${p.estado === 'entregado' ? 'ok' : p.estado === 'anulado' ? 'danger' : 'warn'}`}>
-                        {ESTADO_LABEL[p.estado] || p.estado}
-                      </span>
+                      {p.atrasado ? (
+                        <span className="chip danger">Atrasado</span>
+                      ) : (
+                        <span className={`chip ${p.estado === 'entregado' ? 'ok' : p.estado === 'anulado' ? 'danger' : 'warn'}`}>
+                          {ESTADO_LABEL[p.estado] || p.estado}
+                        </span>
+                      )}
                     </td>
                     <td className="num">
                       <div className="actions" style={{ justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
@@ -408,7 +452,7 @@ export default function Pedidos() {
           <div className="modal">
             <h3>Pedido #{pedidoDetalle.id}</h3>
             <p className="muted small" style={{ marginTop: 0 }}>
-              {nombreCliente(pedidoDetalle)} · {ESTADO_LABEL[pedidoDetalle.estado]}
+              {nombreCliente(pedidoDetalle)} · {pedidoDetalle.atrasado ? 'Atrasado' : ESTADO_LABEL[pedidoDetalle.estado]}
               {pedidoDetalle.fechaEntrega && <> · Entrega: {formatFecha(pedidoDetalle.fechaEntrega)}</>}
               {pedidoDetalle.comentario && <> · 💬 {pedidoDetalle.comentario}</>}
             </p>
