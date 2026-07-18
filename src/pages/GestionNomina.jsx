@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha } from '../utils/format.js'
 import { notify, confirmar } from '../utils/notify.js'
 import Vacio from '../components/Vacio.jsx'
+
+const nuevoItemTarea = () => ({ key: Math.random().toString(36).slice(2), productoId: '', procesoId: '', cantidad: '' })
 
 // Etiquetas y orden de los estados de una tarea
 const ESTADO_LABEL = {
@@ -34,7 +36,7 @@ function BarraProgreso({ valor }) {
 export default function GestionNomina() {
   const {
     empleados, productos, tareas,
-    addTarea, updateTarea, terminarTarea, deleteTarea, getTareaHistorial,
+    addTareas, updateTarea, terminarTarea, deleteTarea, getTareaHistorial,
     getTareaFotos, addTareaFoto, deleteTareaFoto,
     getEmpleado,
   } = useData()
@@ -45,20 +47,26 @@ export default function GestionNomina() {
   const puedeEliminar = puede('gestion-nomina', 'eliminar')
 
   // --- Formulario de asignación ---
+  // Un empleado puede recibir varios trabajos (producto+proceso+cantidad) de una sola vez;
+  // cada línea se guarda como una tarea independiente (progreso/fotos/historial por separado),
+  // porque cada proceso avanza y termina en su propio momento.
   const [formAbierto, setFormAbierto] = useState(false)
   const [nuevaEmpleadoId, setNuevaEmpleadoId] = useState('')
-  const [nuevaProductoId, setNuevaProductoId] = useState('')
-  const [nuevaProcesoId, setNuevaProcesoId] = useState('')
-  const [nuevaCantidad, setNuevaCantidad] = useState('')
   const [nuevaComentario, setNuevaComentario] = useState('')
+  const [nuevosItems, setNuevosItems] = useState([nuevoItemTarea()])
   const [guardando, setGuardando] = useState(false)
-
-  const productoSel = productos.find((p) => String(p.id) === String(nuevaProductoId))
 
   // --- Filtros ---
   const [filtroEmpleado, setFiltroEmpleado] = useState('')
   const [filtroCargo, setFiltroCargo] = useState('')
   const [filtroEstado, setFiltroEstado] = useState('')
+  const [filtroBuscar, setFiltroBuscar] = useState('')
+  const [filtroDesde, setFiltroDesde] = useState('')
+  const [filtroHasta, setFiltroHasta] = useState('')
+
+  // --- Paginación ---
+  const [pagina, setPagina] = useState(1)
+  const porPagina = 10
 
   // --- Edición en línea (borradores de progreso/comentario por tarea) ---
   const [borradores, setBorradores] = useState({}) // { tareaId: { progreso, comentario } }
@@ -80,6 +88,7 @@ export default function GestionNomina() {
   const nombreEmpleado = (id) => getEmpleado(id)?.nombre || '— (eliminado)'
 
   const tareasFiltradas = useMemo(() => {
+    const q = filtroBuscar.trim().toLowerCase()
     return tareas.filter((t) => {
       if (filtroEmpleado && String(t.empleadoId) !== String(filtroEmpleado)) return false
       if (filtroEstado && t.estado !== filtroEstado) return false
@@ -87,9 +96,21 @@ export default function GestionNomina() {
         const emp = getEmpleado(t.empleadoId)
         if (!emp || emp.cargo !== filtroCargo) return false
       }
+      if (filtroDesde && t.creado < filtroDesde) return false
+      if (filtroHasta && t.creado > `${filtroHasta}T23:59:59`) return false
+      if (q) {
+        const enTexto = [nombreEmpleado(t.empleadoId), t.productoNombre, t.procesoNombre, t.comentario]
+          .join(' ').toLowerCase()
+        if (!enTexto.includes(q)) return false
+      }
       return true
     })
-  }, [tareas, filtroEmpleado, filtroCargo, filtroEstado, empleados])
+  }, [tareas, filtroEmpleado, filtroCargo, filtroEstado, filtroBuscar, filtroDesde, filtroHasta, empleados])
+
+  const totalPaginas = Math.max(1, Math.ceil(tareasFiltradas.length / porPagina))
+  const tareasPagina = tareasFiltradas.slice((pagina - 1) * porPagina, pagina * porPagina)
+
+  useEffect(() => { setPagina(1) }, [filtroEmpleado, filtroCargo, filtroEstado, filtroBuscar, filtroDesde, filtroHasta])
 
   // Resumen por empleado: progreso promedio y conteo por estado
   const resumen = useMemo(() => {
@@ -110,26 +131,40 @@ export default function GestionNomina() {
 
   const resetForm = () => {
     setNuevaEmpleadoId('')
-    setNuevaProductoId('')
-    setNuevaProcesoId('')
-    setNuevaCantidad('')
     setNuevaComentario('')
+    setNuevosItems([nuevoItemTarea()])
     setFormAbierto(false)
   }
 
+  const setNuevoItemField = (key, field, val) => {
+    setNuevosItems((its) =>
+      its.map((it) => {
+        if (it.key !== key) return it
+        const next = { ...it, [field]: val }
+        // si cambia el producto, reiniciar el proceso elegido
+        if (field === 'productoId') next.procesoId = ''
+        return next
+      })
+    )
+  }
+
+  const addNuevoItemRow = () => setNuevosItems((its) => [...its, nuevoItemTarea()])
+  const removeNuevoItemRow = (key) =>
+    setNuevosItems((its) => (its.length === 1 ? its : its.filter((it) => it.key !== key)))
+
   const handleAsignar = async () => {
     if (!nuevaEmpleadoId) { notify.error('Selecciona un empleado'); return }
-    if (!nuevaProductoId || !nuevaProcesoId) { notify.error('Selecciona producto y proceso'); return }
-    if (!(Number(nuevaCantidad) > 0)) { notify.error('Indica una cantidad mayor a 0'); return }
+    const itemsValidos = nuevosItems.filter((it) => it.productoId && it.procesoId && Number(it.cantidad) > 0)
+    if (itemsValidos.length === 0) { notify.error('Agrega al menos un trabajo con producto, proceso y cantidad'); return }
     setGuardando(true)
     try {
-      await addTarea({
+      await addTareas(itemsValidos.map((it) => ({
         empleadoId: nuevaEmpleadoId,
-        productoId: nuevaProductoId,
-        procesoId: nuevaProcesoId,
-        cantidad: Number(nuevaCantidad),
+        productoId: it.productoId,
+        procesoId: it.procesoId,
+        cantidad: Number(it.cantidad),
         comentario: nuevaComentario,
-      })
+      })))
       resetForm()
     } catch (e) {
       notify.error('Error al asignar la tarea: ' + e.message)
@@ -141,15 +176,20 @@ export default function GestionNomina() {
   // Devuelve el valor de edición (borrador si existe, si no el de la tarea)
   const valorProgreso = (t) => (borradores[t.id]?.progreso ?? t.progreso)
   const valorComentario = (t) => (borradores[t.id]?.comentario ?? t.comentario)
+  const valorCantidad = (t) => (borradores[t.id]?.cantidad ?? t.cantidad)
+  const valorEmpleadoId = (t) => (borradores[t.id]?.empleadoId ?? String(t.empleadoId || ''))
 
   const setBorrador = (id, campo, val) =>
     setBorradores((b) => ({ ...b, [id]: { ...b[id], [campo]: val } }))
 
   const guardarCambios = async (t) => {
+    if (!(Number(valorCantidad(t)) > 0)) { notify.error('Indica una cantidad mayor a 0'); return }
     try {
       await updateTarea(t.id, {
         progreso: Number(valorProgreso(t)),
         comentario: valorComentario(t),
+        cantidad: Number(valorCantidad(t)),
+        empleadoId: Number(valorEmpleadoId(t)),
       })
       // limpiar el borrador de esa tarea
       setBorradores((b) => {
@@ -166,6 +206,15 @@ export default function GestionNomina() {
     if (!(await confirmar('¿Marcar esta tarea como terminada? Pasará a estar lista para pago de nómina.', { titulo: 'Terminar tarea', textoOk: 'Sí, terminar', peligro: false }))) return
     try {
       await terminarTarea(t.id)
+    } catch (e) {
+      notify.error('Error: ' + e.message)
+    }
+  }
+
+  const handleReabrir = async (t) => {
+    if (!(await confirmar('¿Reabrir esta tarea? Volverá a "en progreso".', { titulo: 'Reabrir tarea', textoOk: 'Sí, reabrir', peligro: false }))) return
+    try {
+      await updateTarea(t.id, { estado: 'en_progreso' })
     } catch (e) {
       notify.error('Error: ' + e.message)
     }
@@ -196,7 +245,10 @@ export default function GestionNomina() {
 
   const hayBorrador = (t) =>
     borradores[t.id] &&
-    (Number(valorProgreso(t)) !== t.progreso || valorComentario(t) !== t.comentario)
+    (Number(valorProgreso(t)) !== t.progreso ||
+      valorComentario(t) !== t.comentario ||
+      Number(valorCantidad(t)) !== t.cantidad ||
+      valorEmpleadoId(t) !== String(t.empleadoId || ''))
 
   // --- Registro fotográfico ---
   const verFotos = async (t) => {
@@ -305,6 +357,29 @@ export default function GestionNomina() {
           </div>
         )}
 
+        {!bloqueada && (
+          <div className="row" style={{ marginTop: 4, alignItems: 'flex-end' }}>
+            <div style={{ flex: 2 }}>
+              <label className="small">Empleado asignado</label>
+              <select value={valorEmpleadoId(t)} onChange={(e) => setBorrador(t.id, 'empleadoId', e.target.value)}>
+                {empleados.map((emp) => (
+                  <option key={emp.id} value={emp.id}>
+                    {emp.nombre}{emp.cargo ? ` (${emp.cargo})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="small">Cantidad</label>
+              <input
+                type="number" min="0" step="any"
+                value={valorCantidad(t)}
+                onChange={(e) => setBorrador(t.id, 'cantidad', e.target.value)}
+              />
+            </div>
+          </div>
+        )}
+
         {bloqueada && t.comentario && (
           <p className="muted small" style={{ marginTop: 8 }}>💬 {t.comentario}</p>
         )}
@@ -317,6 +392,11 @@ export default function GestionNomina() {
               </button>
               {t.estado !== 'terminada' && (
                 <button className="btn-primary btn-sm" onClick={() => handleTerminar(t)}>✓ Marcar terminada</button>
+              )}
+              {t.estado === 'terminada' && (
+                <button className="btn-secondary btn-sm" onClick={() => handleReabrir(t)} title="Reabrir" aria-label="Reabrir">
+                  ◀ Reabrir
+                </button>
               )}
             </>
           )}
@@ -413,15 +493,32 @@ export default function GestionNomina() {
       {/* Asignar tarea */}
       {puedeCrear && (
         <div className="form-actions">
-          <button type="button" className="btn-primary" onClick={() => setFormAbierto(true)}>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={empleados.length === 0 || productos.length === 0}
+            title={empleados.length === 0 || productos.length === 0 ? 'Necesitas empleados y productos creados para asignar tareas' : undefined}
+            onClick={() => setFormAbierto(true)}
+          >
             + Asignar tarea
           </button>
+          {(empleados.length === 0 || productos.length === 0) && (
+            <span className="muted small">Necesitas empleados y productos creados para asignar tareas.</span>
+          )}
         </div>
       )}
 
       {/* Filtros */}
       <div className="card">
-        <div className="row">
+        <label className="small">Buscar</label>
+        <input
+          type="text"
+          placeholder="🔎 Buscar empleado, producto, proceso o comentario"
+          value={filtroBuscar}
+          onChange={(e) => setFiltroBuscar(e.target.value)}
+        />
+
+        <div className="row" style={{ marginTop: 10 }}>
           <div style={{ flex: 1 }}>
             <label className="small">Empleado</label>
             <select value={filtroEmpleado} onChange={(e) => setFiltroEmpleado(e.target.value)}>
@@ -450,6 +547,23 @@ export default function GestionNomina() {
             </select>
           </div>
         </div>
+
+        <div className="row" style={{ marginTop: 10 }}>
+          <div style={{ flex: 1 }}>
+            <label className="small">Desde</label>
+            <input type="date" value={filtroDesde} onChange={(e) => setFiltroDesde(e.target.value)} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label className="small">Hasta</label>
+            <input type="date" value={filtroHasta} onChange={(e) => setFiltroHasta(e.target.value)} />
+          </div>
+          <button
+            className="btn-secondary"
+            onClick={() => { setFiltroBuscar(''); setFiltroEmpleado(''); setFiltroCargo(''); setFiltroEstado(''); setFiltroDesde(''); setFiltroHasta('') }}
+          >
+            Limpiar
+          </button>
+        </div>
       </div>
 
       {/* Lista de tareas */}
@@ -475,7 +589,7 @@ export default function GestionNomina() {
                 </tr>
               </thead>
               <tbody>
-                {tareasFiltradas.map((t) => (
+                {tareasPagina.map((t) => (
                   <tr key={t.id} className="chip-clicable" onClick={() => setTareaDetalleId(t.id)}>
                     <td className="muted small">{formatFecha(t.creado)}</td>
                     <td><strong>{nombreEmpleado(t.empleadoId)}</strong></td>
@@ -491,6 +605,26 @@ export default function GestionNomina() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {tareasFiltradas.length > 0 && (
+          <div className="actions" style={{ marginTop: 10 }}>
+            <button
+              className="btn-secondary btn-sm"
+              disabled={pagina === 1}
+              onClick={() => setPagina(pagina - 1)}
+            >
+              ⬅ Anterior
+            </button>
+            <span className="muted small">Página {pagina} de {totalPaginas}</span>
+            <button
+              className="btn-secondary btn-sm"
+              disabled={pagina === totalPaginas}
+              onClick={() => setPagina(pagina + 1)}
+            >
+              Siguiente ➡
+            </button>
           </div>
         )}
       </div>
@@ -536,7 +670,7 @@ export default function GestionNomina() {
           <div className="modal">
             <h3>Asignar tarea</h3>
             <div className="row">
-              <div style={{ flex: 2 }}>
+              <div style={{ flex: 1 }}>
                 <label>Empleado</label>
                 <select value={nuevaEmpleadoId} onChange={(e) => setNuevaEmpleadoId(e.target.value)}>
                   <option value="">— Seleccionar —</option>
@@ -547,40 +681,64 @@ export default function GestionNomina() {
                   ))}
                 </select>
               </div>
-              <div style={{ flex: 2 }}>
-                <label>Producto</label>
-                <select
-                  value={nuevaProductoId}
-                  onChange={(e) => { setNuevaProductoId(e.target.value); setNuevaProcesoId('') }}
-                >
-                  <option value="">— Producto —</option>
-                  {productos.map((p) => (
-                    <option key={p.id} value={p.id}>{p.nombre}</option>
-                  ))}
-                </select>
-              </div>
-              <div style={{ flex: 2 }}>
-                <label>Proceso</label>
-                <select
-                  value={nuevaProcesoId}
-                  disabled={!productoSel}
-                  onChange={(e) => setNuevaProcesoId(e.target.value)}
-                >
-                  <option value="">— Proceso —</option>
-                  {productoSel?.procesos.map((p) => (
-                    <option key={p.id} value={p.id}>{p.nombre} ({formatCOP(p.pago)})</option>
-                  ))}
-                </select>
-              </div>
-              <div style={{ flex: 1 }}>
-                <label>Cantidad</label>
-                <input
-                  type="number" min="0" step="any" placeholder="0"
-                  value={nuevaCantidad}
-                  onChange={(e) => setNuevaCantidad(e.target.value)}
-                />
-              </div>
             </div>
+
+            <p className="muted small" style={{ marginTop: 12, marginBottom: 4 }}>
+              Trabajos a asignar (puedes agregar varios productos/procesos para el mismo empleado)
+            </p>
+            <div className="table-wrap">
+              <table className="table compact">
+                <thead>
+                  <tr>
+                    <th>Producto</th>
+                    <th>Proceso</th>
+                    <th className="num">Cantidad</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {nuevosItems.map((it) => {
+                    const producto = productos.find((p) => String(p.id) === String(it.productoId))
+                    return (
+                      <tr key={it.key}>
+                        <td>
+                          <select value={it.productoId} onChange={(e) => setNuevoItemField(it.key, 'productoId', e.target.value)}>
+                            <option value="">— Producto —</option>
+                            {productos.map((p) => (
+                              <option key={p.id} value={p.id}>{p.nombre}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>
+                          <select
+                            value={it.procesoId}
+                            disabled={!producto}
+                            onChange={(e) => setNuevoItemField(it.key, 'procesoId', e.target.value)}
+                          >
+                            <option value="">— Proceso —</option>
+                            {producto?.procesos.map((p) => (
+                              <option key={p.id} value={p.id}>{p.nombre} ({formatCOP(p.pago)})</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="num">
+                          <input
+                            type="number" min="0" step="any" placeholder="0"
+                            value={it.cantidad}
+                            onChange={(e) => setNuevoItemField(it.key, 'cantidad', e.target.value)}
+                          />
+                        </td>
+                        <td>
+                          <button className="btn-icon danger" title="Quitar" aria-label="Quitar" onClick={() => removeNuevoItemRow(it.key)}>✕</button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <button className="btn-secondary" onClick={addNuevoItemRow}>+ Agregar trabajo</button>
+
             <div style={{ marginTop: 10 }}>
               <label>Comentario (opcional)</label>
               <input
@@ -590,9 +748,6 @@ export default function GestionNomina() {
                 style={{ width: '100%' }}
               />
             </div>
-            {(empleados.length === 0 || productos.length === 0) && (
-              <p className="muted small">Necesitas empleados y productos creados para asignar tareas.</p>
-            )}
             <div className="form-actions">
               <button className="btn-primary" onClick={handleAsignar} disabled={guardando}>
                 {guardando ? 'Guardando…' : 'Asignar tarea'}

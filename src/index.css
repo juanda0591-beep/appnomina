@@ -276,6 +276,7 @@ h2 { margin-top: 0; }
 .card:hover { box-shadow: 0 6px 20px rgba(15, 23, 42, .07); border-color: #d5dde8; }
 .card h3 { margin-top: 0; }
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.card-alerta { background: #fef2f2; border-color: #fecaca; }
 
 label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin: 10px 0 4px; }
 label.small { font-size: 12px; }

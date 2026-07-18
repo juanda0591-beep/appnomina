@@ -996,6 +996,7 @@ app.get('/api/tareas', permisoAnyRequired([
 app.post('/api/tareas', permisoRequired('gestion-nomina', 'crear'), (req, res) => {
   const { empleadoId, productoId, procesoId, cantidad, comentario } = req.body
   if (!empleadoId) return res.status(400).json({ error: 'Selecciona un empleado' })
+  if (!(Number(cantidad) > 0)) return res.status(400).json({ error: 'Indica una cantidad mayor a 0' })
 
   const producto = productoId ? db.prepare('SELECT * FROM productos WHERE id = ?').get(productoId) : null
   const proceso = procesoId ? db.prepare('SELECT * FROM procesos WHERE id = ?').get(procesoId) : null
@@ -1026,9 +1027,22 @@ app.put('/api/tareas/:id', permisoRequired('gestion-nomina', 'editar'), (req, re
     return res.status(400).json({ error: 'La tarea ya fue pagada; no se puede modificar.' })
   }
 
-  const { progreso, comentario, estado } = req.body
+  const { progreso, comentario, estado, cantidad, empleadoId } = req.body
   const nuevoProgreso = progreso == null ? tarea.progreso : Math.max(0, Math.min(100, Math.round(Number(progreso) || 0)))
   const nuevoComentario = comentario == null ? tarea.comentario : String(comentario)
+
+  if (cantidad != null && !(Number(cantidad) > 0)) {
+    return res.status(400).json({ error: 'Indica una cantidad mayor a 0' })
+  }
+  const nuevaCantidad = cantidad == null ? tarea.cantidad : Number(cantidad)
+
+  // Reasignar empleado: el pago ya calculado (pago x und) no cambia, solo a quién se le atribuye
+  let nuevoEmpleadoId = tarea.empleado_id
+  if (empleadoId != null) {
+    const empleado = db.prepare('SELECT id FROM empleados WHERE id = ?').get(empleadoId)
+    if (!empleado) return res.status(400).json({ error: 'Empleado no encontrado' })
+    nuevoEmpleadoId = empleado.id
+  }
 
   // Deriva el estado automático a partir del progreso, salvo que se fije explícitamente
   let nuevoEstado = estado || tarea.estado
@@ -1040,18 +1054,24 @@ app.put('/api/tareas/:id', permisoRequired('gestion-nomina', 'editar'), (req, re
 
   const ahora = new Date().toISOString()
   const tx = db.transaction(() => {
-    db.prepare('UPDATE tareas SET progreso = ?, comentario = ?, estado = ?, actualizado = ? WHERE id = ?')
-      .run(nuevoProgreso, nuevoComentario, nuevoEstado, ahora, tarea.id)
+    db.prepare('UPDATE tareas SET progreso = ?, comentario = ?, estado = ?, cantidad = ?, empleado_id = ?, actualizado = ? WHERE id = ?')
+      .run(nuevoProgreso, nuevoComentario, nuevoEstado, nuevaCantidad, nuevoEmpleadoId, ahora, tarea.id)
 
     const cambioProgreso = nuevoProgreso !== tarea.progreso
     const cambioComentario = nuevoComentario !== (tarea.comentario || '')
-    if (cambioProgreso || cambioComentario) {
+    const cambioEmpleado = nuevoEmpleadoId !== tarea.empleado_id
+    const cambioCantidad = nuevaCantidad !== tarea.cantidad
+    if (cambioProgreso || cambioComentario || cambioEmpleado || cambioCantidad) {
+      const notas = []
+      if (cambioEmpleado) notas.push(`Reasignado a ${db.prepare('SELECT nombre FROM empleados WHERE id = ?').get(nuevoEmpleadoId)?.nombre || '—'}`)
+      if (cambioCantidad) notas.push(`Cantidad ${tarea.cantidad} → ${nuevaCantidad}`)
+      if (cambioComentario) notas.push(nuevoComentario)
       insertTareaHistorial.run(
         tarea.id,
         req.usuario || '',
         tarea.progreso,
         nuevoProgreso,
-        cambioComentario ? nuevoComentario : null,
+        notas.length ? notas.join(' — ') : null,
         ahora,
       )
     }
@@ -1078,13 +1098,46 @@ app.post('/api/tareas/:id/terminar', permisoRequired('gestion-nomina', 'editar')
 })
 
 app.delete('/api/tareas/:id', permisoRequired('gestion-nomina', 'eliminar'), (req, res) => {
-  const tarea = db.prepare('SELECT estado FROM tareas WHERE id = ?').get(req.params.id)
+  const tarea = db.prepare('SELECT * FROM tareas WHERE id = ?').get(req.params.id)
   if (!tarea) return res.status(404).json({ error: 'Tarea no encontrada' })
   if (tarea.estado === 'pagada') {
     return res.status(400).json({ error: 'La tarea ya fue pagada; no se puede eliminar.' })
   }
+  const empleado = db.prepare('SELECT nombre FROM empleados WHERE id = ?').get(tarea.empleado_id)
+  db.prepare(
+    `INSERT INTO tarea_eliminada_log (tarea_id, empleado_nombre, producto_nombre, proceso_nombre, cantidad, progreso, estado, comentario, usuario, fecha)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    tarea.id,
+    empleado?.nombre || '— (eliminado)',
+    tarea.producto_nombre || '',
+    tarea.proceso_nombre || '',
+    tarea.cantidad,
+    tarea.progreso,
+    tarea.estado,
+    tarea.comentario || '',
+    req.usuario || '',
+    new Date().toISOString(),
+  )
   db.prepare('DELETE FROM tareas WHERE id = ?').run(req.params.id)
   res.json({ ok: true })
+})
+
+app.get('/api/tareas/eliminadas', permisoRequired('gestion-nomina', 'ver'), (req, res) => {
+  const rows = db.prepare('SELECT * FROM tarea_eliminada_log ORDER BY fecha DESC, id DESC LIMIT 200').all()
+  res.json(rows.map((r) => ({
+    id: r.id,
+    tareaId: r.tarea_id,
+    empleadoNombre: r.empleado_nombre || '',
+    productoNombre: r.producto_nombre || '',
+    procesoNombre: r.proceso_nombre || '',
+    cantidad: r.cantidad,
+    progreso: r.progreso,
+    estado: r.estado,
+    comentario: r.comentario || '',
+    usuario: r.usuario || '',
+    fecha: r.fecha,
+  })))
 })
 
 app.get('/api/tareas/:id/historial', permisoRequired('gestion-nomina', 'ver'), (req, res) => {

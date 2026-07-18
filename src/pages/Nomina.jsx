@@ -3,6 +3,7 @@ import { useData } from '../context/DataContext.jsx'
 import { formatCOP, hoyISO } from '../utils/format.js'
 import { generarPdfNomina } from '../utils/pdf.js'
 import { notify, confirmar } from '../utils/notify.js'
+import Vacio from '../components/Vacio.jsx'
 
 const nuevoItem = () => ({ key: Math.random().toString(36).slice(2), productoId: '', procesoId: '', cantidad: '' })
 
@@ -323,7 +324,7 @@ export default function Nomina() {
                   <td className="num">{formatCOP(linea?.pago || 0)}</td>
                   <td className="num"><strong>{formatCOP(linea?.subtotal || 0)}</strong></td>
                   <td>
-                    <button className="btn-icon danger" onClick={() => removeItemRow(it.key)}>✕</button>
+                    <button className="btn-icon danger" title="Quitar" aria-label="Quitar" onClick={() => removeItemRow(it.key)}>✕</button>
                   </td>
                 </tr>
               )
@@ -340,9 +341,13 @@ export default function Nomina() {
       {/* Descuentos de préstamos */}
       <div className="card">
         <h3>Descuentos de préstamos</h3>
-        {!empleadoId && <p className="muted">Selecciona un empleado para ver sus préstamos.</p>}
+        {!empleadoId && (
+          <Vacio icono="👷" titulo="Selecciona un empleado">
+            Elige un empleado arriba para ver sus préstamos.
+          </Vacio>
+        )}
         {empleadoId && prestamos.length === 0 && (
-          <p className="muted">Este empleado no tiene préstamos pendientes. 🎉</p>
+          <Vacio icono="🎉" titulo="Sin préstamos pendientes" />
         )}
         {prestamos.map((p) => (
           <div className="row prestamo-row" key={p.id}>

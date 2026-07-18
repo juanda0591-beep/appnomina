@@ -122,11 +122,19 @@ export default function Productos() {
 
   const handleSubmitEntrada = async (e) => {
     e.preventDefault()
-    if (!(Number(entradaForm.cantidad) > 0)) { notify.error('Indica una cantidad mayor a 0'); return }
+    const cant = Number(entradaForm.cantidad)
+    if (!(cant > 0)) { notify.error('Indica una cantidad mayor a 0'); return }
+
+    const ok = await confirmar(
+      `¿Registrar entrada de ${cant} unidad(es) de "${entradaProd.nombre}"?`,
+      { titulo: 'Registrar entrada', textoOk: 'Sí, registrar', peligro: false }
+    )
+    if (!ok) return
+
     setGuardandoEntrada(true)
     try {
       await registrarEntradaProducto(entradaProd.id, {
-        cantidad: Number(entradaForm.cantidad),
+        cantidad: cant,
         costoUnitario: Number(entradaForm.costoUnitario) || 0,
         fecha: entradaForm.fecha,
         descripcion: entradaForm.descripcion,
@@ -456,7 +464,7 @@ export default function Productos() {
                     onChange={(e) => setProcesoField(i, 'pago', e.target.value)}
                     placeholder="Pago x unidad"
                   />
-                  <button type="button" className="btn-icon danger" onClick={() => removeProcesoRow(i)}>
+                  <button type="button" className="btn-icon danger" title="Quitar proceso" aria-label="Quitar proceso" onClick={() => removeProcesoRow(i)}>
                     ✕
                   </button>
                 </div>
@@ -501,7 +509,7 @@ export default function Productos() {
                         <span className="muted small" style={{ flex: 1 }}>
                           {m.porColor ? unidadDeFamilia(m.familia) : unidadDeMaterial(m.materialId)}
                         </span>
-                        <button type="button" className="btn-icon danger" onClick={() => removeRecetaFila(i, mi)}>
+                        <button type="button" className="btn-icon danger" title="Quitar material" aria-label="Quitar material" onClick={() => removeRecetaFila(i, mi)}>
                           ✕
                         </button>
                       </div>

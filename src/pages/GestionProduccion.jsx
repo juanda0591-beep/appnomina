@@ -46,7 +46,7 @@ function AvisoMaterial({ mrp }) {
   }
   const faltantes = mrp.items.filter((i) => i.faltante > 0)
   return (
-    <div className="card" style={{ background: '#fef2f2', border: '1px solid #fecaca', marginTop: 10, marginBottom: 0 }}>
+    <div className="card card-alerta" style={{ marginTop: 10, marginBottom: 0 }}>
       <strong className="texto-salida">⚠️ Material insuficiente en stock</strong>
       <p className="muted small" style={{ margin: '4px 0 0' }}>
         Se puede crear igual (el stock quedará en negativo), pero faltaría:
@@ -947,7 +947,7 @@ export default function GestionProduccion() {
                           )}
                           {puedeEditar && estado === 'en_progreso' && (
                             <>
-                              <button className="btn-secondary btn-sm" onClick={() => handleCambiarEstado(orden, 'pendiente')} title="Volver a pendiente">◀</button>
+                              <button className="btn-secondary btn-sm" onClick={() => handleCambiarEstado(orden, 'pendiente')} title="Volver a pendiente" aria-label="Volver a pendiente">◀</button>
                               <button className="btn-primary btn-sm" disabled={!!motivo} title={motivo || 'Marcar terminada'} onClick={() => handleCambiarEstado(orden, 'terminada')}>✓ Terminar</button>
                             </>
                           )}
@@ -955,7 +955,7 @@ export default function GestionProduccion() {
                             <button className="btn-secondary btn-sm" onClick={() => handleCambiarEstado(orden, 'en_progreso')} title="Reabrir">◀ Reabrir</button>
                           )}
                           {puedeEditar && (estado === 'pendiente' || estado === 'en_progreso') && (
-                            <button className="btn-danger btn-sm" onClick={() => handleCancelarOrden(orden)} title="Cancelar orden">✕</button>
+                            <button className="btn-danger btn-sm" onClick={() => handleCancelarOrden(orden)} title="Cancelar orden" aria-label="Cancelar orden">✕</button>
                           )}
                         </div>
                       </div>

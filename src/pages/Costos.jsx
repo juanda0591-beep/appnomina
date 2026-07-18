@@ -360,7 +360,7 @@ export default function Costos() {
                     <input type="number" min="0" step="any" value={it.precioUnitario ?? ''} onChange={(e) => setEnLista('insumos', i, 'precioUnitario', e.target.value)} placeholder="0" />
                   </td>
                   <td className="num"><strong>{formatCOP((Number(it.cantidad) || 0) * (Number(it.precioUnitario) || 0))}</strong></td>
-                  <td><button className="btn-icon danger" onClick={() => quitarDeLista('insumos', i)}>✕</button></td>
+                  <td><button className="btn-icon danger" title="Quitar" aria-label="Quitar" onClick={() => quitarDeLista('insumos', i)}>✕</button></td>
                 </tr>
               ))}
             </tbody>
@@ -413,7 +413,7 @@ export default function Costos() {
                       <input type="number" min="0" step="any" value={m.valor ?? ''} onChange={(e) => setEnLista('manoObra', i, 'valor', e.target.value)} placeholder="0" />
                     </td>
                     <td className="num"><strong>{formatCOP(sub)}</strong></td>
-                    <td><button className="btn-icon danger" onClick={() => quitarDeLista('manoObra', i)}>✕</button></td>
+                    <td><button className="btn-icon danger" title="Quitar" aria-label="Quitar" onClick={() => quitarDeLista('manoObra', i)}>✕</button></td>
                   </tr>
                 )
               })}
@@ -466,7 +466,7 @@ export default function Costos() {
                       <input type="number" min="0" step="any" value={it.montoPeriodo ?? ''} onChange={(e) => setEnLista('indirectos', i, 'montoPeriodo', e.target.value)} placeholder="0" />
                     </td>
                     <td className="num">{formatCOP(porUnidad)}</td>
-                    <td><button className="btn-icon danger" onClick={() => quitarDeLista('indirectos', i)}>✕</button></td>
+                    <td><button className="btn-icon danger" title="Quitar" aria-label="Quitar" onClick={() => quitarDeLista('indirectos', i)}>✕</button></td>
                   </tr>
                 )
               })}
@@ -578,7 +578,7 @@ export default function Costos() {
                       {e.alerta && ' ⚠️'}
                     </td>
                     <td className="num">{formatCOP(e.gananciaTramo || 0)}</td>
-                    <td><button className="btn-icon danger" onClick={() => quitarDeLista('tramos', i)}>✕</button></td>
+                    <td><button className="btn-icon danger" title="Quitar" aria-label="Quitar" onClick={() => quitarDeLista('tramos', i)}>✕</button></td>
                   </tr>
                 )
               })}

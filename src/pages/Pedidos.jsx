@@ -378,7 +378,7 @@ export default function Pedidos() {
                         <input type="number" min="0" step="any" value={it.precioUnitario} onChange={(e) => setItem(i, 'precioUnitario', e.target.value)} placeholder="0" />
                       </td>
                       <td className="num">{formatCOP((Number(it.cantidad) || 0) * (Number(it.precioUnitario) || 0))}</td>
-                      <td><button type="button" className="btn-icon danger" onClick={() => removeItem(i)}>✕</button></td>
+                      <td><button type="button" className="btn-icon danger" title="Quitar" aria-label="Quitar" onClick={() => removeItem(i)}>✕</button></td>
                     </tr>
                     )
                   })}

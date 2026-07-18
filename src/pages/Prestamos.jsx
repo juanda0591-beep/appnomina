@@ -98,6 +98,7 @@ export default function Prestamos() {
                         <button
                           className="btn-icon danger"
                           title="Eliminar"
+                          aria-label="Eliminar"
                           onClick={async () => {
                             if (await confirmar('¿Eliminar este préstamo?')) deletePrestamo(p.id)
                           }}

@@ -83,7 +83,7 @@ export default function ProduccionDashboard() {
 
       {/* Órdenes atrasadas */}
       {data.ordenesAtrasadas && data.ordenesAtrasadas.length > 0 && (
-        <div className="card" style={{ background: '#fef2f2', border: '1px solid #fecaca' }}>
+        <div className="card card-alerta">
           <h3>⚠️ Órdenes atrasadas ({data.ordenesAtrasadas.length})</h3>
           <p className="muted small">Pasaron su fecha de entrega y todavía no están terminadas.</p>
           <div className="table-wrap">

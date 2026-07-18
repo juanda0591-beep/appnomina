@@ -160,6 +160,21 @@ db.exec(`
     FOREIGN KEY (tarea_id) REFERENCES tareas(id) ON DELETE CASCADE
   );
 
+  -- Snapshot de tareas eliminadas (no referencia tareas.id: debe sobrevivir al borrado)
+  CREATE TABLE IF NOT EXISTS tarea_eliminada_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tarea_id INTEGER NOT NULL,
+    empleado_nombre TEXT,
+    producto_nombre TEXT,
+    proceso_nombre TEXT,
+    cantidad REAL,
+    progreso INTEGER,
+    estado TEXT,
+    comentario TEXT,
+    usuario TEXT,
+    fecha TEXT
+  );
+
   CREATE TABLE IF NOT EXISTS app_secret (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     secret TEXT NOT NULL

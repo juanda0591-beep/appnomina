@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
 import { generarPdfReporte, generarPdfMovimientos, generarPdfFabricacion, generarPdfReporteMateriales, descargarCSV } from '../utils/pdf.js'
 import { notify, preguntarTexto } from '../utils/notify.js'
+import Vacio from '../components/Vacio.jsx'
 
 function inicioDeMes() {
   const d = new Date()
@@ -249,7 +250,9 @@ export default function Reportes() {
         </div>
 
         {fabricacion.length === 0 && (
-          <p className="muted">No hay órdenes de producción en este periodo.</p>
+          <Vacio icono="🏭" titulo="Sin órdenes en este periodo">
+            Ajusta el rango de fechas o crea una orden desde Gestión de Producción.
+          </Vacio>
         )}
 
         {fabricacion.length > 0 && (
@@ -377,7 +380,11 @@ export default function Reportes() {
             Periodo: {formatFecha(desde)} — {formatFecha(hasta)} · {repVentas.cantidadVentas} ventas registradas.
           </p>
 
-          {repVentas.porProducto.length === 0 && <p className="muted">No hay ventas en este periodo.</p>}
+          {repVentas.porProducto.length === 0 && (
+            <Vacio icono="🛒" titulo="Sin ventas en este periodo">
+              Ajusta el rango de fechas para ver otras ventas.
+            </Vacio>
+          )}
           {repVentas.porProducto.length > 0 && (
             <>
               <div className="cards-grid">
@@ -477,7 +484,11 @@ export default function Reportes() {
             </div>
           </div>
 
-          {repMateriales.materiales.length === 0 && <p className="muted">No hay materiales registrados.</p>}
+          {repMateriales.materiales.length === 0 && (
+            <Vacio icono="🧱" titulo="Sin materiales registrados">
+              Registra materiales desde la sección de Materiales.
+            </Vacio>
+          )}
           {repMateriales.materiales.length > 0 && (
             <div className="table-wrap">
               <table className="table">
@@ -596,7 +607,11 @@ export default function Reportes() {
               Periodo: {formatFecha(reporte.desde)} — {formatFecha(reporte.hasta)}
             </p>
 
-            {reporte.cantidad === 0 && <p className="muted">No hay pagos en este periodo.</p>}
+            {reporte.cantidad === 0 && (
+              <Vacio icono="📚" titulo="Sin pagos en este periodo">
+                Ajusta el rango de fechas para ver otros pagos.
+              </Vacio>
+            )}
             {reporte.cantidad > 0 && (
               <div className="table-wrap">
                 <table className="table">
@@ -674,7 +689,11 @@ export default function Reportes() {
                 </div>
               </div>
 
-              {movs.lista.length === 0 && <p className="muted">No hay movimientos en este periodo.</p>}
+              {movs.lista.length === 0 && (
+                <Vacio icono="💵" titulo="Sin movimientos en este periodo">
+                  Ajusta el rango de fechas para ver otros movimientos.
+                </Vacio>
+              )}
               {movs.lista.length > 0 && (
                 <div className="table-wrap">
                   <table className="table">

@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext.jsx"
 import { formatCOP, formatFecha } from "../utils/format.js"
 import { generarPdfNomina } from "../utils/pdf.js"
 import { notify, confirmar } from "../utils/notify.js"
+import Vacio from "../components/Vacio.jsx"
 
 export default function Historial() {
   const { nominas, empresa, prestamos, getEmpleado, deleteNomina } = useData()
@@ -133,41 +134,61 @@ export default function Historial() {
 
       {/* ================= FILTROS ================= */}
       <div className="card">
+        <label htmlFor="historial-buscar">Buscar</label>
         <input
+          id="historial-buscar"
           type="text"
           placeholder="🔎 Buscar empleado, documento o cargo"
           value={buscar}
           onChange={(e) => setBuscar(e.target.value)}
         />
 
-        <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-          <input
-            type="date"
-            value={fechaInicio}
-            onChange={(e) => setFechaInicio(e.target.value)}
-          />
-
-          <input
-            type="date"
-            value={fechaFin}
-            onChange={(e) => setFechaFin(e.target.value)}
-          />
-
-          <button onClick={limpiar}>Limpiar</button>
+        <div className="row" style={{ marginTop: 10 }}>
+          <div style={{ flex: 1 }}>
+            <label htmlFor="historial-desde">Desde</label>
+            <input
+              id="historial-desde"
+              type="date"
+              value={fechaInicio}
+              onChange={(e) => setFechaInicio(e.target.value)}
+            />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label htmlFor="historial-hasta">Hasta</label>
+            <input
+              id="historial-hasta"
+              type="date"
+              value={fechaFin}
+              onChange={(e) => setFechaFin(e.target.value)}
+            />
+          </div>
+          <button className="btn-secondary" onClick={limpiar}>Limpiar</button>
         </div>
 
-        <div style={{ marginTop: 10, display: "flex", gap: 10 }}>
-          {puedeExportar && <button onClick={exportarExcel}>📊 Excel</button>}
-        </div>
+        {puedeExportar && (
+          <div className="actions" style={{ marginTop: 10 }}>
+            <button className="btn-secondary" onClick={exportarExcel}>📊 Excel</button>
+          </div>
+        )}
       </div>
 
       {/* ================= RESUMEN ================= */}
-      <div className="card">
-        <strong>Total registros:</strong> {filtrado.length}
-        <br />
-        <strong>Total pagado:</strong>{" "}
-        {formatCOP(filtrado.reduce((a, b) => a + b.total, 0))}
+      <div className="cards-grid">
+        <div className="stat-card">
+          <span className="stat-label">Total registros</span>
+          <span className="stat-value">{filtrado.length}</span>
+        </div>
+        <div className="stat-card highlight">
+          <span className="stat-label">Total pagado</span>
+          <span className="stat-value">{formatCOP(filtrado.reduce((a, b) => a + b.total, 0))}</span>
+        </div>
       </div>
+
+      {filtrado.length === 0 && (
+        <Vacio icono="📚" titulo="Sin pagos registrados">
+          Ajusta la búsqueda o el rango de fechas, o registra un pago desde Pago de Nómina.
+        </Vacio>
+      )}
 
       {/* ================= LISTA ================= */}
       {datosPagina.map((n) => {
@@ -194,12 +215,12 @@ export default function Historial() {
                   {formatCOP(n.total)}
                 </span>
 
-                <button onClick={() => reimprimir(n)}>📄 PDF</button>
-                <button onClick={() => enviarWhatsApp(n)}>📱 WhatsApp</button>
+                <button className="btn-secondary btn-sm" onClick={() => reimprimir(n)}>📄 PDF</button>
+                <button className="btn-secondary btn-sm" onClick={() => enviarWhatsApp(n)}>📱 WhatsApp</button>
 
                 {puedeEliminar && (
                   <button
-                    className="btn-danger"
+                    className="btn-danger btn-sm"
                     onClick={async () => {
                       if (
                         await confirmar(
@@ -209,7 +230,7 @@ export default function Historial() {
                         deleteNomina(n.id)
                     }}
                   >
-                    Eliminar
+                    🗑 Eliminar
                   </button>
                 )}
               </div>
@@ -267,25 +288,29 @@ export default function Historial() {
       })}
 
       {/* ================= PAGINACIÓN ================= */}
-      <div className="card" style={{ display: "flex", gap: 10 }}>
-        <button
-          disabled={pagina === 1}
-          onClick={() => setPagina(pagina - 1)}
-        >
-          ⬅ Anterior
-        </button>
+      {filtrado.length > 0 && (
+        <div className="card actions">
+          <button
+            className="btn-secondary btn-sm"
+            disabled={pagina === 1}
+            onClick={() => setPagina(pagina - 1)}
+          >
+            ⬅ Anterior
+          </button>
 
-        <span>
-          Página {pagina} de {totalPaginas || 1}
-        </span>
+          <span className="muted small">
+            Página {pagina} de {totalPaginas || 1}
+          </span>
 
-        <button
-          disabled={pagina === totalPaginas}
-          onClick={() => setPagina(pagina + 1)}
-        >
-          Siguiente ➡
-        </button>
-      </div>
+          <button
+            className="btn-secondary btn-sm"
+            disabled={pagina === totalPaginas}
+            onClick={() => setPagina(pagina + 1)}
+          >
+            Siguiente ➡
+          </button>
+        </div>
+      )}
     </div>
   )
 }

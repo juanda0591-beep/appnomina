@@ -349,6 +349,16 @@ export function DataProvider({ children }) {
     await recargar()
     return creada
   }
+  // Crea varias tareas (p. ej. varios productos/procesos para un mismo empleado)
+  // recargando una sola vez al final, en vez de una recarga completa por cada una.
+  const addTareas = async (tareasArr) => {
+    const creadas = []
+    for (const t of tareasArr) {
+      creadas.push(await http('/tareas', { method: 'POST', body: JSON.stringify(t) }))
+    }
+    await recargar()
+    return creadas
+  }
   const updateTarea = async (id, datos) => {
     const actualizada = await http(`/tareas/${id}`, { method: 'PUT', body: JSON.stringify(datos) })
     await recargar()
@@ -538,6 +548,7 @@ export function DataProvider({ children }) {
     registrarPagoVenta,
     registrarAbonoGlobal,
     addTarea,
+    addTareas,
     updateTarea,
     terminarTarea,
     deleteTarea,

@@ -235,6 +235,7 @@ export default function ControlDinero() {
                           <button
                             className="btn-icon danger"
                             title="Eliminar"
+                            aria-label="Eliminar"
                             onClick={async () => {
                               if (await confirmar('¿Eliminar este movimiento?')) deleteMovimiento(m.id)
                             }}

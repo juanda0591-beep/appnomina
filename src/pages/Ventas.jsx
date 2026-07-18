@@ -640,7 +640,7 @@ export default function Ventas() {
                           </td>
                         )}
                         <td className="num">{formatCOP((Number(it.cantidad) || 0) * (Number(it.precioUnitario) || 0) * (1 - (descuentoTipo === 'producto' ? clamp(it.descuentoPct) : 0) / 100))}</td>
-                        <td><button type="button" className="btn-icon danger" onClick={() => removeItem(i)}>✕</button></td>
+                        <td><button type="button" className="btn-icon danger" title="Quitar" aria-label="Quitar" onClick={() => removeItem(i)}>✕</button></td>
                       </tr>
                     )
                   })}
