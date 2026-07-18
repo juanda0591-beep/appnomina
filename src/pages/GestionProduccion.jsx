@@ -1,15 +1,17 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
-import { formatCOP, formatFecha } from '../utils/format.js'
+import { formatCOP, formatFecha, formatDuracion } from '../utils/format.js'
 import { notify, confirmar } from '../utils/notify.js'
 import Vacio from '../components/Vacio.jsx'
 
-// Etiquetas de estado, compartidas entre órdenes y tareas (mismos valores)
+// Etiquetas de estado, compartidas entre órdenes y tareas (mismos valores).
+// 'cancelada' solo existe en órdenes, las tareas nunca la usan.
 const ESTADO_LABEL = {
   pendiente: 'Pendiente',
   en_progreso: 'En progreso',
   terminada: 'Terminada',
+  cancelada: 'Cancelada',
 }
 
 // Clase de color para la barra según el progreso
@@ -32,7 +34,7 @@ function BarraProgreso({ valor }) {
 
 // Una orden está atrasada si tiene fecha de entrega pasada y no está terminada.
 function estaAtrasada(orden) {
-  if (!orden.fechaEntrega || orden.estado === 'terminada') return false
+  if (!orden.fechaEntrega || orden.estado === 'terminada' || orden.estado === 'cancelada') return false
   return orden.fechaEntrega.slice(0, 10) < new Date().toISOString().slice(0, 10)
 }
 
@@ -75,7 +77,7 @@ export default function GestionProduccion() {
     addTareaProduccion, updateTareaProduccion, terminarTareaProduccion, deleteTareaProduccion,
     getTareaProduccionHistorial,
     addOrdenProduccion, terminarOrdenProduccion, deleteOrdenProduccion,
-    cambiarEstadoOrden, chequearMaterialOrden,
+    cambiarEstadoOrden, cancelarOrdenProduccion, chequearMaterialOrden,
     getEmpleado,
   } = useData()
   const { puede } = useAuth()
@@ -184,9 +186,32 @@ export default function GestionProduccion() {
   const procesosUsados = new Set(
     (ordenSel?.tareas || []).map((t) => (t.procesoNombre || '').toLowerCase())
   )
-  const procesosDisponibles = (productoDeOrdenSel?.procesos || []).filter(
-    (p) => !procesosUsados.has((p.nombre || '').toLowerCase())
+  // Procesos terminados de la orden (para saber si ya se puede pasar al siguiente
+  // de la cronología del producto).
+  const procesosTerminados = new Set(
+    (ordenSel?.tareas || []).filter((t) => t.estado === 'terminada').map((t) => (t.procesoNombre || '').toLowerCase())
   )
+  // Cronología del producto: sus procesos vienen del backend en el orden en que se
+  // definieron (Corte → Reengrese → Armado → ...). Un proceso solo se puede agregar
+  // si todos los anteriores en esa secuencia ya están terminados.
+  const procesosSecuencia = productoDeOrdenSel?.procesos || []
+  const procesosDisponibles = procesosSecuencia.filter((p, idx) => {
+    if (procesosUsados.has((p.nombre || '').toLowerCase())) return false
+    const anteriores = procesosSecuencia.slice(0, idx)
+    return anteriores.every((ant) => procesosTerminados.has((ant.nombre || '').toLowerCase()))
+  })
+  // Siguiente proceso bloqueado (si el que sigue en la secuencia no se puede agregar
+  // aún), para mostrar al usuario qué falta terminar antes.
+  const procesoBloqueado = procesosSecuencia.find((p, idx) => {
+    if (procesosUsados.has((p.nombre || '').toLowerCase())) return false
+    const anteriores = procesosSecuencia.slice(0, idx)
+    return !anteriores.every((ant) => procesosTerminados.has((ant.nombre || '').toLowerCase()))
+  })
+  const procesoBloqueadoFaltantes = procesoBloqueado
+    ? procesosSecuencia
+        .slice(0, procesosSecuencia.indexOf(procesoBloqueado))
+        .filter((ant) => !procesosTerminados.has((ant.nombre || '').toLowerCase()))
+    : []
 
   const ordenesFiltradas = useMemo(() => {
     return ordenesProduccion.filter((o) => {
@@ -278,6 +303,22 @@ export default function GestionProduccion() {
     }
   }
 
+  const handleCancelarOrden = async (orden) => {
+    const aviso = orden.tareas.length > 0
+      ? ' El material ya descontado por sus procesos no se repone automáticamente.'
+      : ''
+    if (!(await confirmar(
+      `¿Cancelar la orden de "${orden.productoNombre}"? Quedará cerrada sin sumar al stock.${aviso}`,
+      { titulo: 'Cancelar orden', textoOk: 'Sí, cancelar', peligro: true }
+    ))) return
+    try {
+      await cancelarOrdenProduccion(orden.id)
+      notify.ok('Orden cancelada')
+    } catch (e) {
+      notify.error('Error: ' + e.message)
+    }
+  }
+
   // ---------- Agregar proceso (tarea) a una orden ----------
   const abrirTareaForm = (orden) => {
     setTareaFormOrdenId(orden.id)
@@ -361,6 +402,7 @@ export default function GestionProduccion() {
   const valorComentario = (t) => (borradores[t.id]?.comentario ?? t.comentario)
   const valorCantidad = (t) => (borradores[t.id]?.cantidad ?? t.cantidad)
   const valorMotivoMerma = (t) => (borradores[t.id]?.motivoMerma ?? (t.motivoMerma || ''))
+  const valorEmpleadoId = (t) => (borradores[t.id]?.empleadoId ?? String(t.empleadoId || ''))
 
   const setBorrador = (id, campo, val) =>
     setBorradores((b) => ({ ...b, [id]: { ...b[id], [campo]: val } }))
@@ -372,6 +414,7 @@ export default function GestionProduccion() {
         comentario: valorComentario(t),
         cantidad: Number(valorCantidad(t)),
         motivoMerma: valorMotivoMerma(t),
+        empleadoId: Number(valorEmpleadoId(t)),
       })
       setBorradores((b) => {
         const next = { ...b }
@@ -420,7 +463,8 @@ export default function GestionProduccion() {
     (Number(valorProgreso(t)) !== t.progreso ||
       valorComentario(t) !== t.comentario ||
       Number(valorCantidad(t)) !== t.cantidad ||
-      valorMotivoMerma(t) !== (t.motivoMerma || ''))
+      valorMotivoMerma(t) !== (t.motivoMerma || '') ||
+      valorEmpleadoId(t) !== String(t.empleadoId || ''))
 
   const toggleProceso = (id) => setProcesoExpandidoId((actual) => (actual === id ? null : id))
 
@@ -452,6 +496,21 @@ export default function GestionProduccion() {
                 onChange={(e) => setBorrador(t.id, 'comentario', e.target.value)}
                 style={{ width: '100%' }}
               />
+            </div>
+          </div>
+        )}
+
+        {!bloqueada && (
+          <div className="row" style={{ marginTop: 4 }}>
+            <div style={{ flex: 1 }}>
+              <label className="small">Empleado asignado</label>
+              <select value={valorEmpleadoId(t)} onChange={(e) => setBorrador(t.id, 'empleadoId', e.target.value)}>
+                {empleados.map((emp) => (
+                  <option key={emp.id} value={emp.id}>
+                    {emp.nombre}{emp.cargo ? ` (${emp.cargo})` : ''}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
         )}
@@ -770,7 +829,11 @@ export default function GestionProduccion() {
                   const actual = procesoActualDe(orden)
                   const atrasada = estaAtrasada(orden)
                   return (
-                    <tr key={orden.id} className={atrasada ? 'fila-alerta' : ''}>
+                    <tr
+                      key={orden.id}
+                      className={`chip-clicable${atrasada ? ' fila-alerta' : ''}`}
+                      onClick={() => setOrdenDetalleId(orden.id)}
+                    >
                       <td>#{orden.id}</td>
                       <td className="muted small">{formatFecha(orden.creado)}</td>
                       <td className="small">
@@ -789,21 +852,18 @@ export default function GestionProduccion() {
                           : <span className="muted small">{actual.texto}</span>}
                       </td>
                       <td>
-                        <span className={`chip ${orden.estado === 'terminada' ? 'ok' : orden.estado === 'en_progreso' ? 'warn' : ''}`}>
+                        <span className={`chip ${orden.estado === 'terminada' ? 'ok' : orden.estado === 'en_progreso' ? 'warn' : orden.estado === 'cancelada' ? 'danger' : ''}`}>
                           {ESTADO_LABEL[orden.estado] || orden.estado}
                         </span>
                       </td>
-                      <td className="num">
+                      <td className="num" onClick={(e) => e.stopPropagation()}>
                         <div className="actions" style={{ justifyContent: 'flex-end' }}>
-                          <button className="btn-secondary btn-sm" onClick={() => setOrdenDetalleId(orden.id)}>
-                            🔎 Seguimiento
-                          </button>
-                          {puedeCrear && (
+                          {puedeCrear && orden.estado !== 'terminada' && orden.estado !== 'cancelada' && (
                             <button className="btn-secondary btn-sm" onClick={() => abrirTareaForm(orden)}>
                               + Proceso
                             </button>
                           )}
-                          {puedeEditar && orden.estado !== 'terminada' && (() => {
+                          {puedeEditar && orden.estado !== 'terminada' && orden.estado !== 'cancelada' && (() => {
                             const motivo = motivoNoTerminar(orden)
                             return (
                               <button
@@ -816,6 +876,16 @@ export default function GestionProduccion() {
                               </button>
                             )
                           })()}
+                          {puedeEditar && orden.estado !== 'terminada' && orden.estado !== 'cancelada' && (
+                            <button className="btn-secondary btn-sm" onClick={() => handleCancelarOrden(orden)}>
+                              ✕ Cancelar
+                            </button>
+                          )}
+                          {puedeEditar && orden.estado === 'cancelada' && (
+                            <button className="btn-secondary btn-sm" onClick={() => handleCambiarEstado(orden, 'en_progreso')} title="Reabrir">
+                              ◀ Reabrir
+                            </button>
+                          )}
                           {puedeEliminar && (
                             <button
                               className="btn-danger btn-sm"
@@ -838,7 +908,7 @@ export default function GestionProduccion() {
 
         {ordenesFiltradas.length > 0 && vista === 'kanban' && (
           <div className="kanban">
-            {['pendiente', 'en_progreso', 'terminada'].map((estado) => {
+            {['pendiente', 'en_progreso', 'terminada', 'cancelada'].map((estado) => {
               const enColumna = ordenesFiltradas.filter((o) => o.estado === estado)
               return (
                 <div className="kanban-col" key={estado}>
@@ -852,7 +922,11 @@ export default function GestionProduccion() {
                     const atrasada = estaAtrasada(orden)
                     const motivo = motivoNoTerminar(orden)
                     return (
-                      <div className={`kanban-card${atrasada ? ' atrasada' : ''}`} key={orden.id}>
+                      <div
+                        className={`kanban-card${atrasada ? ' atrasada' : ''} chip-clicable`}
+                        key={orden.id}
+                        onClick={() => setOrdenDetalleId(orden.id)}
+                      >
                         <div className="kanban-card-head">
                           <strong>#{orden.id} {orden.productoNombre || '— eliminado'}{orden.colorNombre ? ` · ${orden.colorNombre}` : ''}</strong>
                           <span className="muted small">{orden.cantidad} und</span>
@@ -867,8 +941,7 @@ export default function GestionProduccion() {
                         {orden.costoReal?.total > 0 && (
                           <div className="small muted">Costo real: {formatCOP(orden.costoReal.total)}</div>
                         )}
-                        <div className="actions" style={{ marginTop: 8 }}>
-                          <button className="btn-secondary btn-sm" onClick={() => setOrdenDetalleId(orden.id)}>🔎</button>
+                        <div className="actions" style={{ marginTop: 8 }} onClick={(e) => e.stopPropagation()}>
                           {puedeEditar && estado === 'pendiente' && (
                             <button className="btn-primary btn-sm" onClick={() => handleCambiarEstado(orden, 'en_progreso')}>▶ Iniciar</button>
                           )}
@@ -878,8 +951,11 @@ export default function GestionProduccion() {
                               <button className="btn-primary btn-sm" disabled={!!motivo} title={motivo || 'Marcar terminada'} onClick={() => handleCambiarEstado(orden, 'terminada')}>✓ Terminar</button>
                             </>
                           )}
-                          {puedeEditar && estado === 'terminada' && (
+                          {puedeEditar && (estado === 'terminada' || estado === 'cancelada') && (
                             <button className="btn-secondary btn-sm" onClick={() => handleCambiarEstado(orden, 'en_progreso')} title="Reabrir">◀ Reabrir</button>
+                          )}
+                          {puedeEditar && (estado === 'pendiente' || estado === 'en_progreso') && (
+                            <button className="btn-danger btn-sm" onClick={() => handleCancelarOrden(orden)} title="Cancelar orden">✕</button>
                           )}
                         </div>
                       </div>
@@ -949,9 +1025,14 @@ export default function GestionProduccion() {
                 )}
               </div>
             )}
-            {productoDeOrdenSel && procesosDisponibles.length === 0 && (
+            {productoDeOrdenSel && procesosDisponibles.length === 0 && procesosUsados.size >= procesosSecuencia.length && (
               <p className="muted small">
                 ✓ Esta orden ya tiene todos los procesos del producto. No quedan procesos por agregar.
+              </p>
+            )}
+            {procesoBloqueado && procesosDisponibles.length === 0 && (
+              <p className="muted small">
+                ⏳ El siguiente proceso es "{procesoBloqueado.nombre}", pero antes hay que terminar: {procesoBloqueadoFaltantes.map((p) => p.nombre).join(', ')}.
               </p>
             )}
             <div style={{ marginTop: 10 }}>
@@ -994,51 +1075,45 @@ export default function GestionProduccion() {
             )}
 
             {ordenDetalle.tareas.length > 0 && (
-              <div className="table-wrap">
-                <table className="table compact">
-                  <thead>
-                    <tr>
-                      <th>Proceso</th>
-                      <th>Empleado</th>
-                      <th className="num">Cantidad</th>
-                      <th className="num">Merma</th>
-                      <th style={{ minWidth: 140 }}>Progreso</th>
-                      <th>Estado</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ordenDetalle.tareas.map((t, idx) => {
-                      // Merma respecto al proceso anterior (la cantidad que entró vs la que salió)
-                      const prev = idx > 0 ? ordenDetalle.tareas[idx - 1] : null
-                      const merma = prev ? (Number(prev.cantidad) || 0) - (Number(t.cantidad) || 0) : 0
-                      return (
-                      <Fragment key={t.id}>
-                        <tr className="chip-clicable" onClick={() => toggleProceso(t.id)}>
-                          <td>{procesoExpandidoId === t.id ? '▾' : '▸'} {t.procesoNombre}</td>
-                          <td>{nombreEmpleado(t.empleadoId)}</td>
-                          <td className="num">{t.cantidad}</td>
-                          <td className="num">
-                            {prev && merma > 0
-                              ? <span className="texto-salida">-{merma}</span>
-                              : <span className="muted">—</span>}
-                          </td>
-                          <td><BarraProgreso valor={t.progreso} /></td>
-                          <td>
-                            <span className={`chip ${t.estado === 'terminada' ? 'ok' : t.estado === 'en_progreso' ? 'warn' : ''}`}>
-                              {ESTADO_LABEL[t.estado] || t.estado}
+              <div className="timeline">
+                {ordenDetalle.tareas.map((t, idx) => {
+                  // Merma respecto al proceso anterior (la cantidad que entró vs la que salió)
+                  const prev = idx > 0 ? ordenDetalle.tareas[idx - 1] : null
+                  const merma = prev ? (Number(prev.cantidad) || 0) - (Number(t.cantidad) || 0) : 0
+                  const esUltimo = idx === ordenDetalle.tareas.length - 1
+                  // Duración real: si terminó, cuánto duró de inicio a fin; si va en curso,
+                  // cuánto lleva desde que empezó; si no ha empezado, no hay nada que mostrar.
+                  const duracion = t.inicioReal ? formatDuracion(t.inicioReal, t.finReal) : null
+                  return (
+                    <div className="timeline-step" key={t.id}>
+                      <div className="timeline-rail">
+                        <div className={`timeline-dot ${t.estado}`} />
+                        {!esUltimo && <div className={`timeline-line ${t.estado === 'terminada' ? 'terminada' : ''}`} />}
+                      </div>
+                      <div className="timeline-content" onClick={() => toggleProceso(t.id)}>
+                        <div className="timeline-head">
+                          <strong>{procesoExpandidoId === t.id ? '▾' : '▸'} {t.procesoNombre}</strong>
+                          <span className={`chip ${t.estado === 'terminada' ? 'ok' : t.estado === 'en_progreso' ? 'warn' : ''}`}>
+                            {ESTADO_LABEL[t.estado] || t.estado}
+                          </span>
+                          {duracion && (
+                            <span className={`timeline-duracion ${t.estado}`}>
+                              {t.estado === 'terminada' ? `⏱ ${duracion}` : `⏳ en curso hace ${duracion}`}
                             </span>
-                          </td>
-                        </tr>
+                          )}
+                        </div>
+                        <p className="timeline-meta">
+                          {nombreEmpleado(t.empleadoId)} · Cantidad: {t.cantidad}
+                          {prev && merma > 0 && <> · <span className="texto-salida">Merma: -{merma}</span></>}
+                        </p>
+                        {procesoExpandidoId !== t.id && <BarraProgreso valor={t.progreso} />}
                         {procesoExpandidoId === t.id && (
-                          <tr>
-                            <td colSpan={6}>{renderDetalleProceso(t)}</td>
-                          </tr>
+                          <div onClick={(e) => e.stopPropagation()}>{renderDetalleProceso(t)}</div>
                         )}
-                      </Fragment>
-                      )
-                    })}
-                  </tbody>
-                </table>
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             )}
 

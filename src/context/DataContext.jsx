@@ -414,6 +414,11 @@ export function DataProvider({ children }) {
     await recargar()
     return actualizada
   }
+  const cancelarOrdenProduccion = async (id) => {
+    const actualizada = await http(`/ordenes-produccion/${id}/cancelar`, { method: 'POST' })
+    await recargar()
+    return actualizada
+  }
   // Chequeo preventivo de materiales (MRP): no muta nada, solo consulta faltantes.
   const chequearMaterialOrden = (params) =>
     http('/produccion/chequeo-material', { method: 'POST', body: JSON.stringify(params) })
@@ -550,6 +555,7 @@ export function DataProvider({ children }) {
     terminarOrdenProduccion,
     deleteOrdenProduccion,
     cambiarEstadoOrden,
+    cancelarOrdenProduccion,
     addMaterial,
     updateMaterial,
     deleteMaterial,

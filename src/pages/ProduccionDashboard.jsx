@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
-import { formatCOP } from '../utils/format.js'
+import { formatCOP, formatFecha } from '../utils/format.js'
 import { GraficoBarras, COLOR } from '../components/Grafico.jsx'
 import { NumeroAnimado } from '../components/dashboardWidgets.jsx'
 import Vacio from '../components/Vacio.jsx'
@@ -58,6 +58,13 @@ export default function ProduccionDashboard() {
           <strong className="dash-value"><NumeroAnimado valor={data.ordenesTerminadasMes} /></strong>
         </div>
         <div className="dash-card">
+          <span className="dash-icon">⚠️</span>
+          <span className="dash-label">Órdenes atrasadas</span>
+          <strong className={`dash-value${(data.ordenesAtrasadas?.length || 0) > 0 ? ' texto-salida' : ''}`}>
+            <NumeroAnimado valor={data.ordenesAtrasadas?.length || 0} />
+          </strong>
+        </div>
+        <div className="dash-card">
           <span className="dash-icon">📦</span>
           <span className="dash-label">Unidades producidas (mes)</span>
           <strong className="dash-value"><NumeroAnimado valor={data.unidadesMes} /></strong>
@@ -73,6 +80,40 @@ export default function ProduccionDashboard() {
           <strong className="dash-value"><NumeroAnimado valor={data.costoRealMes} moneda /></strong>
         </div>
       </div>
+
+      {/* Órdenes atrasadas */}
+      {data.ordenesAtrasadas && data.ordenesAtrasadas.length > 0 && (
+        <div className="card" style={{ background: '#fef2f2', border: '1px solid #fecaca' }}>
+          <h3>⚠️ Órdenes atrasadas ({data.ordenesAtrasadas.length})</h3>
+          <p className="muted small">Pasaron su fecha de entrega y todavía no están terminadas.</p>
+          <div className="table-wrap">
+            <table className="table compact">
+              <thead>
+                <tr>
+                  <th>Orden</th>
+                  <th>Producto</th>
+                  <th>Entrega</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.ordenesAtrasadas.map((o) => (
+                  <tr key={o.id}>
+                    <td>#{o.id}</td>
+                    <td>{o.productoNombre || '— eliminado'}</td>
+                    <td className="texto-salida">{formatFecha(o.fechaEntrega)}</td>
+                    <td>
+                      <span className={`chip ${o.estado === 'en_progreso' ? 'warn' : ''}`}>
+                        {o.estado === 'en_progreso' ? 'En progreso' : 'Pendiente'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Cuello de botella */}
       <div className="cards-grid">

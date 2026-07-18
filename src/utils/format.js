@@ -32,3 +32,21 @@ export function hoyISO() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
+
+// Duración legible entre dos timestamps ISO ("2 días", "4 horas", "15 min").
+// Redondea al mayor de los dos rangos: si hay días de por medio se ignoran las
+// horas sueltas, y así sucesivamente, para no saturar la vista con precisión falsa.
+export function formatDuracion(desdeISO, hastaISO) {
+  if (!desdeISO) return ''
+  const desde = new Date(desdeISO)
+  const hasta = hastaISO ? new Date(hastaISO) : new Date()
+  if (isNaN(desde) || isNaN(hasta)) return ''
+  const ms = Math.max(0, hasta - desde)
+  const min = Math.round(ms / 60000)
+  if (min < 1) return 'menos de 1 min'
+  if (min < 60) return `${min} min`
+  const horas = Math.round(min / 60)
+  if (horas < 24) return `${horas} h`
+  const dias = Math.round(horas / 24)
+  return `${dias} día${dias === 1 ? '' : 's'}`
+}

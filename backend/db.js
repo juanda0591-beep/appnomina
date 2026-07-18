@@ -257,7 +257,7 @@ db.exec(`
     producto_id INTEGER,
     producto_nombre TEXT,
     cantidad REAL NOT NULL DEFAULT 0,
-    estado TEXT NOT NULL DEFAULT 'pendiente',   -- pendiente|en_progreso|terminada
+    estado TEXT NOT NULL DEFAULT 'pendiente',   -- pendiente|en_progreso|terminada|cancelada
     comentario TEXT,
     stock_abastecido REAL NOT NULL DEFAULT 0,   -- cantidad ya sumada al stock del producto
     fecha_entrega TEXT,                         -- fecha de compromiso de entrega (opcional)
@@ -530,6 +530,10 @@ addCol('ventas', 'descuento_pct', 'descuento_pct REAL NOT NULL DEFAULT 0')
 addCol('venta_pagos', 'metodo', "metodo TEXT NOT NULL DEFAULT 'efectivo'")
 // Fecha límite de pago para ventas a crédito (opcional); si pasa y queda saldo, la venta se marca "vencida"
 addCol('ventas', 'fecha_vencimiento', 'fecha_vencimiento TEXT')
+// Tiempos reales por proceso: cuándo pasó a en_progreso y cuándo se marcó terminada
+// (distinto de creado/actualizado, que reflejan la fila, no el trabajo real en taller).
+addCol('tareas_produccion', 'inicio_real', 'inicio_real TEXT')
+addCol('tareas_produccion', 'fin_real', 'fin_real TEXT')
 
 // Backfill de ventas existentes: asigna código VTA-#### y registra el "pagado"
 // histórico como un abono inicial (sin volver a mover caja, ya se movió en su día).

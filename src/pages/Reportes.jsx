@@ -29,7 +29,7 @@ export default function Reportes() {
   const [buscarProducto, setBuscarProducto] = useState('')
   const [ordenAbierta, setOrdenAbierta] = useState(null) // id de orden expandida
 
-  const ESTADO_ORDEN = { pendiente: 'Pendiente', en_progreso: 'En progreso', terminada: 'Terminada' }
+  const ESTADO_ORDEN = { pendiente: 'Pendiente', en_progreso: 'En progreso', terminada: 'Terminada', cancelada: 'Cancelada' }
 
   // Analiza una orden de producción: sus procesos, unidades iniciadas (primer
   // proceso) vs terminadas (último), merma total y materiales consumidos.
@@ -295,9 +295,10 @@ export default function Reportes() {
                           <td>{abierto ? '▾' : '▸'} #{o.id}<div className="muted small">{formatFecha(o.creado)}</div></td>
                           <td><strong>{o.productoNombre}</strong></td>
                           <td>
-                            <span className={`chip ${o.estado === 'terminada' ? 'ok' : o.estado === 'en_progreso' ? 'warn' : ''}`}>
+                            <span className={`chip ${o.estado === 'terminada' ? 'ok' : o.estado === 'en_progreso' ? 'warn' : o.estado === 'cancelada' ? 'danger' : ''}`}>
                               {ESTADO_ORDEN[o.estado] || o.estado}
                             </span>
+                            {o.atrasada && <span className="chip danger" style={{ marginLeft: 6 }}>⚠️ Atrasada</span>}
                           </td>
                           <td className="num">{o.analisis.iniciados}</td>
                           <td className="num">{o.estado === 'terminada' ? o.analisis.finales : '—'}</td>

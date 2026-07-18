@@ -250,8 +250,11 @@ function resolverMaterialPorColor(familia, colorId) {
 }
 
 function productoConProcesos(prod) {
+  // Orden ASC = la cronología de fabricación (el orden en que se definieron en el
+  // formulario de Productos, ej: Corte → Reengrese → Armado → ...). Producción usa
+  // este mismo orden para exigir que no se salte ningún paso.
   const procesos = db
-    .prepare('SELECT * FROM procesos WHERE producto_id = ?')
+    .prepare('SELECT * FROM procesos WHERE producto_id = ? ORDER BY id ASC')
     .all(prod.id)
     .map((p) => ({ ...p, materiales: materialesDeProceso(p.id) }))
   const variantes = variantesDeProducto(prod.id)
@@ -1195,6 +1198,8 @@ function tareaProduccionSalida(t) {
     manoObra: (Number(t.cantidad) || 0) * pagoUnitario,
     creado: t.creado,
     actualizado: t.actualizado,
+    inicioReal: t.inicio_real || null,
+    finReal: t.fin_real || null,
     materialesConsumidos: materialesConsumidosStmt.all(t.id).map((m) => ({
       materialId: m.material_id,
       materialNombre: m.material_nombre,
@@ -1218,6 +1223,13 @@ function calcularCostoUnitarioEstimado(d) {
   const subtotalUnit = directosUnit + indirectosUnit
   const imprevistoUnit = subtotalUnit * (num(d.imprevistoPct) / 100)
   return subtotalUnit + imprevistoUnit
+}
+
+// Una orden está atrasada si tiene fecha de entrega pasada y no está terminada
+// (mismo criterio que usa el frontend en el tablero/Kanban de Producción).
+function ordenAtrasada(o) {
+  if (!o.fecha_entrega || o.estado === 'terminada') return false
+  return o.fecha_entrega.slice(0, 10) < new Date().toISOString().slice(0, 10)
 }
 
 function ordenProduccionSalida(o) {
@@ -1258,6 +1270,7 @@ function ordenProduccionSalida(o) {
     estado: o.estado,
     comentario: o.comentario || '',
     fechaEntrega: o.fecha_entrega || '',
+    atrasada: ordenAtrasada(o),
     stockAbastecido: o.stock_abastecido || 0,
     creado: o.creado,
     actualizado: o.actualizado,
@@ -1425,6 +1438,20 @@ app.post('/api/ordenes-produccion/:id/estado', permisoRequired('gestion-producci
   res.json(ordenProduccionSalida(db.prepare('SELECT * FROM ordenes_produccion WHERE id = ?').get(orden.id)))
 })
 
+// Cancela una orden abandonada. No revierte materiales ya consumidos por sus
+// procesos (misma limitación que eliminar una tarea: el descuento de inventario
+// no es reversible automáticamente) ni afecta el stock del producto, porque una
+// orden cancelada nunca llegó a abastecerlo (eso solo pasa al terminar).
+app.post('/api/ordenes-produccion/:id/cancelar', permisoRequired('gestion-produccion', 'editar'), (req, res) => {
+  const orden = db.prepare('SELECT * FROM ordenes_produccion WHERE id = ?').get(req.params.id)
+  if (!orden) return res.status(404).json({ error: 'Orden no encontrada' })
+  if (orden.estado === 'terminada') return res.status(400).json({ error: 'No se puede cancelar una orden ya terminada' })
+  if (orden.estado === 'cancelada') return res.status(400).json({ error: 'Esta orden ya está cancelada' })
+  const ahora = new Date().toISOString()
+  db.prepare("UPDATE ordenes_produccion SET estado = 'cancelada', actualizado = ? WHERE id = ?").run(ahora, orden.id)
+  res.json(ordenProduccionSalida(db.prepare('SELECT * FROM ordenes_produccion WHERE id = ?').get(orden.id)))
+})
+
 // Chequeo de material (MRP ligero preventivo): dada una lista de procesos y una
 // cantidad, calcula cuánto material se necesita y si el stock actual alcanza.
 // No descuenta ni bloquea nada; es solo informativo. Recibe body:
@@ -1524,6 +1551,26 @@ app.post('/api/tareas-produccion', permisoRequired('gestion-produccion', 'crear'
     }
   }
 
+  // Cronología obligatoria: los procesos de un producto tienen un orden de
+  // fabricación (el orden en que se definieron, ej: Corte → Reengrese → Armado →
+  // ...). No se puede registrar un proceso si alguno anterior en esa secuencia
+  // todavía no está en la orden y terminado — evita saltarse pasos del taller.
+  if (orden && proceso && proceso.producto_id) {
+    const secuencia = db.prepare('SELECT nombre FROM procesos WHERE producto_id = ? ORDER BY id ASC').all(proceso.producto_id)
+    const idx = secuencia.findIndex((p) => p.nombre.toLowerCase() === proceso.nombre.toLowerCase())
+    if (idx > 0) {
+      const anteriores = secuencia.slice(0, idx)
+      const tareasOrden = db.prepare('SELECT proceso_nombre, estado FROM tareas_produccion WHERE orden_produccion_id = ?').all(orden.id)
+      const faltantes = anteriores.filter((p) => {
+        const t = tareasOrden.find((x) => (x.proceso_nombre || '').toLowerCase() === p.nombre.toLowerCase())
+        return !t || t.estado !== 'terminada'
+      })
+      if (faltantes.length > 0) {
+        return res.status(400).json({ error: `Antes de "${proceso.nombre}" hay que terminar: ${faltantes.map((p) => p.nombre).join(', ')}` })
+      }
+    }
+  }
+
   const avisos = []
   const crear = db.transaction(() => {
     const r = db.prepare(
@@ -1604,11 +1651,20 @@ app.put('/api/tareas-produccion/:id', permisoRequired('gestion-produccion', 'edi
   const tarea = db.prepare('SELECT * FROM tareas_produccion WHERE id = ?').get(req.params.id)
   if (!tarea) return res.status(404).json({ error: 'Tarea no encontrada' })
 
-  const { progreso, comentario, estado, cantidad, motivoMerma } = req.body
+  const { progreso, comentario, estado, cantidad, motivoMerma, empleadoId } = req.body
   const nuevoProgreso = progreso == null ? tarea.progreso : Math.max(0, Math.min(100, Math.round(Number(progreso) || 0)))
   const nuevoComentario = comentario == null ? tarea.comentario : String(comentario)
   const nuevaCantidad = cantidad == null ? tarea.cantidad : Math.max(0, Number(cantidad) || 0)
   const nuevoMotivoMerma = motivoMerma == null ? tarea.motivo_merma : String(motivoMerma)
+
+  // Reasignar empleado: no cambia materiales ni mano de obra ya calculada de otros
+  // procesos, solo a quién se le atribuye el pago de esta tarea en adelante.
+  let nuevoEmpleadoId = tarea.empleado_id
+  if (empleadoId != null) {
+    const empleado = db.prepare('SELECT id FROM empleados WHERE id = ?').get(empleadoId)
+    if (!empleado) return res.status(400).json({ error: 'Empleado no encontrado' })
+    nuevoEmpleadoId = empleado.id
+  }
 
   let nuevoEstado = estado || tarea.estado
   if (!estado && tarea.estado !== 'terminada') {
@@ -1617,22 +1673,44 @@ app.put('/api/tareas-produccion/:id', permisoRequired('gestion-produccion', 'edi
     else nuevoEstado = 'pendiente'
   }
 
+  // Tiempos reales: inicio_real se marca la primera vez que sale de "pendiente"
+  // (no se vuelve a tocar después); fin_real se marca al llegar a "terminada" y se
+  // limpia si se reabre (vuelve a pendiente/en_progreso), para que el timer siga.
+  let nuevoInicioReal = tarea.inicio_real
+  let nuevoFinReal = tarea.fin_real
   const ahora = new Date().toISOString()
+  if (nuevoEstado !== 'pendiente' && !nuevoInicioReal) nuevoInicioReal = ahora
+  if (nuevoEstado === 'terminada' && !nuevoFinReal) nuevoFinReal = ahora
+  if (nuevoEstado !== 'terminada' && nuevoFinReal) nuevoFinReal = null
+
   const tx = db.transaction(() => {
-    db.prepare('UPDATE tareas_produccion SET progreso = ?, comentario = ?, estado = ?, cantidad = ?, motivo_merma = ?, actualizado = ? WHERE id = ?')
-      .run(nuevoProgreso, nuevoComentario, nuevoEstado, nuevaCantidad, nuevoMotivoMerma, ahora, tarea.id)
+    db.prepare('UPDATE tareas_produccion SET progreso = ?, comentario = ?, estado = ?, cantidad = ?, motivo_merma = ?, empleado_id = ?, inicio_real = ?, fin_real = ?, actualizado = ? WHERE id = ?')
+      .run(nuevoProgreso, nuevoComentario, nuevoEstado, nuevaCantidad, nuevoMotivoMerma, nuevoEmpleadoId, nuevoInicioReal, nuevoFinReal, ahora, tarea.id)
 
     const cambioProgreso = nuevoProgreso !== tarea.progreso
     const cambioComentario = nuevoComentario !== (tarea.comentario || '')
-    if (cambioProgreso || cambioComentario) {
+    const cambioEmpleado = nuevoEmpleadoId !== tarea.empleado_id
+    if (cambioProgreso || cambioComentario || cambioEmpleado) {
       insertTareaProduccionHistorial.run(
         tarea.id,
         req.usuario || '',
         tarea.progreso,
         nuevoProgreso,
-        cambioComentario ? nuevoComentario : null,
+        cambioEmpleado
+          ? `Reasignado a ${db.prepare('SELECT nombre FROM empleados WHERE id = ?').get(nuevoEmpleadoId)?.nombre || '—'}${cambioComentario ? ' — ' + nuevoComentario : ''}`
+          : (cambioComentario ? nuevoComentario : null),
         ahora,
       )
+    }
+
+    // Si la cantidad cambió y la orden ya estaba terminada (ya abasteció stock),
+    // resincroniza: cantidadAbastecerOrden() vuelve a leer la última tarea (con el
+    // valor nuevo) y abastecerStockProducto() aplica solo el delta contra lo previo.
+    // Sin esto, editar la cantidad de la última tarea de una orden cerrada dejaba el
+    // stock del producto desalineado con la producción real.
+    if (nuevaCantidad !== tarea.cantidad && tarea.orden_produccion_id) {
+      const orden = db.prepare('SELECT * FROM ordenes_produccion WHERE id = ?').get(tarea.orden_produccion_id)
+      if (orden && orden.estado === 'terminada') abastecerStockProducto(orden)
     }
   })
   tx()
@@ -1644,9 +1722,10 @@ app.post('/api/tareas-produccion/:id/terminar', permisoRequired('gestion-producc
   if (!tarea) return res.status(404).json({ error: 'Tarea no encontrada' })
 
   const ahora = new Date().toISOString()
+  const inicioReal = tarea.inicio_real || ahora
   const tx = db.transaction(() => {
-    db.prepare("UPDATE tareas_produccion SET progreso = 100, estado = 'terminada', actualizado = ? WHERE id = ?")
-      .run(ahora, tarea.id)
+    db.prepare("UPDATE tareas_produccion SET progreso = 100, estado = 'terminada', inicio_real = ?, fin_real = ?, actualizado = ? WHERE id = ?")
+      .run(inicioReal, ahora, ahora, tarea.id)
     insertTareaProduccionHistorial.run(tarea.id, req.usuario || '', tarea.progreso, 100, null, ahora)
   })
   tx()
@@ -1680,8 +1759,20 @@ app.get('/api/produccion/dashboard', permisoAnyRequired([
   const mes = new Date().toISOString().slice(0, 7)
   const ordenes = db.prepare('SELECT * FROM ordenes_produccion').all().map(ordenProduccionSalida)
 
-  const activas = ordenes.filter((o) => o.estado !== 'terminada').length
+  const activas = ordenes.filter((o) => o.estado !== 'terminada' && o.estado !== 'cancelada').length
   const terminadasMes = ordenes.filter((o) => o.estado === 'terminada' && (o.actualizado || '').slice(0, 7) === mes)
+
+  // Órdenes atrasadas (fecha de entrega pasada y sin terminar), ordenadas por la
+  // más vencida primero, para que el dashboard resalte lo más urgente.
+  const ordenesAtrasadas = ordenes
+    .filter((o) => o.atrasada)
+    .sort((a, b) => (a.fechaEntrega || '').localeCompare(b.fechaEntrega || ''))
+    .map((o) => ({
+      id: o.id,
+      productoNombre: o.productoNombre,
+      fechaEntrega: o.fechaEntrega,
+      estado: o.estado,
+    }))
 
   // Unidades producidas y costo real del mes (órdenes terminadas este mes)
   let unidadesMes = 0
@@ -1704,7 +1795,7 @@ app.get('/api/produccion/dashboard', permisoAnyRequired([
   // Cuello de botella: proceso con más tareas sin terminar (en órdenes activas)
   const cuelloMap = {}
   for (const o of ordenes) {
-    if (o.estado === 'terminada') continue
+    if (o.estado === 'terminada' || o.estado === 'cancelada') continue
     for (const t of o.tareas) {
       if (t.estado === 'terminada') continue
       const key = t.procesoNombre || '(sin proceso)'
@@ -1728,6 +1819,7 @@ app.get('/api/produccion/dashboard', permisoAnyRequired([
   res.json({
     ordenesActivas: activas,
     ordenesTerminadasMes: terminadasMes.length,
+    ordenesAtrasadas,
     unidadesMes,
     costoRealMes,
     mermaPromedio,
