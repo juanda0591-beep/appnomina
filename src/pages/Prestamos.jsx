@@ -127,7 +127,7 @@ export default function Prestamos() {
                   <label>Empleado</label>
                   <select value={empleadoId} onChange={(e) => setEmpleadoId(e.target.value)}>
                     <option value="">— Seleccionar —</option>
-                    {empleados.map((emp) => (
+                    {empleados.filter((emp) => emp.activo).map((emp) => (
                       <option key={emp.id} value={emp.id}>{emp.nombre}</option>
                     ))}
                   </select>

@@ -253,7 +253,7 @@ export default function Nomina() {
               onChange={(e) => handleEmpleadoChange(e.target.value)}
             >
               <option value="">— Seleccionar —</option>
-              {empleados.map((emp) => (
+              {empleados.filter((e) => e.activo).map((emp) => (
                 <option key={emp.id} value={emp.id}>{emp.nombre}</option>
               ))}
             </select>

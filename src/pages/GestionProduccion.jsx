@@ -505,9 +505,9 @@ export default function GestionProduccion() {
             <div style={{ flex: 1 }}>
               <label className="small">Empleado asignado</label>
               <select value={valorEmpleadoId(t)} onChange={(e) => setBorrador(t.id, 'empleadoId', e.target.value)}>
-                {empleados.map((emp) => (
+                {empleados.filter((emp) => emp.activo || String(emp.id) === valorEmpleadoId(t)).map((emp) => (
                   <option key={emp.id} value={emp.id}>
-                    {emp.nombre}{emp.cargo ? ` (${emp.cargo})` : ''}
+                    {emp.nombre}{emp.cargo ? ` (${emp.cargo})` : ''}{!emp.activo ? ' (inactivo)' : ''}
                   </option>
                 ))}
               </select>
@@ -979,7 +979,7 @@ export default function GestionProduccion() {
                 <label>Empleado</label>
                 <select value={taEmpleadoId} onChange={(e) => setTaEmpleadoId(e.target.value)}>
                   <option value="">— Seleccionar —</option>
-                  {empleados.map((emp) => (
+                  {empleados.filter((emp) => emp.activo).map((emp) => (
                     <option key={emp.id} value={emp.id}>
                       {emp.nombre}{emp.cargo ? ` (${emp.cargo})` : ''}
                     </option>

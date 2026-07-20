@@ -257,6 +257,10 @@ export function DataProvider({ children }) {
     await http(`/empleados/${id}`, { method: 'DELETE' })
     await recargar()
   }
+  const setEmpleadoActivo = async (id, activo) => {
+    await http(`/empleados/${id}/activo`, { method: 'PUT', body: JSON.stringify({ activo }) })
+    await recargar()
+  }
 
   // ---------- HERRAMIENTAS ENTREGADAS ----------
   const getHerramientasEmpleado = (empleadoId) => http(`/empleados/${empleadoId}/herramientas`)
@@ -504,6 +508,7 @@ export function DataProvider({ children }) {
     addEmpleado,
     updateEmpleado,
     deleteEmpleado,
+    setEmpleadoActivo,
     getHerramientasEmpleado,
     addHerramienta,
     updateHerramienta,

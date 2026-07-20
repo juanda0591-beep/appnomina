@@ -403,6 +403,13 @@ if (!colsNominas.some((c) => c.name === 'comentario')) {
   db.exec('ALTER TABLE nominas ADD COLUMN comentario TEXT')
 }
 
+// Empleado activo/inactivo (soft delete): si tiene historial (tareas, préstamos,
+// herramientas) el DELETE físico se bloquea y se ofrece desactivar en su lugar.
+const colsEmpleados = db.prepare("PRAGMA table_info(empleados)").all()
+if (!colsEmpleados.some((c) => c.name === 'activo')) {
+  db.exec('ALTER TABLE empleados ADD COLUMN activo INTEGER NOT NULL DEFAULT 1')
+}
+
 // Columna de rol en usuarios (admin | usuario). El primer usuario existente
 // se marca como admin para que nunca quede el sistema sin administrador.
 const colsUsuarios = db.prepare("PRAGMA table_info(usuarios)").all()

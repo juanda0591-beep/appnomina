@@ -26,7 +26,7 @@ const ESTADO_HERRAMIENTA_CHIP = {
 
 export default function Empleados() {
   const {
-    empleados, addEmpleado, updateEmpleado, deleteEmpleado, prestamosDeEmpleado,
+    empleados, addEmpleado, updateEmpleado, deleteEmpleado, setEmpleadoActivo, prestamosDeEmpleado,
     getHerramientasEmpleado, addHerramienta, updateHerramienta, deleteHerramienta,
   } = useData()
   const { puede } = useAuth()
@@ -37,6 +37,7 @@ export default function Empleados() {
   const [formAbierto, setFormAbierto] = useState(false)
   const [editId, setEditId] = useState(null)
   const [busqueda, setBusqueda] = useState('')
+  const [verInactivos, setVerInactivos] = useState(false)
 
   // --- Herramientas entregadas ---
   const [herramientasEmpleadoId, setHerramientasEmpleadoId] = useState(null) // empleado con el modal abierto
@@ -166,13 +167,53 @@ export default function Empleados() {
 
   const empleadoHerramientas = empleados.find((e) => e.id === herramientasEmpleadoId)
 
+  const handleEliminar = async (emp) => {
+    if (!(await confirmar(`¿Eliminar a "${emp.nombre}"?`))) return
+    try {
+      await deleteEmpleado(emp.id)
+      notify.ok('Empleado eliminado')
+    } catch (err) {
+      // Si tiene historial (tareas, préstamos, herramientas, nóminas), el backend
+      // bloquea el borrado físico; se ofrece desactivar en su lugar para no perder el rastro.
+      if (err.message.includes('tieneHistorial') || err.message.toLowerCase().includes('historial')) {
+        const desactivar = await confirmar(
+          `"${emp.nombre}" tiene historial (tareas, préstamos, herramientas o nóminas) y no se puede eliminar sin perderlo. ¿Deseas desactivarlo en su lugar? Dejará de aparecer para asignarle trabajos nuevos, pero conserva todo su historial.`,
+          { titulo: 'No se puede eliminar', textoOk: 'Sí, desactivar', peligro: false }
+        )
+        if (desactivar) {
+          try {
+            await setEmpleadoActivo(emp.id, false)
+            notify.ok('Empleado desactivado')
+          } catch (err2) {
+            notify.error('Error al desactivar: ' + err2.message)
+          }
+        }
+      } else {
+        notify.error('Error al eliminar: ' + err.message)
+      }
+    }
+  }
+
+  const handleToggleActivo = async (emp) => {
+    const activar = !emp.activo
+    if (!(await confirmar(
+      activar ? `¿Reactivar a "${emp.nombre}"?` : `¿Desactivar a "${emp.nombre}"? Dejará de aparecer para asignarle trabajos nuevos, pero conserva su historial.`,
+      { titulo: activar ? 'Reactivar empleado' : 'Desactivar empleado', textoOk: activar ? 'Sí, reactivar' : 'Sí, desactivar', peligro: !activar }
+    ))) return
+    try {
+      await setEmpleadoActivo(emp.id, activar)
+      notify.ok(activar ? 'Empleado reactivado' : 'Empleado desactivado')
+    } catch (err) {
+      notify.error('Error: ' + err.message)
+    }
+  }
+
   const q = busqueda.trim().toLowerCase()
-  const empleadosFiltrados = q
-    ? empleados.filter((e) =>
-        [e.nombre, e.cargo, e.cedula, e.telefono]
-          .some((v) => (v || '').toLowerCase().includes(q))
-      )
-    : empleados
+  const empleadosFiltrados = empleados
+    .filter((e) => verInactivos || e.activo)
+    .filter((e) =>
+      !q || [e.nombre, e.cargo, e.cedula, e.telefono].some((v) => (v || '').toLowerCase().includes(q))
+    )
 
   return (
     <div>
@@ -191,16 +232,22 @@ export default function Empleados() {
       )}
 
       <div className="card">
-        <h3>Empleados registrados ({empleados.length})</h3>
+        <h3>Empleados registrados ({empleadosFiltrados.length})</h3>
 
         {empleados.length > 0 && (
-          <input
-            type="search"
-            value={busqueda}
-            onChange={(e) => setBusqueda(e.target.value)}
-            placeholder="🔎 Buscar por nombre, cargo, cédula o teléfono…"
-            style={{ marginBottom: 12 }}
-          />
+          <div className="row" style={{ alignItems: 'center' }}>
+            <input
+              type="search"
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              placeholder="🔎 Buscar por nombre, cargo, cédula o teléfono…"
+              style={{ marginBottom: 12, flex: 1 }}
+            />
+            <label className="small" style={{ whiteSpace: 'nowrap' }}>
+              <input type="checkbox" checked={verInactivos} onChange={(e) => setVerInactivos(e.target.checked)} />
+              {' '}Ver inactivos
+            </label>
+          </div>
         )}
 
         {empleados.length === 0 && (
@@ -217,7 +264,8 @@ export default function Empleados() {
           return (
             <div key={emp.id} className="list-item">
               <div>
-                <strong>{emp.nombre}</strong>
+                <strong>{emp.nombre}</strong>{' '}
+                {!emp.activo && <span className="chip">Inactivo</span>}
                 <div className="muted small">
                   {emp.cargo && <>{emp.cargo} · </>}
                   {emp.cedula && <>C.C. {emp.cedula} · </>}
@@ -235,12 +283,12 @@ export default function Empleados() {
                   <button className="btn-secondary" onClick={() => startEdit(emp)}>Editar</button>
                 )}
                 {puedeEliminar && (
-                  <button
-                    className="btn-danger"
-                    onClick={async () => {
-                      if (await confirmar(`¿Eliminar a "${emp.nombre}"?`)) deleteEmpleado(emp.id)
-                    }}
-                  >
+                  <button className="btn-secondary" onClick={() => handleToggleActivo(emp)}>
+                    {emp.activo ? '⏸ Desactivar' : '▶ Reactivar'}
+                  </button>
+                )}
+                {puedeEliminar && (
+                  <button className="btn-danger" onClick={() => handleEliminar(emp)}>
                     Eliminar
                   </button>
                 )}

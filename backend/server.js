@@ -703,7 +703,7 @@ app.get('/api/empleados', permisoAnyRequired([
   ['historial', 'ver'],
   ['reportes', 'ver'],
 ]), (req, res) => {
-  res.json(db.prepare('SELECT * FROM empleados ORDER BY nombre').all())
+  res.json(db.prepare('SELECT * FROM empleados ORDER BY nombre').all().map((e) => ({ ...e, activo: e.activo !== 0 })))
 })
 
 app.post('/api/empleados', permisoRequired('empleados', 'crear'), (req, res) => {
@@ -721,20 +721,34 @@ app.put('/api/empleados/:id', permisoRequired('empleados', 'editar'), (req, res)
   res.json(db.prepare('SELECT * FROM empleados WHERE id = ?').get(req.params.id))
 })
 
+// Activar/desactivar (soft delete): un empleado inactivo no aparece como opción
+// para asignarle trabajos nuevos, pero conserva todo su historial intacto.
+app.put('/api/empleados/:id/activo', permisoRequired('empleados', 'eliminar'), (req, res) => {
+  const activo = req.body.activo ? 1 : 0
+  const empleado = db.prepare('SELECT id FROM empleados WHERE id = ?').get(req.params.id)
+  if (!empleado) return res.status(404).json({ error: 'Empleado no encontrado' })
+  db.prepare('UPDATE empleados SET activo = ? WHERE id = ?').run(activo, req.params.id)
+  res.json(db.prepare('SELECT * FROM empleados WHERE id = ?').get(req.params.id))
+})
+
 app.delete('/api/empleados/:id', permisoRequired('empleados', 'eliminar'), (req, res) => {
   const empleadoId = Number(req.params.id)
-  const tx = db.transaction(() => {
-    const prestamosEmpleado = db.prepare('SELECT id FROM prestamos WHERE empleado_id = ?').all(empleadoId)
-    const deleteMovimientoPrestamo = db.prepare("DELETE FROM movimientos WHERE origen = 'prestamo' AND ref_id = ?")
 
-    for (const prestamo of prestamosEmpleado) {
-      deleteMovimientoPrestamo.run(prestamo.id)
-    }
+  const tieneHistorial =
+    db.prepare('SELECT COUNT(*) n FROM prestamos WHERE empleado_id = ?').get(empleadoId).n > 0 ||
+    db.prepare('SELECT COUNT(*) n FROM tareas WHERE empleado_id = ?').get(empleadoId).n > 0 ||
+    db.prepare('SELECT COUNT(*) n FROM tareas_produccion WHERE empleado_id = ?').get(empleadoId).n > 0 ||
+    db.prepare('SELECT COUNT(*) n FROM herramientas_entregas WHERE empleado_id = ?').get(empleadoId).n > 0 ||
+    db.prepare('SELECT COUNT(*) n FROM nominas WHERE empleado_id = ?').get(empleadoId).n > 0
 
-    db.prepare('DELETE FROM empleados WHERE id = ?').run(empleadoId)
-  })
+  if (tieneHistorial) {
+    return res.status(400).json({
+      error: 'Este empleado tiene historial (tareas, préstamos, herramientas o nóminas) y no se puede eliminar. Desactívalo en su lugar para conservar el historial.',
+      tieneHistorial: true,
+    })
+  }
 
-  tx()
+  db.prepare('DELETE FROM empleados WHERE id = ?').run(empleadoId)
   res.json({ ok: true })
 })
 
