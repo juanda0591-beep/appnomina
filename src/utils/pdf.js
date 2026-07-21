@@ -1364,3 +1364,117 @@ function tablaPiezasCortes(doc, marginX, y, r) {
   })
   return doc.lastAutoTable.finalY + 8
 }
+
+// ── Pegatinas QR de garantía ────────────────────────────────────────────────
+// Texto que queda embebido en el QR (se lee sin internet con cualquier escáner).
+function textoGarantiaQR({ empresaNombre, productoNombre, colorNombre, ordenId, unidad, procesos }) {
+  const l = []
+  l.push(`GARANTIA${empresaNombre ? ' - ' + empresaNombre : ''}`)
+  l.push(`Producto: ${productoNombre}${colorNombre ? ' (' + colorNombre + ')' : ''}`)
+  l.push(`Orden de produccion: #${ordenId}`)
+  l.push(`Folio: ${unidad.folio}`)
+  if (unidad.fechaProduccion) l.push(`Producido: ${formatFecha(unidad.fechaProduccion)}`)
+  l.push(`Garantia: ${unidad.garantiaMeses} meses${unidad.garantiaHasta ? ' (hasta ' + formatFecha(unidad.garantiaHasta) + ')' : ''}`)
+  if (procesos?.length) l.push(`Procesos: ${procesos.join(', ')}`)
+  return l.join('\n')
+}
+
+// Genera un PDF con una pegatina por unidad (2 columnas), cada una con su QR y los
+// datos de garantía. `unidades` = salida de getUnidadesOrden; `procesos` = nombres
+// de las etapas por las que pasó el producto. Es async (genera los QR primero).
+export async function generarPdfPegatinas({ empresa, ordenId, productoNombre, colorNombre, unidades, procesos = [] }) {
+  const QRCode = (await import('qrcode')).default
+  const empresaNombre = empresa?.nombre || ''
+
+  // Pre-genera el dataURL del QR de cada unidad (alta corrección de errores).
+  const qrs = await Promise.all(unidades.map((u) =>
+    QRCode.toDataURL(
+      textoGarantiaQR({ empresaNombre, productoNombre, colorNombre, ordenId, unidad: u, procesos }),
+      { errorCorrectionLevel: 'M', margin: 1, width: 300 }
+    ).catch(() => null)
+  ))
+
+  const doc = new jsPDF()
+  dibujarHojaPegatinas(doc, { empresaNombre, ordenId, productoNombre, colorNombre, unidades, qrs })
+  doc.save(`pegatinas_orden_${ordenId}.pdf`)
+}
+
+// Dibuja la grilla de pegatinas (2 columnas). Cada pegatina: QR a la izquierda,
+// datos a la derecha, dentro de un recuadro punteado para recortar.
+function dibujarHojaPegatinas(doc, { empresaNombre, ordenId, productoNombre, colorNombre, unidades, qrs }) {
+  const pageW = doc.internal.pageSize.getWidth()
+  const pageH = doc.internal.pageSize.getHeight()
+  const marginX = 12, marginTop = 14
+  const cols = 2
+  const gap = 6
+  const stickerW = (pageW - marginX * 2 - gap * (cols - 1)) / cols
+  const stickerH = 44
+  const qrSize = 34
+
+  let idx = 0
+  let y = marginTop
+  while (idx < unidades.length) {
+    if (y + stickerH > pageH - 10) { doc.addPage(); y = marginTop }
+    for (let c = 0; c < cols && idx < unidades.length; c++) {
+      const x = marginX + c * (stickerW + gap)
+      dibujarUnaPegatina(doc, x, y, stickerW, stickerH, qrSize, {
+        empresaNombre, ordenId, productoNombre, colorNombre,
+        unidad: unidades[idx], qr: qrs[idx],
+      })
+      idx++
+    }
+    y += stickerH + gap
+  }
+}
+
+function dibujarUnaPegatina(doc, x, y, w, h, qrSize, { empresaNombre, ordenId, productoNombre, colorNombre, unidad, qr }) {
+  // Recuadro punteado (guía de corte)
+  doc.setDrawColor(...C.muted)
+  doc.setLineWidth(0.2)
+  doc.setLineDashPattern([1, 1], 0)
+  doc.roundedRect(x, y, w, h, 1.5, 1.5, 'S')
+  doc.setLineDashPattern([], 0)
+
+  const pad = 3
+  const qrY = y + (h - qrSize) / 2
+  if (qr) doc.addImage(qr, 'PNG', x + pad, qrY, qrSize, qrSize)
+
+  // Bloque de texto a la derecha del QR
+  const tx = x + pad + qrSize + 3
+  const tw = w - (pad + qrSize + 3) - pad
+  let ty = y + pad + 3
+
+  if (empresaNombre) {
+    doc.setFont(undefined, 'bold')
+    doc.setFontSize(7.5)
+    doc.setTextColor(...C.primary)
+    doc.text(doc.splitTextToSize(empresaNombre, tw), tx, ty)
+    ty += 4
+  }
+
+  doc.setFont(undefined, 'bold')
+  doc.setFontSize(8.5)
+  doc.setTextColor(...C.dark)
+  const nombreLineas = doc.splitTextToSize(productoNombre + (colorNombre ? ` (${colorNombre})` : ''), tw)
+  doc.text(nombreLineas.slice(0, 2), tx, ty)
+  ty += nombreLineas.slice(0, 2).length * 3.6 + 1.5
+
+  doc.setFont(undefined, 'normal')
+  doc.setFontSize(7)
+  doc.setTextColor(...C.dark)
+  doc.text(`Orden #${ordenId}  ·  ${unidad.folio}`, tx, ty); ty += 3.8
+  if (unidad.fechaProduccion) { doc.text(`Producido: ${formatFecha(unidad.fechaProduccion)}`, tx, ty); ty += 3.8 }
+
+  doc.setFont(undefined, 'bold')
+  doc.setTextColor(...C.success)
+  const gTxt = `Garantia: ${unidad.garantiaMeses} meses`
+  doc.text(gTxt, tx, ty); ty += 3.6
+  if (unidad.garantiaHasta) {
+    doc.setFont(undefined, 'normal')
+    doc.setTextColor(...C.muted)
+    doc.setFontSize(6.5)
+    doc.text(`hasta ${formatFecha(unidad.garantiaHasta)}`, tx, ty)
+  }
+  doc.setTextColor(...C.dark)
+}
+

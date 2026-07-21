@@ -3,6 +3,7 @@ import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha, formatDuracion } from '../utils/format.js'
 import { notify, confirmar } from '../utils/notify.js'
+import { generarPdfPegatinas } from '../utils/pdf.js'
 import Vacio from '../components/Vacio.jsx'
 
 // Etiquetas de estado, compartidas entre órdenes y tareas (mismos valores).
@@ -78,6 +79,7 @@ export default function GestionProduccion() {
     getTareaProduccionHistorial,
     addOrdenProduccion, terminarOrdenProduccion, deleteOrdenProduccion,
     cambiarEstadoOrden, cancelarOrdenProduccion, chequearMaterialOrden,
+    getUnidadesOrden, setGarantiaOrden, empresa,
     getEmpleado,
   } = useData()
   const { puede } = useAuth()
@@ -116,6 +118,13 @@ export default function GestionProduccion() {
   // --- Modal de seguimiento de una orden (tabla de sus procesos) ---
   const [ordenDetalleId, setOrdenDetalleId] = useState(null)
   const [procesoExpandidoId, setProcesoExpandidoId] = useState(null)
+
+  // --- Modal de pegatinas QR de garantía ---
+  const [pegatinasOrden, setPegatinasOrden] = useState(null) // orden seleccionada
+  const [pegUnidades, setPegUnidades] = useState([])
+  const [pegMeses, setPegMeses] = useState(6)
+  const [pegCargando, setPegCargando] = useState(false)
+  const [pegGenerando, setPegGenerando] = useState(false)
 
   // --- Modal de detalle de un proceso sin orden ---
   const [tareaDetalleId, setTareaDetalleId] = useState(null)
@@ -285,6 +294,54 @@ export default function GestionProduccion() {
       await terminarOrdenProduccion(orden.id)
     } catch (e) {
       notify.error('Error: ' + e.message)
+    }
+  }
+
+  // Abre el modal de pegatinas: carga las unidades (folios) de la orden.
+  const abrirPegatinas = async (orden) => {
+    setPegatinasOrden(orden)
+    setPegCargando(true)
+    setPegUnidades([])
+    try {
+      const data = await getUnidadesOrden(orden.id)
+      setPegUnidades(data.unidades || [])
+      setPegMeses(data.unidades?.[0]?.garantiaMeses ?? 6)
+    } catch (e) {
+      notify.error('Error al cargar unidades: ' + e.message)
+      setPegatinasOrden(null)
+    } finally {
+      setPegCargando(false)
+    }
+  }
+
+  const cerrarPegatinas = () => { setPegatinasOrden(null); setPegUnidades([]) }
+
+  // Genera el PDF de pegatinas. Si cambió la garantía, la guarda antes.
+  const imprimirPegatinas = async () => {
+    if (!pegatinasOrden || pegUnidades.length === 0) return
+    setPegGenerando(true)
+    try {
+      let unidades = pegUnidades
+      const mesesActual = pegUnidades[0]?.garantiaMeses ?? 6
+      if (Number(pegMeses) !== mesesActual) {
+        const data = await setGarantiaOrden(pegatinasOrden.id, Number(pegMeses))
+        unidades = data.unidades || unidades
+        setPegUnidades(unidades)
+      }
+      // Nombres de los procesos por los que pasó el producto (para el QR)
+      const procesos = (pegatinasOrden.tareas || []).map((t) => t.procesoNombre).filter(Boolean)
+      await generarPdfPegatinas({
+        empresa,
+        ordenId: pegatinasOrden.id,
+        productoNombre: pegatinasOrden.productoNombre,
+        colorNombre: pegatinasOrden.colorNombre,
+        unidades,
+        procesos,
+      })
+    } catch (e) {
+      notify.error('Error al generar pegatinas: ' + e.message)
+    } finally {
+      setPegGenerando(false)
     }
   }
 
@@ -881,6 +938,11 @@ export default function GestionProduccion() {
                               ✕ Cancelar
                             </button>
                           )}
+                          {orden.estado === 'terminada' && (
+                            <button className="btn-secondary btn-sm" onClick={() => abrirPegatinas(orden)} title="Imprimir pegatinas QR de garantía">
+                              🏷️ Pegatinas
+                            </button>
+                          )}
                           {puedeEditar && orden.estado === 'cancelada' && (
                             <button className="btn-secondary btn-sm" onClick={() => handleCambiarEstado(orden, 'en_progreso')} title="Reabrir">
                               ◀ Reabrir
@@ -950,6 +1012,9 @@ export default function GestionProduccion() {
                               <button className="btn-secondary btn-sm" onClick={() => handleCambiarEstado(orden, 'pendiente')} title="Volver a pendiente" aria-label="Volver a pendiente">◀</button>
                               <button className="btn-primary btn-sm" disabled={!!motivo} title={motivo || 'Marcar terminada'} onClick={() => handleCambiarEstado(orden, 'terminada')}>✓ Terminar</button>
                             </>
+                          )}
+                          {estado === 'terminada' && (
+                            <button className="btn-secondary btn-sm" onClick={() => abrirPegatinas(orden)} title="Imprimir pegatinas QR de garantía">🏷️</button>
                           )}
                           {puedeEditar && (estado === 'terminada' || estado === 'cancelada') && (
                             <button className="btn-secondary btn-sm" onClick={() => handleCambiarEstado(orden, 'en_progreso')} title="Reabrir">◀ Reabrir</button>
@@ -1236,6 +1301,52 @@ export default function GestionProduccion() {
             <div className="form-actions">
               <button className="btn-secondary" onClick={cerrarDetalleOrden}>Cerrar</button>
             </div>
+          </div>
+        </>
+      )}
+
+      {/* Modal: pegatinas QR de garantía */}
+      {pegatinasOrden && (
+        <>
+          <div className="overlay" onClick={cerrarPegatinas} />
+          <div className="card modal">
+            <h3>🏷️ Pegatinas de garantía — Orden #{pegatinasOrden.id}</h3>
+            <p className="muted small">
+              {pegatinasOrden.productoNombre}{pegatinasOrden.colorNombre ? ` (${pegatinasOrden.colorNombre})` : ''}
+            </p>
+
+            {pegCargando ? (
+              <p className="muted">Cargando unidades…</p>
+            ) : pegUnidades.length === 0 ? (
+              <p className="muted">Esta orden no generó unidades para etiquetar.</p>
+            ) : (
+              <>
+                <p className="small">
+                  Se imprimirá <strong>{pegUnidades.length}</strong> pegatina(s), una por unidad producida.
+                  Cada una lleva un QR que muestra los datos de garantía sin necesidad de internet.
+                </p>
+                <div className="row" style={{ alignItems: 'flex-end' }}>
+                  <div style={{ flex: 1 }}>
+                    <label>Meses de garantía</label>
+                    <input
+                      type="number" min="0" step="1" value={pegMeses}
+                      onChange={(e) => setPegMeses(e.target.value)}
+                    />
+                  </div>
+                  <div style={{ flex: 2 }}>
+                    <p className="muted small" style={{ margin: 0 }}>
+                      Folios: {pegUnidades[0].folio} … {pegUnidades[pegUnidades.length - 1].folio}
+                    </p>
+                  </div>
+                </div>
+                <div className="form-actions">
+                  <button className="btn-secondary" onClick={cerrarPegatinas}>Cancelar</button>
+                  <button className="btn-primary" onClick={imprimirPegatinas} disabled={pegGenerando}>
+                    {pegGenerando ? 'Generando…' : '🖨️ Generar PDF'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </>
       )}

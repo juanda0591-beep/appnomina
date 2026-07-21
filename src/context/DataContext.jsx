@@ -436,6 +436,10 @@ export function DataProvider({ children }) {
   // Chequeo preventivo de materiales (MRP): no muta nada, solo consulta faltantes.
   const chequearMaterialOrden = (params) =>
     http('/produccion/chequeo-material', { method: 'POST', body: JSON.stringify(params) })
+  // Unidades (folios) de una orden terminada, para imprimir las pegatinas QR.
+  const getUnidadesOrden = (id) => http(`/ordenes-produccion/${id}/unidades`)
+  const setGarantiaOrden = (id, garantiaMeses) =>
+    http(`/ordenes-produccion/${id}/garantia`, { method: 'PUT', body: JSON.stringify({ garantiaMeses }) })
 
   // ---------- MATERIALES ----------
   const addMaterial = async (material) => {
@@ -583,6 +587,8 @@ export function DataProvider({ children }) {
     addOrdenProduccion,
     updateOrdenProduccion,
     terminarOrdenProduccion,
+    getUnidadesOrden,
+    setGarantiaOrden,
     deleteOrdenProduccion,
     cambiarEstadoOrden,
     cancelarOrdenProduccion,

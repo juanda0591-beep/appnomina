@@ -1519,6 +1519,48 @@ function ordenProduccionSalida(o) {
   }
 }
 
+// Suma meses a una fecha ISO y devuelve la fecha resultante en ISO (solo día).
+function sumarMeses(fechaIso, meses) {
+  if (!fechaIso) return null
+  const d = new Date(fechaIso)
+  if (isNaN(d)) return null
+  d.setMonth(d.getMonth() + (Number(meses) || 0))
+  return d.toISOString().slice(0, 10)
+}
+
+// Da forma a una unidad para el frontend, calculando la fecha de fin de garantía.
+function unidadSalida(u) {
+  return {
+    id: u.id,
+    ordenId: u.orden_id,
+    folio: u.folio,
+    fechaProduccion: u.fecha_produccion || null,
+    garantiaMeses: u.garantia_meses,
+    garantiaHasta: sumarMeses(u.fecha_produccion, u.garantia_meses),
+  }
+}
+
+// Genera las unidades físicas de una orden (una por producto producido) con folio
+// único para su pegatina de garantía. Idempotente: si la orden ya tiene unidades,
+// no hace nada (para que reabrir/re-terminar no las duplique).
+function generarUnidadesOrden(orden, fechaProduccion, garantiaMeses = 6) {
+  const yaHay = db.prepare('SELECT COUNT(*) AS n FROM produccion_unidades WHERE orden_id = ?').get(orden.id)
+  if (yaHay && yaHay.n > 0) return
+  // Cuántas unidades: las realmente producidas (último proceso), o la cantidad
+  // planificada si aún no hay procesos. Se redondea (unidades físicas enteras).
+  const producidas = cantidadAbastecerOrden(orden.id)
+  const n = Math.max(0, Math.round(producidas > 0 ? producidas : Number(orden.cantidad) || 0))
+  if (n === 0) return
+  const insert = db.prepare(
+    `INSERT INTO produccion_unidades (orden_id, folio, fecha_produccion, garantia_meses, creado)
+     VALUES (?, ?, ?, ?, ?)`
+  )
+  for (let i = 1; i <= n; i++) {
+    const folio = `OP${orden.id}-${String(i).padStart(3, '0')}`
+    insert.run(orden.id, folio, fechaProduccion, garantiaMeses, fechaProduccion)
+  }
+}
+
 // Cantidad con la que una orden abastece el stock del producto al terminarse:
 // la cantidad del ÚLTIMO proceso (el más reciente por creación), para reflejar
 // la merma entre procesos (ej: cortaron 30 pero ensamblaron 28 → suma 28).
@@ -1650,9 +1692,47 @@ app.post('/api/ordenes-produccion/:id/terminar', permisoRequired('gestion-produc
     db.prepare("UPDATE ordenes_produccion SET estado = 'terminada', actualizado = ? WHERE id = ?").run(ahora, orden.id)
     // Al terminar, abastece el stock del producto con la cantidad del último proceso
     abastecerStockProducto(orden)
+    // Genera las unidades con folio para las pegatinas de garantía (idempotente)
+    generarUnidadesOrden(orden, ahora)
   })
   terminar()
   res.json(ordenProduccionSalida(db.prepare('SELECT * FROM ordenes_produccion WHERE id = ?').get(orden.id)))
+})
+
+// Unidades producidas de una orden (para imprimir las pegatinas QR de garantía).
+// Devuelve cada folio con su fecha de producción y la fecha de fin de garantía.
+app.get('/api/ordenes-produccion/:id/unidades', permisoRequired('gestion-produccion', 'ver'), (req, res) => {
+  const orden = db.prepare('SELECT * FROM ordenes_produccion WHERE id = ?').get(req.params.id)
+  if (!orden) return res.status(404).json({ error: 'Orden no encontrada' })
+  // Órdenes terminadas antes de existir esta función no tienen unidades: se generan
+  // al vuelo usando su fecha de terminado (actualizado) como fecha de producción.
+  if (orden.estado === 'terminada') {
+    const hay = db.prepare('SELECT COUNT(*) AS n FROM produccion_unidades WHERE orden_id = ?').get(orden.id)
+    if (!hay || hay.n === 0) generarUnidadesOrden(orden, orden.actualizado || orden.creado || new Date().toISOString())
+  }
+  const unidades = db
+    .prepare('SELECT * FROM produccion_unidades WHERE orden_id = ? ORDER BY id ASC')
+    .all(orden.id)
+    .map(unidadSalida)
+  res.json({
+    ordenId: orden.id,
+    productoNombre: orden.producto_nombre || '',
+    colorNombre: orden.color_nombre || '',
+    unidades,
+  })
+})
+
+// Ajusta los meses de garantía de todas las unidades de una orden (default 6).
+app.put('/api/ordenes-produccion/:id/garantia', permisoRequired('gestion-produccion', 'editar'), (req, res) => {
+  const orden = db.prepare('SELECT * FROM ordenes_produccion WHERE id = ?').get(req.params.id)
+  if (!orden) return res.status(404).json({ error: 'Orden no encontrada' })
+  const meses = Math.max(0, Math.round(Number(req.body?.garantiaMeses) || 0))
+  db.prepare('UPDATE produccion_unidades SET garantia_meses = ? WHERE orden_id = ?').run(meses, orden.id)
+  const unidades = db
+    .prepare('SELECT * FROM produccion_unidades WHERE orden_id = ? ORDER BY id ASC')
+    .all(orden.id)
+    .map(unidadSalida)
+  res.json({ ordenId: orden.id, unidades })
 })
 
 // Cambio de estado para el tablero Kanban. Solo permite los movimientos manuales

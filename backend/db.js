@@ -424,6 +424,18 @@ db.exec(`
     desperdicio_pct REAL,
     creado TEXT
   );
+
+  -- Unidades físicas producidas por una orden, cada una con folio único para su
+  -- pegatina QR de garantía. Se generan al terminar la orden.
+  CREATE TABLE IF NOT EXISTS produccion_unidades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    orden_id INTEGER NOT NULL,
+    folio TEXT NOT NULL UNIQUE,            -- OP{orden}-{secuencial}, ej: OP12-001
+    fecha_produccion TEXT,                 -- fecha en que se terminó la orden
+    garantia_meses INTEGER NOT NULL DEFAULT 6,
+    creado TEXT,
+    FOREIGN KEY (orden_id) REFERENCES ordenes_produccion(id) ON DELETE CASCADE
+  );
 `)
 
 // Cataloga los nombres de proceso que ya existían por producto (texto libre)
