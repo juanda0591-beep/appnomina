@@ -1159,3 +1159,208 @@ export function descargarCSV(nombreArchivo, filas) {
   a.click()
   URL.revokeObjectURL(url)
 }
+
+// ── Cortes y Planos ─────────────────────────────────────────────────────────
+// Paleta de piezas (misma idea que PlanoCorte.jsx) para el plano en el PDF.
+const COLORES_PIEZA = [
+  [147, 197, 253], [167, 243, 208], [252, 211, 77], [252, 165, 165],
+  [196, 181, 253], [249, 168, 212], [94, 234, 212], [253, 186, 116],
+]
+function colorDePieza(nombre) {
+  let h = 0
+  const s = String(nombre || '')
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % COLORES_PIEZA.length
+  return COLORES_PIEZA[h]
+}
+const cm1 = (mm) => (Math.round(Number(mm) * 10) / 100).toLocaleString('es-CO', { maximumFractionDigits: 1 })
+
+// Dibuja una lámina con sus piezas colocadas, a escala, dentro del ancho dado.
+// Coordenadas de piezas en mm. Devuelve la nueva Y tras el dibujo.
+function dibujarLaminaPdf(doc, x, y, anchoDisp, lamina, piezas) {
+  const escala = anchoDisp / lamina.ancho
+  const w = lamina.ancho * escala
+  const h = lamina.largo * escala
+
+  // Contorno de la lámina
+  doc.setFillColor(255, 255, 255)
+  doc.setDrawColor(...C.dark)
+  doc.setLineWidth(0.5)
+  doc.rect(x, y, w, h, 'FD')
+
+  // Piezas
+  for (const p of piezas) {
+    const px = x + p.x * escala
+    const py = y + p.y * escala
+    const pw = p.ancho * escala
+    const ph = p.largo * escala
+    doc.setFillColor(...colorDePieza(p.nombre))
+    doc.setDrawColor(30, 41, 59)
+    doc.setLineWidth(0.3)
+    doc.rect(px, py, pw, ph, 'FD')
+    // Etiqueta solo si la pieza tiene espacio suficiente
+    if (pw > 16 && ph > 9) {
+      doc.setFontSize(6.5)
+      doc.setTextColor(...C.dark)
+      const etiqueta = `${p.nombre}`
+      const medida = `${cm1(p.ancho)}x${cm1(p.largo)}${p.rotada ? ' ↻' : ''}`
+      doc.text(doc.splitTextToSize(etiqueta, pw - 2), px + pw / 2, py + ph / 2 - 1, { align: 'center' })
+      doc.setFontSize(6)
+      doc.setTextColor(...C.muted)
+      doc.text(medida, px + pw / 2, py + ph / 2 + 3, { align: 'center' })
+    }
+  }
+  doc.setTextColor(...C.dark)
+  return y + h
+}
+
+// Incrusta la imagen del dibujo del mueble (PNG dataURL) centrada y a escala.
+// Devuelve la nueva Y. Máximo 85 mm de alto para dejar espacio al plano.
+function dibujarDisenoPdf(doc, marginX, y, img) {
+  const pageW = doc.internal.pageSize.getWidth()
+  const pageH = doc.internal.pageSize.getHeight()
+  let props
+  try { props = doc.getImageProperties(img) } catch { return y }
+  const maxW = pageW - marginX * 2
+  const maxH = 85
+  let w = maxW
+  let h = (props.height * w) / props.width
+  if (h > maxH) { h = maxH; w = (props.width * h) / props.height }
+
+  if (y + h + 14 > pageH - 20) { doc.addPage(); y = 20 }
+
+  doc.setFontSize(11)
+  doc.setFont(undefined, 'bold')
+  doc.setTextColor(...C.dark)
+  doc.text('Diseño del mueble', marginX, y)
+  doc.setFont(undefined, 'normal')
+  y += 4
+
+  const x = marginX + (maxW - w) / 2 // centrado
+  // Marco sutil detrás del dibujo
+  doc.setFillColor(248, 250, 252)
+  doc.setDrawColor(...C.border)
+  doc.setLineWidth(0.3)
+  doc.roundedRect(x - 3, y - 3, w + 6, h + 6, 2, 2, 'FD')
+  doc.addImage(img, 'PNG', x, y, w, h)
+  return y + h + 10
+}
+
+// Genera y descarga el PDF del plan de corte optimizado.
+// `resultado` = salida de calcularCorte(); `config` = { productoNombre, unidades,
+// sierra, costoLamina }; `disenoImg` = PNG del dibujo. Medidas mostradas en cm.
+export function generarPdfCortes({ empresa, resultado: r, config = {}, disenoImg = null }) {
+  const doc = new jsPDF()
+  const marginX = 14
+  const pageW = doc.internal.pageSize.getWidth()
+  const pageH = doc.internal.pageSize.getHeight()
+
+  let y = drawEncabezadoEmpresa(doc, empresa, marginX)
+  y = tituloDoc(doc, marginX, y, 'Plan de corte', config.productoNombre || undefined)
+
+  // Metadatos del corte
+  const filas = [
+    ['Lámina', `${cm1(r.lamina.ancho)} × ${cm1(r.lamina.largo)} cm${r.lamina.espesor ? ` · ${r.lamina.espesor} mm` : ''}`],
+    ['Unidades', String(config.unidades || 1)],
+    ['Sierra/disco', `${config.sierra ?? '—'} mm`],
+  ]
+  y = metaDatos(doc, marginX, y, filas)
+
+  // Dibujo del mueble (si se generó por medidas), centrado y a escala.
+  if (disenoImg) y = dibujarDisenoPdf(doc, marginX, y, disenoImg)
+
+  // Resumen de resultados (tabla de una fila)
+  autoTable(doc, {
+    ...T(),
+    startY: y,
+    head: [['Láminas', 'Desperdicio', 'Costo total', 'Costo desperdiciado', 'Retazo mayor']],
+    body: [[
+      String(r.cantidadLaminas),
+      `${r.desperdicioPct}%`,
+      formatCOP(r.costoTotal),
+      formatCOP(Math.round(r.costoTotal * r.desperdicioPct / 100)),
+      r.retazoMayor?.ancho > 0 ? `${cm1(r.retazoMayor.ancho)} × ${cm1(r.retazoMayor.largo)} cm` : '—',
+    ]],
+    columnStyles: { 0: { halign: 'right' }, 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' } },
+  })
+  y = doc.lastAutoTable.finalY + 6
+
+  if (r.sinCabida?.length > 0) {
+    doc.setFontSize(9)
+    doc.setTextColor(...C.danger)
+    const txt = `⚠ ${r.sinCabida.length} pieza(s) no caben en la lámina: ${r.sinCabida.map((p) => p.nombre).join(', ')}`
+    const ls = doc.splitTextToSize(txt, pageW - marginX * 2)
+    doc.text(ls, marginX, y)
+    y += ls.length * 4 + 4
+    doc.setTextColor(...C.dark)
+  }
+
+  // Lista consolidada de piezas (agrupadas por nombre + medida)
+  y = tablaPiezasCortes(doc, marginX, y, r)
+
+  // Planos de cada lámina, uno por bloque
+  const anchoDisp = pageW - marginX * 2
+  for (const lam of r.laminas) {
+    const escala = anchoDisp / r.lamina.ancho
+    const altoPlano = r.lamina.largo * escala
+    // Salto de página si el plano no cabe en lo que queda
+    if (y + altoPlano + 18 > pageH - 20) { doc.addPage(); y = 20 }
+    doc.setFontSize(11)
+    doc.setFont(undefined, 'bold')
+    doc.setTextColor(...C.dark)
+    doc.text(`Lámina ${lam.indice} de ${r.cantidadLaminas}`, marginX, y)
+    doc.setFont(undefined, 'normal')
+    doc.setFontSize(8)
+    doc.setTextColor(...C.muted)
+    doc.text(`${cm1(r.lamina.ancho)} × ${cm1(r.lamina.largo)} cm · ${lam.piezas.length} pieza(s)`, pageW - marginX, y, { align: 'right' })
+    y += 3
+    doc.setTextColor(...C.dark)
+    y = dibujarLaminaPdf(doc, marginX, y, anchoDisp, r.lamina, lam.piezas) + 10
+  }
+
+  pieDePagina(doc, empresa, marginX)
+  const nombre = (config.productoNombre || 'mueble').replace(/\s+/g, '_')
+  doc.save(`plan_corte_${nombre}.pdf`)
+}
+
+// Exporta el despiece (piezas) a CSV para abrir en Excel. Medidas en cm.
+// `piezas` = filas de la tabla del generador/manual: { nombre, ancho, alto,
+// cantidad, permiteRotar }. Se asume ancho/alto ya en cm (como los muestra la UI).
+export function exportarDespieceCSV({ productoNombre, piezas }) {
+  const filas = [['Pieza', 'Ancho (cm)', 'Alto (cm)', 'Cantidad', 'Veta']]
+  for (const p of piezas) {
+    if (!String(p.nombre || '').trim()) continue
+    filas.push([
+      p.nombre, p.ancho, p.alto, p.cantidad || 1,
+      p.permiteRotar ? 'libre' : 'fija',
+    ])
+  }
+  const nombre = (productoNombre || 'mueble').replace(/\s+/g, '_')
+  descargarCSV(`despiece_${nombre}.csv`, filas)
+}
+
+// Tabla consolidada de piezas del plan de corte (cuenta total por tipo).
+function tablaPiezasCortes(doc, marginX, y, r) {
+  const conteo = new Map()
+  for (const lam of r.laminas) {
+    for (const p of lam.piezas) {
+      const key = `${p.nombre}|${Math.round(p.ancho)}|${Math.round(p.largo)}`
+      const ex = conteo.get(key)
+      if (ex) ex.cant++
+      else conteo.set(key, { nombre: p.nombre, ancho: p.ancho, largo: p.largo, cant: 1 })
+    }
+  }
+  const filas = [...conteo.values()]
+  if (!filas.length) return y
+  const total = filas.reduce((s, f) => s + f.cant, 0)
+  autoTable(doc, {
+    ...T(),
+    startY: y,
+    head: [['Pieza', 'Ancho (cm)', 'Alto (cm)', 'Cantidad']],
+    body: filas.map((f) => [f.nombre, cm1(f.ancho), cm1(f.largo), String(f.cant)]),
+    foot: [['Total piezas', '', '', String(total)]],
+    footStyles: { fillColor: C.headBg, textColor: C.dark, fontStyle: 'bold' },
+    columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' } },
+    didParseCell: (data) => { if ([1, 2, 3].includes(data.column.index)) data.cell.styles.halign = 'right' },
+  })
+  return doc.lastAutoTable.finalY + 8
+}

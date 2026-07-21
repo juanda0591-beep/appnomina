@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, lazy, Suspense } from 'react'
 import { NavLink, Route, Routes, useLocation, Navigate } from 'react-router-dom'
 import Dashboard from './pages/Dashboard.jsx'
 import Productos from './pages/Productos.jsx'
@@ -20,6 +20,8 @@ import Ventas from './pages/Ventas.jsx'
 import Empresa from './pages/Empresa.jsx'
 import Usuarios from './pages/Usuarios.jsx'
 import Cuenta from './pages/Cuenta.jsx'
+// Carga perezosa: Konva/react-konva solo pesan al entrar a esta ruta.
+const CortesPlanos = lazy(() => import('./pages/CortesPlanos.jsx'))
 import { useData } from './context/DataContext.jsx'
 import { useAuth } from './context/AuthContext.jsx'
 
@@ -44,6 +46,7 @@ const links = [
     items: [
       { to: '/materiales', label: '🧱 Materiales', pagina: 'materiales' },
       { to: '/colores', label: '🎨 Colores', pagina: 'colores' },
+      { to: '/cortes-planos', label: '✂️ Cortes y Planos', pagina: 'cortes-planos' },
       { to: '/gestion-produccion', label: '🏭 Producción', pagina: 'gestion-produccion' },
       { to: '/produccion-dashboard', label: '📈 Panel Producción', pagina: 'produccion-dashboard' },
     ],
@@ -217,6 +220,11 @@ export default function App() {
           <Route path="/ventas" element={protegida('ventas', <Ventas />)} />
           <Route path="/materiales" element={protegida('materiales', <Materiales />)} />
           <Route path="/colores" element={protegida('colores', <Colores />)} />
+          <Route path="/cortes-planos" element={protegida('cortes-planos', (
+            <Suspense fallback={<div className="banner">Cargando módulo…</div>}>
+              <CortesPlanos />
+            </Suspense>
+          ))} />
           <Route path="/gestion-produccion" element={protegida('gestion-produccion', <GestionProduccion />)} />
           <Route path="/produccion-dashboard" element={protegida('produccion-dashboard', <ProduccionDashboard />)} />
           <Route path="/empleados" element={protegida('empleados', <Empleados />)} />

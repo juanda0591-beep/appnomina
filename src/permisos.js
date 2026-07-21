@@ -14,6 +14,7 @@ export const PAGINAS = [
   { id: 'productos', label: '📦 Productos', to: '/productos', acciones: ['ver', 'crear', 'editar', 'eliminar'] },
   { id: 'materiales', label: '🧱 Materiales', to: '/materiales', acciones: ['ver', 'crear', 'editar', 'eliminar'] },
   { id: 'colores', label: '🎨 Colores', to: '/colores', acciones: ['ver', 'crear', 'editar', 'eliminar'] },
+  { id: 'cortes-planos', label: '✂️ Cortes y Planos', to: '/cortes-planos', acciones: ['ver', 'crear', 'editar', 'eliminar'] },
   { id: 'gestion-produccion', label: '🏭 Gestión de Producción', to: '/gestion-produccion', acciones: ['ver', 'crear', 'editar', 'eliminar'] },
   { id: 'produccion-dashboard', label: '📈 Dashboard Producción', to: '/produccion-dashboard', acciones: ['ver'] },
   { id: 'empleados', label: '👷 Empleados', to: '/empleados', acciones: ['ver', 'crear', 'editar', 'eliminar'] },

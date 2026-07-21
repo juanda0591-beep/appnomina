@@ -18,6 +18,7 @@ import {
   eliminarUsuario,
   resetPassword,
 } from './auth.js'
+import { optimizarCorte } from './corte.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -671,6 +672,176 @@ app.get('/api/materiales/:id/movimientos', permisoRequired('materiales', 'ver'),
     .prepare('SELECT * FROM material_movimientos WHERE material_id = ? ORDER BY fecha DESC, id DESC')
     .all(req.params.id)
   res.json(movimientos.map(movimientoMaterialSalida))
+})
+
+// ============ MÓDULO CORTES Y PLANOS ============
+function laminaSalida(l) {
+  return {
+    id: l.id,
+    materialId: l.material_id,
+    materialNombre: l.material_nombre || '',
+    ancho: l.ancho,
+    largo: l.largo,
+    espesor: l.espesor,
+    costo: l.costo,
+  }
+}
+
+function piezaSalida(p) {
+  return {
+    id: p.id,
+    productoId: p.producto_id,
+    nombre: p.nombre,
+    ancho: p.ancho,
+    alto: p.alto,
+    cantidad: p.cantidad,
+    materialId: p.material_id || null,
+    materialNombre: p.material_nombre || '',
+    canto: p.canto || '',
+    permiteRotar: p.permite_rotar !== 0,
+    orden: p.orden,
+  }
+}
+
+// ---- Láminas disponibles ----
+app.get('/api/laminas', permisoAnyRequired([
+  ['cortes-planos', 'ver'],
+  ['materiales', 'ver'],
+]), (req, res) => {
+  const laminas = db.prepare(
+    `SELECT l.*, m.nombre AS material_nombre
+     FROM laminas_stock l LEFT JOIN materiales m ON m.id = l.material_id
+     ORDER BY m.nombre, l.espesor`
+  ).all()
+  res.json(laminas.map(laminaSalida))
+})
+
+app.post('/api/laminas', permisoRequired('cortes-planos', 'crear'), (req, res) => {
+  const { materialId, ancho, largo, espesor, costo = 0 } = req.body
+  if (!materialId) return res.status(400).json({ error: 'El material es obligatorio' })
+  if (!(Number(ancho) > 0) || !(Number(largo) > 0)) return res.status(400).json({ error: 'Ancho y largo deben ser mayores a 0' })
+  const r = db.prepare(
+    'INSERT INTO laminas_stock (material_id, ancho, largo, espesor, costo) VALUES (?, ?, ?, ?, ?)'
+  ).run(Number(materialId), Number(ancho), Number(largo), Number(espesor) || 0, Number(costo) || 0)
+  const l = db.prepare(
+    `SELECT l.*, m.nombre AS material_nombre FROM laminas_stock l
+     LEFT JOIN materiales m ON m.id = l.material_id WHERE l.id = ?`
+  ).get(r.lastInsertRowid)
+  res.json(laminaSalida(l))
+})
+
+app.put('/api/laminas/:id', permisoRequired('cortes-planos', 'editar'), (req, res) => {
+  const { materialId, ancho, largo, espesor, costo = 0 } = req.body
+  db.prepare(
+    'UPDATE laminas_stock SET material_id = ?, ancho = ?, largo = ?, espesor = ?, costo = ? WHERE id = ?'
+  ).run(Number(materialId), Number(ancho), Number(largo), Number(espesor) || 0, Number(costo) || 0, req.params.id)
+  const l = db.prepare(
+    `SELECT l.*, m.nombre AS material_nombre FROM laminas_stock l
+     LEFT JOIN materiales m ON m.id = l.material_id WHERE l.id = ?`
+  ).get(req.params.id)
+  res.json(laminaSalida(l))
+})
+
+app.delete('/api/laminas/:id', permisoRequired('cortes-planos', 'eliminar'), (req, res) => {
+  db.prepare('DELETE FROM laminas_stock WHERE id = ?').run(req.params.id)
+  res.json({ ok: true })
+})
+
+// ---- Despiece (piezas) de un producto ----
+app.get('/api/productos/:id/piezas', permisoAnyRequired([
+  ['cortes-planos', 'ver'],
+  ['productos', 'ver'],
+]), (req, res) => {
+  const piezas = db.prepare(
+    `SELECT p.*, m.nombre AS material_nombre FROM producto_piezas p
+     LEFT JOIN materiales m ON m.id = p.material_id
+     WHERE p.producto_id = ? ORDER BY p.orden, p.id`
+  ).all(req.params.id)
+  res.json(piezas.map(piezaSalida))
+})
+
+// Reemplaza el despiece completo del producto (recibe el array de piezas).
+app.put('/api/productos/:id/piezas', permisoRequired('cortes-planos', 'editar'), (req, res) => {
+  const { id } = req.params
+  const { piezas = [] } = req.body
+  const producto = db.prepare('SELECT id FROM productos WHERE id = ?').get(id)
+  if (!producto) return res.status(404).json({ error: 'Producto no encontrado' })
+
+  const guardar = db.transaction(() => {
+    db.prepare('DELETE FROM producto_piezas WHERE producto_id = ?').run(id)
+    const insert = db.prepare(
+      `INSERT INTO producto_piezas (producto_id, nombre, ancho, alto, cantidad, material_id, canto, permite_rotar, orden)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    piezas.forEach((p, i) => {
+      if (!p.nombre || !p.nombre.trim()) return
+      insert.run(
+        id, p.nombre.trim(), Number(p.ancho) || 0, Number(p.alto) || 0,
+        Math.max(1, Number(p.cantidad) || 1),
+        p.materialId || null, (p.canto || '').trim() || null,
+        p.permiteRotar === false || p.permiteRotar === 0 ? 0 : 1, i
+      )
+    })
+  })
+  guardar()
+  const piezasGuardadas = db.prepare(
+    `SELECT p.*, m.nombre AS material_nombre FROM producto_piezas p
+     LEFT JOIN materiales m ON m.id = p.material_id
+     WHERE p.producto_id = ? ORDER BY p.orden, p.id`
+  ).all(id)
+  res.json(piezasGuardadas.map(piezaSalida))
+})
+
+// ---- Cálculo de optimización de corte ----
+// Recibe piezas + lámina + opciones, corre el motor guillotina y devuelve el layout.
+// No persiste: solo calcula (para vista previa en vivo).
+app.post('/api/cortes/calcular', permisoRequired('cortes-planos', 'ver'), (req, res) => {
+  const { piezas = [], lamina, opciones = {} } = req.body
+  if (!lamina || !(Number(lamina.ancho) > 0) || !(Number(lamina.largo) > 0)) {
+    return res.status(400).json({ error: 'Debes indicar las medidas de la lámina' })
+  }
+  if (!piezas.length) return res.status(400).json({ error: 'No hay piezas para optimizar' })
+  const resultado = optimizarCorte(piezas, lamina, opciones)
+  res.json(resultado)
+})
+
+// ---- Planos guardados ----
+app.get('/api/planos-corte', permisoRequired('cortes-planos', 'ver'), (req, res) => {
+  const planos = db.prepare(
+    'SELECT id, nombre, origen, origen_id, desperdicio_pct, creado FROM planos_corte ORDER BY id DESC'
+  ).all()
+  res.json(planos.map((p) => ({
+    id: p.id, nombre: p.nombre, origen: p.origen, origenId: p.origen_id,
+    desperdicioPct: p.desperdicio_pct, creado: p.creado,
+  })))
+})
+
+app.get('/api/planos-corte/:id', permisoRequired('cortes-planos', 'ver'), (req, res) => {
+  const p = db.prepare('SELECT * FROM planos_corte WHERE id = ?').get(req.params.id)
+  if (!p) return res.status(404).json({ error: 'Plano no encontrado' })
+  res.json({
+    id: p.id, nombre: p.nombre, origen: p.origen, origenId: p.origen_id,
+    desperdicioPct: p.desperdicio_pct, creado: p.creado,
+    resultado: JSON.parse(p.resultado_json),
+  })
+})
+
+app.post('/api/planos-corte', permisoRequired('cortes-planos', 'crear'), (req, res) => {
+  const { nombre, origen = 'manual', origenId = null, resultado, desperdicioPct = 0 } = req.body
+  if (!resultado) return res.status(400).json({ error: 'Falta el resultado del cálculo' })
+  const r = db.prepare(
+    `INSERT INTO planos_corte (nombre, origen, origen_id, resultado_json, desperdicio_pct, creado)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(
+    (nombre || '').trim() || 'Plano sin nombre', origen, origenId || null,
+    JSON.stringify(resultado), Number(desperdicioPct) || 0, new Date().toISOString()
+  )
+  res.json({ id: r.lastInsertRowid, ok: true })
+})
+
+app.delete('/api/planos-corte/:id', permisoRequired('cortes-planos', 'eliminar'), (req, res) => {
+  db.prepare('DELETE FROM planos_corte WHERE id = ?').run(req.params.id)
+  res.json({ ok: true })
 })
 
 // ============ PROCESOS GLOBALES ============

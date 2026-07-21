@@ -385,6 +385,45 @@ db.exec(`
     FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE CASCADE,
     FOREIGN KEY (color_id) REFERENCES colores(id) ON DELETE SET NULL
   );
+
+  -- ============ MÓDULO CORTES Y PLANOS ============
+  -- Catálogo de láminas disponibles por material (medidas estándar de melamina/MDF).
+  CREATE TABLE IF NOT EXISTS laminas_stock (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    material_id INTEGER NOT NULL,
+    ancho REAL NOT NULL,                   -- mm
+    largo REAL NOT NULL,                   -- mm
+    espesor REAL NOT NULL,                 -- mm
+    costo REAL NOT NULL DEFAULT 0,
+    FOREIGN KEY (material_id) REFERENCES materiales(id) ON DELETE CASCADE
+  );
+
+  -- Despiece de un producto: cada fila es un tipo de pieza (se multiplica por cantidad).
+  CREATE TABLE IF NOT EXISTS producto_piezas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    producto_id INTEGER NOT NULL,
+    nombre TEXT NOT NULL,
+    ancho REAL NOT NULL,                   -- mm
+    alto REAL NOT NULL,                    -- mm
+    cantidad INTEGER NOT NULL DEFAULT 1,
+    material_id INTEGER,
+    canto TEXT,                            -- ej "arriba,abajo,izq,der"
+    permite_rotar INTEGER NOT NULL DEFAULT 1,
+    orden INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE CASCADE,
+    FOREIGN KEY (material_id) REFERENCES materiales(id) ON DELETE SET NULL
+  );
+
+  -- Resultado guardado de un cálculo de optimización de corte.
+  CREATE TABLE IF NOT EXISTS planos_corte (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT,
+    origen TEXT,                           -- 'producto' | 'manual'
+    origen_id INTEGER,
+    resultado_json TEXT NOT NULL,
+    desperdicio_pct REAL,
+    creado TEXT
+  );
 `)
 
 // Cataloga los nombres de proceso que ya existían por producto (texto libre)

@@ -459,6 +459,20 @@ export function DataProvider({ children }) {
   }
   const getMaterialMovimientos = (id) => http(`/materiales/${id}/movimientos`)
 
+  // ---------- CORTES Y PLANOS ----------
+  const getLaminas = () => http('/laminas')
+  const addLamina = (lamina) => http('/laminas', { method: 'POST', body: JSON.stringify(lamina) })
+  const updateLamina = (id, lamina) => http(`/laminas/${id}`, { method: 'PUT', body: JSON.stringify(lamina) })
+  const deleteLamina = (id) => http(`/laminas/${id}`, { method: 'DELETE' })
+  const getPiezas = (productoId) => http(`/productos/${productoId}/piezas`)
+  const guardarPiezas = (productoId, piezas) =>
+    http(`/productos/${productoId}/piezas`, { method: 'PUT', body: JSON.stringify({ piezas }) })
+  const calcularCorte = (payload) => http('/cortes/calcular', { method: 'POST', body: JSON.stringify(payload) })
+  const getPlanos = () => http('/planos-corte')
+  const getPlano = (id) => http(`/planos-corte/${id}`)
+  const guardarPlano = (plano) => http('/planos-corte', { method: 'POST', body: JSON.stringify(plano) })
+  const deletePlano = (id) => http(`/planos-corte/${id}`, { method: 'DELETE' })
+
   // ---------- PROCESOS GLOBALES ----------
   const addProcesoGlobal = async (nombre) => {
     const creado = await http('/procesos-globales', { method: 'POST', body: JSON.stringify({ nombre }) })
@@ -577,6 +591,17 @@ export function DataProvider({ children }) {
     deleteMaterial,
     registrarEntradaMaterial,
     getMaterialMovimientos,
+    getLaminas,
+    addLamina,
+    updateLamina,
+    deleteLamina,
+    getPiezas,
+    guardarPiezas,
+    calcularCorte,
+    getPlanos,
+    getPlano,
+    guardarPlano,
+    deletePlano,
     addProcesoGlobal,
     getEmpleado,
     getProducto,

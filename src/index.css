@@ -473,6 +473,20 @@ button:active:not(:disabled) { transform: translateY(1px); }
 }
 .tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
 
+/* Inputs de cota superpuestos sobre la vista frontal (Cortes y Planos) */
+.cota-input {
+  border: 1px solid var(--primary); border-radius: 6px; padding: 2px 4px;
+  font-size: 12px; text-align: center; background: #fff; color: var(--primary);
+  font-weight: 600; z-index: 2;
+}
+.generador-layout { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+.modulos-cards { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.modulo-card {
+  border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
+  background: var(--card);
+}
+.modulo-card label { font-size: 13px; }
+
 /* Control de dinero: tarjetas de balance */
 .balance-cards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 .balance-box {
