@@ -732,6 +732,20 @@ function dibujarFirmas(doc, marginX, empleado, empresa) {
   doc.line(x1, y, x1 + anchoCol, y)
   doc.line(x2, y, x2 + anchoCol, y)
 
+  // Firma dibujada desde el móvil (opcional): se estampa sobre la línea, apoyada en
+  // ella y respetando su proporción original para no verse deformada.
+  if (empresa?.firma) {
+    try {
+      const props = doc.getImageProperties(empresa.firma)
+      const maxW = Math.min(anchoCol * 0.7, 55)
+      const maxH = 14
+      let w = maxW
+      let h = (props.height * w) / props.width
+      if (h > maxH) { h = maxH; w = (props.width * h) / props.height }
+      doc.addImage(empresa.firma, 'PNG', x1, y - h, w, h)
+    } catch { /* dataURL inválido: se deja la línea en blanco */ }
+  }
+
   doc.setFontSize(9)
   doc.setTextColor(90)
   doc.text('Firma del representante', x1, y + 5)

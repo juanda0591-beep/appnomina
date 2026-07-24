@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
-import { notify } from '../utils/notify.js'
+import { notify, confirmar } from '../utils/notify.js'
+import FirmaCanvas from '../components/FirmaCanvas.jsx'
 
-const vacio = { nombre: '', direccion: '', telefono: '', correo: '', nit: '', logo: '' }
+const vacio = { nombre: '', direccion: '', telefono: '', correo: '', nit: '', logo: '', firma: '' }
 
 export default function Empresa() {
   const { empresa, updateEmpresa } = useData()
@@ -38,8 +39,14 @@ export default function Empresa() {
     reader.readAsDataURL(file)
   }
 
+  const onQuitarLogo = async () => {
+    if (!(await confirmar('¿Quitar el logo de la empresa?'))) return
+    setField('logo', '')
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (!form.nombre.trim()) { notify.error('El nombre de la empresa es obligatorio'); return }
     setGuardando(true)
     try {
       await updateEmpresa(form)
@@ -48,6 +55,22 @@ export default function Empresa() {
       notify.error('Error al guardar: ' + err.message)
     } finally {
       setGuardando(false)
+    }
+  }
+
+  // La firma se guarda aparte (no espera al submit general del formulario),
+  // enviando los demás datos actuales para no pisarlos.
+  const [guardandoFirma, setGuardandoFirma] = useState(false)
+  const handleGuardarFirma = async (dataUrl) => {
+    setGuardandoFirma(true)
+    try {
+      await updateEmpresa({ ...form, firma: dataUrl || '' })
+      setField('firma', dataUrl || '')
+      notify.ok(dataUrl ? 'Firma guardada' : 'Firma eliminada')
+    } catch (err) {
+      notify.error('Error al guardar la firma: ' + err.message)
+    } finally {
+      setGuardandoFirma(false)
     }
   }
 
@@ -90,7 +113,7 @@ export default function Empresa() {
         {form.logo && (
           <div className="logo-preview">
             <img src={form.logo} alt="Logo" />
-            <button type="button" className="btn-secondary" onClick={() => setField('logo', '')}>
+            <button type="button" className="btn-secondary" onClick={onQuitarLogo}>
               Quitar logo
             </button>
           </div>
@@ -104,6 +127,23 @@ export default function Empresa() {
           {!puedeEditar && <span className="muted small">No tienes permiso para editar estos datos.</span>}
         </div>
       </form>
+
+      <div className="card">
+        <h3>✍️ Firma del representante</h3>
+        <p className="muted small">
+          Dibuja la firma con el dedo (desde el móvil) o el mouse. Se guarda como imagen
+          y queda impresa en los PDF donde aparece "Firma del representante".
+        </p>
+        {puedeEditar ? (
+          <FirmaCanvas valorInicial={form.firma} onGuardar={handleGuardarFirma} guardando={guardandoFirma} />
+        ) : form.firma ? (
+          <div className="logo-preview">
+            <img src={form.firma} alt="Firma del representante" />
+          </div>
+        ) : (
+          <p className="muted small">No hay firma guardada. No tienes permiso para editarla.</p>
+        )}
+      </div>
     </div>
   )
 }

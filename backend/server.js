@@ -2227,10 +2227,11 @@ app.get('/api/empresa', permisoAnyRequired([
 })
 
 app.put('/api/empresa', permisoRequired('empresa', 'editar'), (req, res) => {
-  const { nombre, direccion, telefono, correo, nit, logo } = req.body
+  const { nombre, direccion, telefono, correo, nit, logo, firma } = req.body
+  if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'El nombre de la empresa es obligatorio' })
   db.prepare(
-    'UPDATE empresa SET nombre=?, direccion=?, telefono=?, correo=?, nit=?, logo=? WHERE id = 1'
-  ).run(nombre || '', direccion || '', telefono || '', correo || '', nit || '', logo || '')
+    'UPDATE empresa SET nombre=?, direccion=?, telefono=?, correo=?, nit=?, logo=?, firma=? WHERE id = 1'
+  ).run(nombre || '', direccion || '', telefono || '', correo || '', nit || '', logo || '', firma || '')
   res.json(db.prepare('SELECT * FROM empresa WHERE id = 1').get())
 })
 

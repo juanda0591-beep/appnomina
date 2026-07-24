@@ -87,7 +87,8 @@ db.exec(`
     telefono TEXT,
     correo TEXT,
     nit TEXT,
-    logo TEXT
+    logo TEXT,
+    firma TEXT
   );
 
   CREATE TABLE IF NOT EXISTS movimientos (
@@ -452,6 +453,13 @@ db.exec(`
 const colsNominas = db.prepare("PRAGMA table_info(nominas)").all()
 if (!colsNominas.some((c) => c.name === 'comentario')) {
   db.exec('ALTER TABLE nominas ADD COLUMN comentario TEXT')
+}
+
+// Firma del representante (dataURL PNG dibujada desde el móvil) para estampar
+// en los PDF donde antes solo había una línea en blanco.
+const colsEmpresa = db.prepare("PRAGMA table_info(empresa)").all()
+if (!colsEmpresa.some((c) => c.name === 'firma')) {
+  db.exec('ALTER TABLE empresa ADD COLUMN firma TEXT')
 }
 
 // Empleado activo/inactivo (soft delete): si tiene historial (tareas, préstamos,
