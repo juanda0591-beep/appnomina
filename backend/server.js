@@ -2714,6 +2714,43 @@ function ventaSalida(v) {
   }
 }
 
+// Bloqueo de stock: valida ANTES de insertar/descontar nada, consolidando
+// cantidades por variante (si el mismo color aparece en más de una línea) para
+// no dejar pasar una venta que en conjunto excede el stock disponible.
+// Lanza Error con el detalle de qué falta si algo no alcanza.
+function validarStockDisponible(itemsValidos) {
+  const requeridoPorVariante = new Map()
+  for (const it of itemsValidos) {
+    if (!it.productoId) continue
+    const producto = db.prepare('SELECT * FROM productos WHERE id = ?').get(it.productoId)
+    if (!producto) continue
+    const variante = it.varianteId
+      ? db.prepare('SELECT * FROM producto_variantes WHERE id = ? AND producto_id = ?').get(it.varianteId, producto.id)
+      : variantePorDefecto(producto.id)
+    if (!variante) continue
+    const prev = requeridoPorVariante.get(variante.id)
+    requeridoPorVariante.set(variante.id, {
+      variante,
+      producto,
+      cantidad: (prev?.cantidad || 0) + (Number(it.cantidad) || 0),
+    })
+  }
+  const faltantes = []
+  for (const { variante, producto, cantidad } of requeridoPorVariante.values()) {
+    const disponible = Number(variante.stock) || 0
+    if (cantidad > disponible) {
+      const colorNombre = variante.color_id
+        ? db.prepare('SELECT nombre FROM colores WHERE id = ?').get(variante.color_id)?.nombre
+        : ''
+      const etiqueta = colorNombre ? `${producto.nombre} (${colorNombre})` : producto.nombre
+      faltantes.push(`${etiqueta}: pedidos ${cantidad}, disponible ${disponible} (faltan ${cantidad - disponible})`)
+    }
+  }
+  if (faltantes.length > 0) {
+    throw new Error(`Stock insuficiente. ${faltantes.join('; ')}`)
+  }
+}
+
 // Núcleo de una venta: crea la venta + ítems, descuenta stock, aplica anticipo y
 // registra el ingreso. Se usa tanto en la venta directa como al convertir un pedido.
 // Devuelve { ventaId, avisos }.
@@ -2722,6 +2759,9 @@ function crearVentaCore({ clienteId, items, comentario, aplicarAnticipo, pedidoI
   if (!cliente) throw new Error('La venta requiere un cliente')
   const itemsValidos = (items || []).filter((it) => (Number(it.cantidad) || 0) > 0)
   if (itemsValidos.length === 0) throw new Error('La venta no tiene productos')
+
+  validarStockDisponible(itemsValidos)
+
   const ahora = new Date().toISOString()
   const fechaVenta = fecha || ahora
   const avisos = []
@@ -2757,14 +2797,10 @@ function crearVentaCore({ clienteId, items, comentario, aplicarAnticipo, pedidoI
     const nuevoStock = (Number(variante.stock) || 0) - cantidad
     db.prepare('UPDATE producto_variantes SET stock = ? WHERE id = ?').run(nuevoStock, variante.id)
     recalcularStockProducto(producto.id)
-    const etiqueta = variante.color_id
-      ? `${producto.nombre} (${db.prepare('SELECT nombre FROM colores WHERE id = ?').get(variante.color_id)?.nombre || ''})`
-      : producto.nombre
     db.prepare(
       `INSERT INTO producto_movimientos (producto_id, variante_id, tipo, cantidad, costo_unitario, fecha, descripcion)
        VALUES (?, ?, 'venta', ?, ?, ?, ?)`
     ).run(producto.id, variante.id, cantidad, producto.valor_compra || 0, ahora, `Venta #${ventaId}${cliente ? ' — ' + cliente.nombre : ''}`)
-    if (nuevoStock < 0) avisos.push(`${etiqueta}: stock insuficiente, quedó en ${nuevoStock}`)
   }
 
   // Aplicar saldo a favor del cliente (anticipo), sin exceder el saldo ni el total
@@ -2824,7 +2860,11 @@ app.post('/api/ventas', permisoRequired('ventas', 'crear'), (req, res) => {
   const crear = db.transaction(() => {
     resultado = crearVentaCore({ clienteId, items: itemsValidos, comentario, aplicarAnticipo, pagoInicial, fecha, fechaVencimiento, descuentoTipo, descuentoPct, metodoPago })
   })
-  crear()
+  try {
+    crear()
+  } catch (err) {
+    return res.status(400).json({ error: err.message })
+  }
   const venta = ventaSalida(db.prepare('SELECT * FROM ventas WHERE id = ?').get(resultado.ventaId))
   res.json({ ...venta, avisos: resultado.avisos })
 })
@@ -2864,7 +2904,11 @@ app.post('/api/pedidos/:id/convertir', permisoRequired('ventas', 'crear'), (req,
     db.prepare("UPDATE pedidos SET estado = 'entregado', venta_id = ?, actualizado = ? WHERE id = ?")
       .run(resultado.ventaId, new Date().toISOString(), pedido.id)
   })
-  convertir()
+  try {
+    convertir()
+  } catch (err) {
+    return res.status(400).json({ error: err.message })
+  }
   const venta = ventaSalida(db.prepare('SELECT * FROM ventas WHERE id = ?').get(resultado.ventaId))
   res.json({ ...venta, avisos: resultado.avisos })
 })
@@ -3021,6 +3065,10 @@ app.put('/api/ventas/:id', permisoRequired('ventas', 'editar'), (req, res) => {
     }
     db.prepare('DELETE FROM venta_items WHERE venta_id = ?').run(venta.id)
 
+    // Bloqueo de stock: ya se revirtió el stock de los ítems viejos, así que este
+    // chequeo ve el stock "real" disponible para los ítems nuevos de la edición.
+    validarStockDisponible(itemsValidos)
+
     // Inserta los ítems nuevos y descuenta stock
     const itemsInsertar = esGlobal ? itemsValidos.map((it) => ({ ...it, descuentoPct: 0 })) : itemsValidos
     const subtotal = insertarItems('venta_items', 'venta_id', venta.id, itemsInsertar, true)
@@ -3042,7 +3090,6 @@ app.put('/api/ventas/:id', permisoRequired('ventas', 'editar'), (req, res) => {
         `INSERT INTO producto_movimientos (producto_id, variante_id, tipo, cantidad, costo_unitario, fecha, descripcion)
          VALUES (?, ?, 'venta', ?, ?, ?, ?)`
       ).run(producto.id, variante.id, cantidad, producto.valor_compra || 0, ahora, `Edición venta #${venta.id}`)
-      if (nuevoStock < 0) avisos.push(`${producto.nombre}: stock insuficiente, quedó en ${nuevoStock}`)
     }
 
     db.prepare(
@@ -3063,7 +3110,11 @@ app.put('/api/ventas/:id', permisoRequired('ventas', 'editar'), (req, res) => {
       )
     }
   })
-  editar()
+  try {
+    editar()
+  } catch (err) {
+    return res.status(400).json({ error: err.message })
+  }
   res.json({ ...ventaSalida(db.prepare('SELECT * FROM ventas WHERE id = ?').get(venta.id)), avisos })
 })
 
