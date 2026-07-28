@@ -383,6 +383,12 @@ export function DataProvider({ children }) {
   const deleteTareaFoto = (fotoId) =>
     http(`/tareas/fotos/${fotoId}`, { method: 'DELETE' })
 
+  // Checklist de verificación de piezas de una tarea (control de calidad).
+  // Se cargan on-demand y se togglean localmente, sin recargar toda la data.
+  const getTareaPiezas = (id) => http(`/tareas/${id}/piezas`)
+  const setTareaPiezaVerificada = (piezaId, verificada) =>
+    http(`/tareas/piezas/${piezaId}`, { method: 'PUT', body: JSON.stringify({ verificada }) })
+
   // ---------- TAREAS DE PRODUCCIÓN (Gestión de Producción) ----------
   const addTareaProduccion = async (tarea) => {
     const creada = await http('/tareas-produccion', { method: 'POST', body: JSON.stringify(tarea) })
@@ -579,6 +585,8 @@ export function DataProvider({ children }) {
     getTareaFotos,
     addTareaFoto,
     deleteTareaFoto,
+    getTareaPiezas,
+    setTareaPiezaVerificada,
     addTareaProduccion,
     updateTareaProduccion,
     terminarTareaProduccion,

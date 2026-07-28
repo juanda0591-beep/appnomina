@@ -432,6 +432,17 @@ button:active:not(:disabled) { transform: translateY(1px); }
 
 .chip.danger { background: #fee2e2; color: var(--danger); }
 
+/* ---------- Verificación de piezas (control de calidad) ---------- */
+.piezas-check { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.pieza-fila {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--card); cursor: pointer;
+}
+.pieza-fila input[type="checkbox"] { width: auto; margin: 0; }
+.pieza-fila.ok { background: #ecfdf5; border-color: #a7f3d0; }
+.pieza-fila .pieza-nombre { flex: 1; }
+
 /* ---------- Producción: línea de tiempo de una orden ---------- */
 .timeline { display: flex; flex-direction: column; margin-top: 10px; }
 .timeline-step { display: flex; gap: 12px; }
@@ -558,7 +569,7 @@ button:active:not(:disabled) { transform: translateY(1px); }
 }
 .firma-canvas-wrap { margin-top: 8px; }
 .firma-canvas {
-  width: 100%; height: 280px; touch-action: none; cursor: crosshair;
+  width: 100%; height: 360px; touch-action: none; cursor: crosshair;
   border: 1px dashed var(--border); border-radius: 8px; background: #fff;
 }
 input[type="file"] {

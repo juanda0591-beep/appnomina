@@ -6,8 +6,9 @@ import { notify, confirmar } from '../utils/notify.js'
 import Vacio from '../components/Vacio.jsx'
 
 const NUEVO_PROCESO = '__nuevo__'
-const emptyProceso = () => ({ nombre: '', pago: '', materiales: [] })
+const emptyProceso = () => ({ nombre: '', pago: '', materiales: [], piezas: [] })
 const emptyRecetaFila = () => ({ materialId: '', cantidad: '', porColor: false, familia: '' })
+const emptyPiezaFila = () => ({ nombre: '', cantidad: '' })
 const hoy = hoyISO
 const emptyEntrada = () => ({ cantidad: '', costoUnitario: '', fecha: hoy(), descripcion: '', varianteId: '' })
 const TIPO_MOV_LABEL = { entrada: 'Compra', produccion: 'Producción' }
@@ -223,6 +224,29 @@ export default function Productos() {
   }
   const unidadDeMaterial = (materialId) => materiales.find((m) => String(m.id) === String(materialId))?.unidad || ''
 
+  // ---------- Checklist de piezas a verificar por proceso (control de calidad) ----------
+  const setPiezaFila = (procesoIdx, filaIdx, field, val) => {
+    setProcesos((ps) =>
+      ps.map((p, idx) => {
+        if (idx !== procesoIdx) return p
+        const nuevasPiezas = (p.piezas || []).map((pz, pi) => (pi === filaIdx ? { ...pz, [field]: val } : pz))
+        return { ...p, piezas: nuevasPiezas }
+      })
+    )
+  }
+  const addPiezaFila = (procesoIdx) => {
+    setProcesos((ps) =>
+      ps.map((p, idx) => (idx === procesoIdx ? { ...p, piezas: [...(p.piezas || []), emptyPiezaFila()] } : p))
+    )
+  }
+  const removePiezaFila = (procesoIdx, filaIdx) => {
+    setProcesos((ps) =>
+      ps.map((p, idx) =>
+        idx === procesoIdx ? { ...p, piezas: (p.piezas || []).filter((_, pi) => pi !== filaIdx) } : p
+      )
+    )
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!nombre.trim()) { notify.error('Escribe el nombre del producto'); return }
@@ -233,6 +257,7 @@ export default function Productos() {
         materiales: p.materiales.filter((m) =>
           Number(m.cantidad) > 0 && (m.porColor ? !!m.familia : !!m.materialId)
         ),
+        piezas: (p.piezas || []).filter((pz) => pz.nombre.trim() && Number(pz.cantidad) > 0),
       }))
     if (validos.length === 0) { notify.error('Agrega al menos un proceso'); return }
 
@@ -288,6 +313,10 @@ export default function Productos() {
           cantidad: String(m.cantidad),
           porColor: !!m.porColor,
           familia: m.familia || '',
+        })),
+        piezas: (p.piezas || []).map((pz) => ({
+          nombre: pz.nombre,
+          cantidad: String(pz.cantidad),
         })),
       }))
     )
@@ -532,6 +561,35 @@ export default function Productos() {
                       Para usar materiales "según color", primero crea materiales con familia y color en 🧱 Materiales.
                     </p>
                   )}
+                </div>
+
+                <div className="receta-materiales">
+                  <span className="muted small">Piezas a verificar al terminar este proceso (control de calidad)</span>
+                  {(p.piezas || []).map((pz, pi) => (
+                    <div key={pi} className="row" style={{ marginBottom: 6 }}>
+                      <input
+                        style={{ flex: 2 }}
+                        value={pz.nombre}
+                        onChange={(e) => setPiezaFila(i, pi, 'nombre', e.target.value)}
+                        placeholder="Pieza (ej: Lateral, Techo, Puerta)"
+                      />
+                      <input
+                        style={{ flex: 1 }}
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={pz.cantidad}
+                        onChange={(e) => setPiezaFila(i, pi, 'cantidad', e.target.value)}
+                        placeholder="Cantidad"
+                      />
+                      <button type="button" className="btn-icon danger" title="Quitar pieza" aria-label="Quitar pieza" onClick={() => removePiezaFila(i, pi)}>
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                  <button type="button" className="btn-secondary" onClick={() => addPiezaFila(i)}>
+                    + Agregar pieza
+                  </button>
                 </div>
               </>
             )}

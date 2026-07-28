@@ -201,6 +201,19 @@ function materialesDeProceso(procesoId) {
   }))
 }
 
+// Checklist de piezas a verificar de un proceso (control de calidad). Gemelo de
+// materialesDeProceso pero para proceso_piezas (nombre + cantidad esperada).
+const procesoPiezasStmt = db.prepare(
+  'SELECT id, nombre, cantidad FROM proceso_piezas WHERE proceso_id = ? ORDER BY orden, id'
+)
+function piezasDeProceso(procesoId) {
+  return procesoPiezasStmt.all(procesoId).map((p) => ({
+    id: p.id,
+    nombre: p.nombre,
+    cantidad: p.cantidad,
+  }))
+}
+
 // Variantes de un producto (con nombre de color resuelto). El stock del inventario
 // vive en producto_variantes; productos.stock es una suma cacheada.
 const variantesStmt = db.prepare(`
@@ -257,7 +270,7 @@ function productoConProcesos(prod) {
   const procesos = db
     .prepare('SELECT * FROM procesos WHERE producto_id = ? ORDER BY id ASC')
     .all(prod.id)
-    .map((p) => ({ ...p, materiales: materialesDeProceso(p.id) }))
+    .map((p) => ({ ...p, materiales: materialesDeProceso(p.id), piezas: piezasDeProceso(p.id) }))
   const variantes = variantesDeProducto(prod.id)
   const stockTotal = variantes.reduce((s, v) => s + (v.stock || 0), 0)
   const aperturaTotal = variantes.reduce((s, v) => s + (v.stockApertura || 0), 0)
@@ -285,6 +298,9 @@ const insertProceso = db.prepare('INSERT INTO procesos (producto_id, nombre, pag
 const insertProcesoMaterial = db.prepare(
   'INSERT INTO proceso_materiales (proceso_id, material_id, cantidad, por_color, familia) VALUES (?, ?, ?, ?, ?)'
 )
+const insertProcesoPieza = db.prepare(
+  'INSERT INTO proceso_piezas (proceso_id, nombre, cantidad, orden) VALUES (?, ?, ?, ?)'
+)
 function insertarProcesosConReceta(productoId, procesos) {
   for (const p of procesos) {
     const r = insertProceso.run(productoId, p.nombre.trim(), Number(p.pago) || 0)
@@ -301,6 +317,14 @@ function insertarProcesosConReceta(productoId, procesos) {
         const materialId = Number(m.materialId)
         if (materialId) insertProcesoMaterial.run(procesoId, materialId, cantidad, 0, null)
       }
+    }
+    // Checklist de piezas a verificar (control de calidad). Se guarda el orden
+    // en que llegan para conservar la lista tal cual la escribió el usuario.
+    let ordenPieza = 0
+    for (const pz of p.piezas || []) {
+      const nombre = (pz.nombre || '').trim()
+      if (!nombre) continue
+      insertProcesoPieza.run(procesoId, nombre, Number(pz.cantidad) || 1, ordenPieza++)
     }
   }
 }
@@ -1164,6 +1188,12 @@ const insertTareaHistorial = db.prepare(
    VALUES (?, ?, ?, ?, ?, ?)`
 )
 
+// Snapshot de una pieza a verificar, copiada del proceso al crear la tarea
+const insertTareaPieza = db.prepare(
+  `INSERT INTO tarea_piezas (tarea_id, nombre, cantidad, verificada, orden, usuario, fecha)
+   VALUES (?, ?, ?, ?, ?, ?, ?)`
+)
+
 app.get('/api/tareas', permisoAnyRequired([
   ['gestion-nomina', 'ver'],
   ['nomina', 'ver'],
@@ -1187,22 +1217,36 @@ app.post('/api/tareas', permisoRequired('gestion-nomina', 'crear'), (req, res) =
   const proceso = procesoId ? db.prepare('SELECT * FROM procesos WHERE id = ?').get(procesoId) : null
   const ahora = new Date().toISOString()
 
-  const r = db.prepare(
-    `INSERT INTO tareas (empleado_id, producto_id, proceso_id, producto_nombre, proceso_nombre, pago, cantidad, progreso, estado, comentario, creado, actualizado)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'pendiente', ?, ?, ?)`
-  ).run(
-    empleadoId,
-    productoId || null,
-    procesoId || null,
-    producto?.nombre || '',
-    proceso?.nombre || '',
-    Number(proceso?.pago) || 0,
-    Number(cantidad) || 0,
-    comentario || '',
-    ahora,
-    ahora,
-  )
-  res.json(tareaSalida(db.prepare('SELECT * FROM tareas WHERE id = ?').get(r.lastInsertRowid)))
+  const crear = db.transaction(() => {
+    const r = db.prepare(
+      `INSERT INTO tareas (empleado_id, producto_id, proceso_id, producto_nombre, proceso_nombre, pago, cantidad, progreso, estado, comentario, creado, actualizado)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'pendiente', ?, ?, ?)`
+    ).run(
+      empleadoId,
+      productoId || null,
+      procesoId || null,
+      producto?.nombre || '',
+      proceso?.nombre || '',
+      Number(proceso?.pago) || 0,
+      Number(cantidad) || 0,
+      comentario || '',
+      ahora,
+      ahora,
+    )
+    const tareaId = r.lastInsertRowid
+    // Snapshot del checklist de piezas del proceso (control de calidad): se copia el
+    // texto+cantidad para que sobreviva aunque luego se edite el producto (los ids de
+    // proceso se recrean en cada edición). Igual patrón que producto_nombre/proceso_nombre.
+    if (proceso) {
+      const piezas = piezasDeProceso(proceso.id)
+      piezas.forEach((pz, idx) => {
+        insertTareaPieza.run(tareaId, pz.nombre, Number(pz.cantidad) || 1, 0, idx, null, null)
+      })
+    }
+    return tareaId
+  })
+  const tareaId = crear()
+  res.json(tareaSalida(db.prepare('SELECT * FROM tareas WHERE id = ?').get(tareaId)))
 })
 
 app.put('/api/tareas/:id', permisoRequired('gestion-nomina', 'editar'), (req, res) => {
@@ -1386,6 +1430,41 @@ app.post('/api/tareas/:id/fotos', permisoRequired('gestion-nomina', 'editar'), (
 app.delete('/api/tareas/fotos/:fotoId', permisoRequired('gestion-nomina', 'editar'), (req, res) => {
   db.prepare('DELETE FROM tarea_fotos WHERE id = ?').run(req.params.fotoId)
   res.json({ ok: true })
+})
+
+// --- Verificación de piezas de una tarea (control de calidad) ---
+// El checklist se copió como snapshot al crear la tarea (tarea_piezas). Aquí solo
+// se lista y se marca/desmarca cada pieza como verificada.
+function tareaPiezaSalida(p) {
+  return {
+    id: p.id,
+    nombre: p.nombre,
+    cantidad: p.cantidad,
+    verificada: !!p.verificada,
+    usuario: p.usuario || '',
+    fecha: p.fecha || null,
+  }
+}
+
+app.get('/api/tareas/:id/piezas', permisoAnyRequired([
+  ['gestion-nomina', 'ver'],
+  ['nomina', 'ver'],
+]), (req, res) => {
+  const rows = db.prepare('SELECT * FROM tarea_piezas WHERE tarea_id = ? ORDER BY orden, id').all(req.params.id)
+  res.json(rows.map(tareaPiezaSalida))
+})
+
+app.put('/api/tareas/piezas/:piezaId', permisoRequired('gestion-nomina', 'editar'), (req, res) => {
+  const pieza = db.prepare('SELECT * FROM tarea_piezas WHERE id = ?').get(req.params.piezaId)
+  if (!pieza) return res.status(404).json({ error: 'Pieza no encontrada' })
+  const tarea = db.prepare('SELECT estado FROM tareas WHERE id = ?').get(pieza.tarea_id)
+  if (tarea && tarea.estado === 'pagada') {
+    return res.status(400).json({ error: 'La tarea ya fue pagada; no se puede modificar.' })
+  }
+  const verificada = req.body.verificada ? 1 : 0
+  db.prepare('UPDATE tarea_piezas SET verificada = ?, usuario = ?, fecha = ? WHERE id = ?')
+    .run(verificada, req.usuario || '', new Date().toISOString(), pieza.id)
+  res.json(tareaPiezaSalida(db.prepare('SELECT * FROM tarea_piezas WHERE id = ?').get(pieza.id)))
 })
 
 // ============ TAREAS DE PRODUCCIÓN (Gestión de Producción) ============

@@ -38,6 +38,7 @@ export default function GestionNomina() {
     empleados, productos, tareas,
     addTareas, updateTarea, terminarTarea, deleteTarea, getTareaHistorial,
     getTareaFotos, addTareaFoto, deleteTareaFoto,
+    getTareaPiezas, setTareaPiezaVerificada,
     getEmpleado,
   } = useData()
   const { puede } = useAuth()
@@ -79,6 +80,10 @@ export default function GestionNomina() {
   const [fotos, setFotos] = useState([]) // fotos de la tarea abierta
   const [fotoNota, setFotoNota] = useState('')
   const [subiendoFoto, setSubiendoFoto] = useState(false)
+
+  // --- Verificación de piezas (control de calidad) ---
+  const [piezasAbierto, setPiezasAbierto] = useState(null) // tareaId
+  const [piezas, setPiezas] = useState([]) // piezas de la tarea abierta
 
   const cargos = useMemo(
     () => [...new Set(empleados.map((e) => e.cargo).filter(Boolean))].sort(),
@@ -314,10 +319,37 @@ export default function GestionNomina() {
   // URL autenticada de la imagen: el endpoint exige token, así que se pasa por query
   const urlFoto = (fotoId) => `/api/tareas/fotos/${fotoId}?token=${sessionStorage.getItem('nomina_token')}`
 
+  // --- Verificación de piezas (control de calidad) ---
+  const verPiezas = async (t) => {
+    if (piezasAbierto === t.id) {
+      setPiezasAbierto(null)
+      return
+    }
+    try {
+      const p = await getTareaPiezas(t.id)
+      setPiezas(p)
+      setPiezasAbierto(t.id)
+    } catch (e) {
+      notify.error('Error al cargar las piezas: ' + e.message)
+    }
+  }
+
+  const togglePieza = async (piezaId, verificada) => {
+    // Optimista: refleja el cambio de una vez y revierte si el backend falla
+    setPiezas((ps) => ps.map((p) => (p.id === piezaId ? { ...p, verificada } : p)))
+    try {
+      await setTareaPiezaVerificada(piezaId, verificada)
+    } catch (e) {
+      setPiezas((ps) => ps.map((p) => (p.id === piezaId ? { ...p, verificada: !verificada } : p)))
+      notify.error('Error al marcar la pieza: ' + e.message)
+    }
+  }
+
   const cerrarDetalleTarea = () => {
     setTareaDetalleId(null)
     setHistorialAbierto(null)
     setFotosAbierto(null)
+    setPiezasAbierto(null)
   }
 
   const tareaDetalle = tareas.find((t) => t.id === tareaDetalleId)
@@ -406,6 +438,9 @@ export default function GestionNomina() {
           <button className="btn-secondary btn-sm" onClick={() => verFotos(t)}>
             📷 Fotos
           </button>
+          <button className="btn-secondary btn-sm" onClick={() => verPiezas(t)}>
+            ✅ Verificación
+          </button>
           {puedeEliminar && t.estado !== 'pagada' && (
             <button className="btn-danger btn-sm" onClick={() => handleEliminar(t)}>🗑 Eliminar</button>
           )}
@@ -479,6 +514,48 @@ export default function GestionNomina() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {piezasAbierto === t.id && (
+          <div className="historial-box">
+            <p className="muted small" style={{ marginTop: 0 }}>
+              Verificación de piezas: marca cada pieza que el trabajo terminado ya incluye.
+            </p>
+            {piezas.length === 0 ? (
+              <p className="muted small">
+                Este proceso no tiene piezas configuradas. Agrégalas en el producto (🛒 Productos) para verificarlas aquí.
+              </p>
+            ) : (
+              <>
+                {(() => {
+                  const hechas = piezas.filter((p) => p.verificada).length
+                  const faltan = piezas.filter((p) => !p.verificada)
+                  return (
+                    <p className="small" style={{ marginTop: 0 }}>
+                      <strong>{hechas} de {piezas.length}</strong> piezas verificadas
+                      {faltan.length > 0 && (
+                        <> · Faltan: {faltan.map((p) => p.nombre).join(', ')}</>
+                      )}
+                    </p>
+                  )
+                })()}
+                <div className="piezas-check">
+                  {piezas.map((p) => (
+                    <label key={p.id} className={`pieza-fila ${p.verificada ? 'ok' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={!!p.verificada}
+                        disabled={bloqueada || !puedeEditar}
+                        onChange={(e) => togglePieza(p.id, e.target.checked)}
+                      />
+                      <span className="pieza-nombre">{p.nombre}</span>
+                      {p.cantidad > 1 && <span className="muted small">×{p.cantidad}</span>}
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>

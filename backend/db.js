@@ -161,6 +161,22 @@ db.exec(`
     FOREIGN KEY (tarea_id) REFERENCES tareas(id) ON DELETE CASCADE
   );
 
+  -- Verificación de piezas de una tarea (control de calidad): snapshot de las
+  -- piezas del proceso (copiadas al crear la tarea, por si el producto se edita),
+  -- cada una con su check de "verificada". El nombre/cantidad se guardan
+  -- denormalizados a propósito: deben sobrevivir a ediciones del producto.
+  CREATE TABLE IF NOT EXISTS tarea_piezas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tarea_id INTEGER NOT NULL,
+    nombre TEXT NOT NULL,
+    cantidad REAL NOT NULL DEFAULT 1,
+    verificada INTEGER NOT NULL DEFAULT 0,
+    orden INTEGER NOT NULL DEFAULT 0,
+    usuario TEXT,                -- quién marcó la última verificación
+    fecha TEXT,                  -- cuándo se marcó
+    FOREIGN KEY (tarea_id) REFERENCES tareas(id) ON DELETE CASCADE
+  );
+
   -- Snapshot de tareas eliminadas (no referencia tareas.id: debe sobrevivir al borrado)
   CREATE TABLE IF NOT EXISTS tarea_eliminada_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -214,6 +230,19 @@ db.exec(`
     cantidad REAL NOT NULL DEFAULT 0,
     FOREIGN KEY (proceso_id) REFERENCES procesos(id) ON DELETE CASCADE,
     FOREIGN KEY (material_id) REFERENCES materiales(id) ON DELETE CASCADE
+  );
+
+  -- Checklist de piezas a verificar por proceso (control de calidad): igual patrón
+  -- que proceso_materiales, pero describe las piezas que debe tener el trabajo
+  -- terminado (ej: en Corte → 2 laterales, 1 techo, 1 piso...). Se define en el
+  -- producto y se copia como snapshot a cada tarea de nómina para verificarla.
+  CREATE TABLE IF NOT EXISTS proceso_piezas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proceso_id INTEGER NOT NULL,
+    nombre TEXT NOT NULL,
+    cantidad REAL NOT NULL DEFAULT 1,
+    orden INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (proceso_id) REFERENCES procesos(id) ON DELETE CASCADE
   );
 
   CREATE TABLE IF NOT EXISTS tareas_produccion (
