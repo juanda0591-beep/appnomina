@@ -19,6 +19,7 @@ import {
   resetPassword,
 } from './auth.js'
 import { optimizarCorte } from './corte.js'
+import { publicKey as pushPublicKey, suscribir as pushSuscribir, desuscribir as pushDesuscribir, notificarAdmins } from './push.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -2225,6 +2226,27 @@ app.get('/api/produccion/dashboard', permisoAnyRequired([
   })
 })
 
+// ============ NOTIFICACIONES PUSH ============
+// Clave pública VAPID: la necesita el navegador para suscribirse (no requiere permiso especial)
+app.get('/api/push/public-key', (req, res) => {
+  res.json({ publicKey: pushPublicKey() })
+})
+
+// Guarda la suscripción push de este dispositivo para el usuario logueado (debe ser admin)
+app.post('/api/push/suscribir', adminRequired, (req, res) => {
+  const usuario = db.prepare('SELECT id FROM usuarios WHERE username = ?').get(req.usuario)
+  if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' })
+  const resultado = pushSuscribir(usuario.id, req.body.subscription)
+  if (!resultado.ok) return res.status(400).json({ error: resultado.error })
+  res.json({ ok: true })
+})
+
+// Elimina la suscripción de este dispositivo (al desactivar el interruptor)
+app.delete('/api/push/suscribir', adminRequired, (req, res) => {
+  pushDesuscribir(req.body.endpoint)
+  res.json({ ok: true })
+})
+
 // ============ MOVIMIENTOS (Control de dinero) ============
 app.get('/api/movimientos', permisoRequired('control-dinero', 'ver'), (req, res) => {
   const { desde, hasta } = req.query
@@ -2260,17 +2282,26 @@ app.post('/api/movimientos', permisoRequired('control-dinero', 'crear'), (req, r
   if (tipo !== 'ingreso' && tipo !== 'gasto') {
     return res.status(400).json({ error: 'tipo debe ser ingreso o gasto' })
   }
+  const montoNum = Number(monto) || 0
   const r = insertMovimiento.run({
     tipo,
     fecha,
     categoria: categoria || '',
-    monto: Number(monto) || 0,
+    monto: montoNum,
     descripcion: descripcion || '',
     comprobante: comprobante || null,
     comprobante_tipo: comprobanteTipo || null,
     origen: 'manual',
     ref_id: null,
   })
+  // No bloquea la respuesta: si el envío push falla, ya se logueó dentro de notificarAdmins.
+  if (tipo === 'ingreso') {
+    const montoTexto = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(montoNum)
+    notificarAdmins({
+      titulo: '💰 Ingreso registrado',
+      cuerpo: `${montoTexto}${categoria ? ' — ' + categoria : ''}${descripcion ? ' — ' + descripcion : ''}`,
+    }).catch(() => {})
+  }
   res.json(movimientoSalida(db.prepare('SELECT * FROM movimientos WHERE id = ?').get(r.lastInsertRowid)))
 })
 

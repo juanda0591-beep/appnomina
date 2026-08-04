@@ -197,6 +197,22 @@ db.exec(`
     secret TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS vapid_keys (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    public_key TEXT NOT NULL,
+    private_key TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS push_subscripciones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL,
+    endpoint TEXT NOT NULL UNIQUE,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    creado TEXT NOT NULL,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+  );
+
   CREATE TABLE IF NOT EXISTS materiales (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nombre TEXT NOT NULL,

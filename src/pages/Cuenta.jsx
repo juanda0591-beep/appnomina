@@ -1,13 +1,43 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
+import { notify } from '../utils/notify.js'
+import { pushSoportado, pushEstaActivo, pushActivar, pushDesactivar } from '../utils/push.js'
 
 export default function Cuenta() {
-  const { usuario, cambiarPassword, logout } = useAuth()
+  const { usuario, rol, cambiarPassword, logout } = useAuth()
   const [actual, setActual] = useState('')
   const [nueva, setNueva] = useState('')
   const [confirmar, setConfirmar] = useState('')
   const [msg, setMsg] = useState(null)
   const [guardando, setGuardando] = useState(false)
+
+  const [pushActivo, setPushActivo] = useState(false)
+  const [pushCargando, setPushCargando] = useState(false)
+
+  useEffect(() => {
+    if (rol === 'admin' && pushSoportado()) {
+      pushEstaActivo().then(setPushActivo).catch(() => {})
+    }
+  }, [rol])
+
+  const togglePush = async () => {
+    setPushCargando(true)
+    try {
+      if (pushActivo) {
+        await pushDesactivar()
+        setPushActivo(false)
+        notify.ok('Notificaciones desactivadas en este dispositivo')
+      } else {
+        await pushActivar()
+        setPushActivo(true)
+        notify.ok('Notificaciones activadas en este dispositivo')
+      }
+    } catch (err) {
+      notify.error(err.message)
+    } finally {
+      setPushCargando(false)
+    }
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -35,6 +65,23 @@ export default function Cuenta() {
         <p>Sesión iniciada como <strong>{usuario}</strong></p>
         <button className="btn-danger" onClick={logout}>Cerrar sesión</button>
       </div>
+
+      {rol === 'admin' && (
+        <div className="card">
+          <h3>🔔 Notificaciones de ingresos</h3>
+          {pushSoportado() ? (
+            <>
+              <p>Recibe una notificación en este dispositivo cada vez que se registre un ingreso de dinero.</p>
+              <label className="switch-row">
+                <input type="checkbox" checked={pushActivo} onChange={togglePush} disabled={pushCargando} />
+                <span>{pushActivo ? 'Activadas en este dispositivo' : 'Recibir notificaciones en este dispositivo'}</span>
+              </label>
+            </>
+          ) : (
+            <p className="muted">Este navegador no admite notificaciones push. Instala la app en el celular para poder activarlas.</p>
+          )}
+        </div>
+      )}
 
       <form className="card" onSubmit={handleSubmit}>
         <h3>Cambiar contraseña</h3>

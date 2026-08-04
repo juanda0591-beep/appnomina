@@ -321,6 +321,9 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .small { font-size: 12px; }
 .danger-text { color: var(--danger); }
 
+.switch-row { display: flex; align-items: center; gap: 10px; cursor: pointer; margin-top: 8px; }
+.switch-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--primary); cursor: pointer; }
+
 /* Estado vacío (sin datos) */
 .vacio {
   display: flex; flex-direction: column; align-items: center; justify-content: center;

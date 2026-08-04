@@ -7,6 +7,9 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.js',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'Sistema de Nómina',
@@ -38,15 +41,9 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
+      injectManifest: {
         // No cachear las llamadas al backend; siempre red primero
-        navigateFallbackDenylist: [/^\/api/],
-        runtimeCaching: [
-          {
-            urlPattern: /^\/api\//,
-            handler: 'NetworkOnly',
-          },
-        ],
+        globPatterns: ['**/*.{js,css,html,svg,png,ico}'],
       },
       devOptions: {
         enabled: false,
