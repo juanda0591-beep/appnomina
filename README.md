@@ -58,6 +58,55 @@ Cámbiala desde **🔒 Mi cuenta** la primera vez. Las contraseñas se guardan c
 Juan pintó 10 armarios de 3 cuerpos. "Pintura" se paga $5/unidad → 10 × $5 = **$50**.
 Si tiene un préstamo, descuentas un monto y el total baja; su saldo se reduce solo.
 
+## IA para crear materiales
+
+En **Materiales > Nuevo material > Preparar con IA**, describe un material para
+obtener un borrador, revisar datos pendientes y ver posibles duplicados. Aplicar
+el borrador completa el formulario; el material solo se registra al guardar y
+confirmar con el flujo habitual. Disponible para usuarios con permisos de ver y
+crear materiales. Los datos extraídos por IA requieren revisión humana.
+
+Configura `OPENAI_API_KEY` y `OPENAI_MODEL` en el entorno del servidor o en un
+archivo `.env.local` en la raíz, siguiendo `.env.example`. La carga de ese archivo
+requiere Node.js 20.12 o superior. Reinicia el servidor tras configurar. El modelo
+debe admitir Structured Outputs en Responses y estar habilitado en tu cuenta de
+OpenAI. La API requiere su propia facturación; sin conexión configurada, el alta
+manual sigue disponible. No pongas la clave en variables `VITE_` ni en el navegador.
+
+Se envían a OpenAI la descripción escrita, hasta 300 colores activos (ID y nombre)
+y hasta 200 nombres de familias. El catálogo completo de materiales se compara
+localmente para buscar similitudes por nombre. No se envían existencias, precios
+del catálogo, empleados ni nóminas. Las solicitudes usan `store: false`. Esto no
+equivale a una garantía de retención cero del proveedor. No se guardan prompts ni
+respuestas en la base de datos. Máximo tres solicitudes simultáneas y una por
+usuario cada seis segundos, con tiempo de espera de 45 segundos.
+
+Referencia: [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
+
+## IA para crear productos
+
+En **Productos > Nuevo producto > Preparar con IA**, describe un producto, sus
+procesos en orden, pagos por unidad, consumos de materiales por producto y piezas
+a verificar. Se prepara un borrador para revisar y aplicar al formulario. No crea
+registros hasta confirmar el guardado habitual. Usa la misma configuración de IA
+que materiales; requiere ver y crear productos y ver materiales.
+
+El asistente consulta hasta 500 materiales (ID, nombre y unidad) y 200 nombres de
+procesos. Envía esos datos y la descripción a OpenAI, sin enviar precios ni stocks
+del catálogo. Los productos existentes se comparan localmente por nombre
+normalizado. Si se limita el catálogo, aparece una observación. Los límites de
+solicitudes se comparten con materiales.
+
+Los valores desconocidos quedan pendientes; los materiales no registrados se
+muestran sin vincular. Al guardar un borrador aplicado, se exige completar o quitar
+las filas de procesos, materiales y piezas pendientes. Los procesos nuevos quedan
+asociados al producto, sin crear entradas en el catálogo global. Las piezas son
+una lista de control de calidad; no generan medidas ni planos de corte. Los
+procesos solo se proponen si se solicitan explícitamente. Una respuesta válida
+puede contener errores de interpretación y siempre requiere revisión humana.
+
+Pruebas de los asistentes: `node --test backend/ia-*.test.js`.
+
 ## Respaldo de datos
 Toda la información está en `backend/nomina.db`. Para respaldar, copia ese archivo.
 La moneda está en pesos colombianos (COP); se cambia en `src/utils/format.js`.

@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha } from '../utils/format.js'
 import { notify, confirmar } from '../utils/notify.js'
 import Vacio from '../components/Vacio.jsx'
+import AsistenteMaterial from '../components/AsistenteMaterial.jsx'
 
 // Catálogo fijo de unidades de medida para materiales
 export const UNIDADES = [
@@ -302,6 +303,18 @@ export default function Materiales() {
           <div className="overlay" onClick={resetForm} />
           <div className="modal">
             <h3>{editId ? 'Editar material' : 'Nuevo material'}</h3>
+            {!editId && puedeCrear && puede('materiales', 'ver') && (
+              <AsistenteMaterial colores={colores} onAplicar={async (borrador) => {
+                if (Object.entries(form).some(([k, v]) => v !== emptyForm[k])) {
+                  const ok = await confirmar('Se reemplazarán los campos actuales con el borrador de IA. ¿Continuar?', {
+                    titulo: 'Aplicar borrador', textoOk: 'Sí, aplicar', peligro: false,
+                  })
+                  if (!ok) return false
+                }
+                setForm(Object.fromEntries(Object.keys(emptyForm).map((k) => [k, borrador[k] == null ? '' : String(borrador[k])])))
+                return true
+              }} />
+            )}
             <form onSubmit={handleSubmit}>
               <div className="row">
                 <div style={{ flex: 2 }}>

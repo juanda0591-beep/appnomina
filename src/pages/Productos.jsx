@@ -4,6 +4,8 @@ import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
 import { notify, confirmar } from '../utils/notify.js'
 import Vacio from '../components/Vacio.jsx'
+import AsistenteProducto from '../components/AsistenteProducto.jsx'
+import { formularioDesdeProductoIA, errorRecetaIA } from '../utils/productoIA.js'
 
 const NUEVO_PROCESO = '__nuevo__'
 const emptyProceso = () => ({ nombre: '', pago: '', materiales: [], piezas: [] })
@@ -35,6 +37,7 @@ export default function Productos() {
   const [procesos, setProcesos] = useState([emptyProceso()])
   const [editId, setEditId] = useState(null)
   const [formAbierto, setFormAbierto] = useState(false)
+  const [desdeIA, setDesdeIA] = useState(false)
 
   // Buscador (por nombre, código o descripción)
   const [busqueda, setBusqueda] = useState('')
@@ -151,6 +154,7 @@ export default function Productos() {
   }
 
   const resetForm = () => {
+    setDesdeIA(false)
     setNombre('')
     setDatos(emptyDatos())
     setProcesos([emptyProceso()])
@@ -250,6 +254,10 @@ export default function Productos() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!nombre.trim()) { notify.error('Escribe el nombre del producto'); return }
+    if (desdeIA) {
+      const error = errorRecetaIA(procesos, materiales)
+      if (error) { notify.error(error); return }
+    }
     const validos = procesos
       .filter((p) => p.nombre.trim())
       .map((p) => ({
@@ -294,6 +302,7 @@ export default function Productos() {
   }
 
   const startEdit = (prod) => {
+    setDesdeIA(false)
     setEditId(prod.id)
     setNombre(prod.nombre)
     setDatos({
@@ -383,6 +392,23 @@ export default function Productos() {
       <div className="overlay" onClick={resetForm} />
       <form className="card modal modal-lg" onSubmit={handleSubmit}>
         <h3>{editId ? 'Editar producto' : 'Nuevo producto'}</h3>
+        {!editId && puedeCrear && puede('productos', 'ver') && puede('materiales', 'ver') && (
+          <AsistenteProducto onAplicar={async (borrador) => {
+            const hayDatos = nombre.trim() || Object.values(datos).some((v) => v !== '')
+              || procesos.some((p) => p.nombre || p.pago !== '' || p.materiales.length || p.piezas.length)
+            if (hayDatos && !await confirmar('Se reemplazarán los campos, procesos y recetas actuales con el borrador de IA. ¿Continuar?', {
+              titulo: 'Aplicar borrador de producto', textoOk: 'Sí, aplicar', peligro: false,
+            })) return false
+            const form = formularioDesdeProductoIA(borrador)
+            setNombre(form.nombre)
+            setDatos(form.datos)
+            setProcesos(form.procesos.length ? form.procesos : [emptyProceso()])
+            setFilaNuevoProceso(null)
+            setNombreNuevoProceso('')
+            setDesdeIA(true)
+            return true
+          }} />
+        )}
         {editId && (
           <p className="muted small">Código: <strong>{productos.find((p) => p.id === editId)?.codigo || '—'}</strong> (se asigna automáticamente)</p>
         )}
@@ -502,6 +528,9 @@ export default function Productos() {
                   <span className="muted small">Materiales que consume este proceso</span>
                   {p.materiales.map((m, mi) => (
                     <div key={mi} style={{ borderBottom: '1px dashed #e5e7eb', paddingBottom: 6, marginBottom: 6 }}>
+                      {m.nombreSugerido && !m.materialId && !m.porColor && (
+                        <p className="muted small">Material pendiente: {m.nombreSugerido}</p>
+                      )}
                       <div className="row">
                         {m.porColor ? (
                           <select

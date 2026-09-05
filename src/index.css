@@ -745,6 +745,22 @@ input[type="file"] {
 }
 
 /* ---------- SweetAlert2 (diálogos de confirmación) ---------- */
+.asistente-material {
+  border-bottom: 1px solid var(--border, #d1d5db);
+  padding-bottom: 14px;
+  margin-bottom: 18px;
+}
+.asistente-material-contenido { margin-top: 14px; min-width: 0; }
+.asistente-material textarea { width: 100%; resize: vertical; min-height: 90px; }
+.asistente-material-datos { margin: 12px 0; }
+.asistente-material-datos > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; padding: 5px 0; }
+.asistente-material-datos dt { color: var(--muted); }
+.asistente-material-datos dd { margin: 0; overflow-wrap: anywhere; }
+.asistente-material li, .asistente-material p { overflow-wrap: anywhere; }
+.asistente-material button { white-space: normal; }
+.asistente-producto-proceso { border-top: 1px solid var(--border); padding: 10px 0; overflow-wrap: anywhere; }
+.asistente-producto-proceso h4 { margin: 0 0 8px; font-size: 16px; }
+
 .swal-nomina {
   border-radius: 16px !important;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif !important;

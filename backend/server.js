@@ -19,9 +19,12 @@ import {
   resetPassword,
 } from './auth.js'
 import { optimizarCorte } from './corte.js'
+import { rutasIA } from './ia-routes.js'
 import { publicKey as pushPublicKey, suscribir as pushSuscribir, desuscribir as pushDesuscribir, notificarAdmins } from './push.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const envLocal = join(__dirname, '..', '.env.local')
+if (existsSync(envLocal) && process.loadEnvFile) process.loadEnvFile(envLocal)
 const app = express()
 
 // En producción, detrás del reverse proxy (Caddy/Nginx), el frontend se sirve
@@ -45,6 +48,7 @@ app.use(express.json({ limit: '20mb' })) // amplio para logo y comprobantes en b
 
 seedUsuario() // crea el usuario admin la primera vez
 app.use(authRequired) // protege todas las rutas /api excepto /api/login
+app.use('/api/ia', rutasIA({ db, permisoRequired }))
 
 const PORT = process.env.PORT || 3001
 
