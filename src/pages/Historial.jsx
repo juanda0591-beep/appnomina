@@ -3,7 +3,7 @@ import { useData } from "../context/DataContext.jsx"
 import { useAuth } from "../context/AuthContext.jsx"
 import { formatCOP, formatFecha } from "../utils/format.js"
 import { generarPdfNomina } from "../utils/pdf.js"
-import { notify, confirmar } from "../utils/notify.js"
+import { notify, confirmarAnulacion } from "../utils/notify.js"
 import Vacio from "../components/Vacio.jsx"
 
 export default function Historial() {
@@ -222,12 +222,10 @@ export default function Historial() {
                   <button
                     className="btn-danger btn-sm"
                     onClick={async () => {
-                      if (
-                        await confirmar(
-                          "¿Eliminar este pago? (No se puede revertir)"
-                        )
-                      )
-                        deleteNomina(n.id)
+                      const motivo = await confirmarAnulacion('Se anulará el pago y se devolverán los descuentos a los préstamos.')
+                      if (!motivo) return
+                      try { await deleteNomina(n.id, motivo) }
+                      catch (e) { notify.error(e.message) }
                     }}
                   >
                     🗑 Eliminar

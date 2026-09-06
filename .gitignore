@@ -5,3 +5,4 @@ dist
 backend/nomina.db
 backend/nomina.db-wal
 backend/nomina.db-shm
+backend/respaldos/

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
-import { notify, confirmar } from '../utils/notify.js'
+import { notify, confirmar, confirmarAnulacion } from '../utils/notify.js'
 import Vacio from '../components/Vacio.jsx'
 
 const hoy = hoyISO
@@ -133,9 +133,10 @@ export default function Clientes() {
 
   const handleEliminarAnticipo = async (a) => {
     if (a.tipo === 'aplicado') { notify.error('Un anticipo ya aplicado a una venta no se puede borrar.'); return }
-    if (!(await confirmar('¿Eliminar este anticipo? Se revertirá el ingreso a caja.'))) return
+    const motivo = await confirmarAnulacion('Se eliminará este anticipo y se revertirá el ingreso a caja.')
+    if (!motivo) return
     try {
-      await deleteAnticipo(anticiposCliente.id, a.id)
+      await deleteAnticipo(anticiposCliente.id, a.id, motivo)
       notify.ok('Anticipo eliminado')
       await recargarAnticipos()
     } catch (err) {

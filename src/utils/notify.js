@@ -51,6 +51,17 @@ export async function preguntarTexto(mensaje, { titulo = 'Ingresa un valor', pla
   return r.isConfirmed ? r.value.trim() : null
 }
 
+export async function confirmarAnulacion(mensaje) {
+  const r = await Swal.fire({
+    title: 'Confirmar anulación', text: mensaje, icon: 'warning',
+    input: 'textarea', inputLabel: 'Motivo de anulación', inputAttributes: { maxlength: 500 },
+    showCancelButton: true, confirmButtonText: 'Sí, anular', cancelButtonText: 'Cancelar',
+    confirmButtonColor: '#dc2626', reverseButtons: true, customClass: { popup: 'swal-nomina' },
+    inputValidator: (v) => !v || v.trim().length < 3 ? 'Escribe un motivo de al menos 3 caracteres.' : undefined,
+  })
+  return r.isConfirmed ? r.value.trim() : null
+}
+
 // Confirmación asíncrona -> devuelve true/false
 export async function confirmar(
   mensaje,

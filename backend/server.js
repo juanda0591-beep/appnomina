@@ -20,11 +20,12 @@ import {
 } from './auth.js'
 import { optimizarCorte } from './corte.js'
 import { rutasIA } from './ia-routes.js'
+import { registrarNomina, anularNomina, ErrorNomina } from './nomina.js'
+import { auditarSolicitud, consultarAuditoria } from './auditoria.js'
+import { gestorRespaldos, verificarRespaldo, ErrorRespaldo } from './respaldos.js'
 import { publicKey as pushPublicKey, suscribir as pushSuscribir, desuscribir as pushDesuscribir, notificarAdmins } from './push.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const envLocal = join(__dirname, '..', '.env.local')
-if (existsSync(envLocal) && process.loadEnvFile) process.loadEnvFile(envLocal)
 const app = express()
 
 // En producción, detrás del reverse proxy (Caddy/Nginx), el frontend se sirve
@@ -48,9 +49,32 @@ app.use(express.json({ limit: '20mb' })) // amplio para logo y comprobantes en b
 
 seedUsuario() // crea el usuario admin la primera vez
 app.use(authRequired) // protege todas las rutas /api excepto /api/login
+app.use(auditarSolicitud)
 app.use('/api/ia', rutasIA({ db, permisoRequired }))
 
 const PORT = process.env.PORT || 3001
+const respaldos = gestorRespaldos(db)
+respaldos.iniciar()
+
+const manejarRespaldo = (fn) => async (req, res) => {
+  try { await fn(req, res) }
+  catch (e) {
+    res.status(e instanceof ErrorRespaldo ? e.status : 500).json({
+      error: e instanceof ErrorRespaldo ? e.message : 'No se pudo acceder a los respaldos. Revisa la carpeta del servidor.',
+    })
+  }
+}
+app.get('/api/respaldos', adminRequired, manejarRespaldo(async (req, res) => res.json(await respaldos.estado())))
+app.post('/api/respaldos', adminRequired, manejarRespaldo(async (req, res) => res.status(201).json(await respaldos.crear())))
+app.post('/api/respaldos/:nombre/verificar', adminRequired, manejarRespaldo(async (req, res) => {
+  res.json(verificarRespaldo(await respaldos.ruta(req.params.nombre)))
+}))
+app.get('/api/respaldos/:nombre/descargar', adminRequired, manejarRespaldo(async (req, res) => {
+  const archivo = await respaldos.ruta(req.params.nombre)
+  verificarRespaldo(archivo)
+  res.set('Cache-Control', 'no-store')
+  res.download(archivo, req.params.nombre)
+}))
 
 // ============ AUTENTICACIÓN ============
 // Límite simple de intentos de login por IP (en memoria) para frenar fuerza bruta.
@@ -99,13 +123,25 @@ app.post('/api/cambiar-password', (req, res) => {
   const { actual, nueva } = req.body
   const result = cambiarPassword(req.usuario, actual, nueva)
   if (!result.ok) return res.status(400).json({ error: result.error })
+  res.json(result)
+})
+
+app.post('/api/logout', (req, res) => {
+  db.prepare('DELETE FROM sesiones WHERE id = ?').run(req.sesionId)
   res.json({ ok: true })
 })
 
+app.get('/api/sesion', (req, res) => {
+  res.json({ username: req.usuario, rol: req.rol })
+})
 
 // ============ USUARIOS (solo admin) ============
 app.get('/api/usuarios', adminRequired, (req, res) => {
   res.json(listarUsuarios())
+})
+
+app.get('/api/auditoria', adminRequired, (req, res) => {
+  res.json(consultarAuditoria(db, req.query))
 })
 
 app.post('/api/usuarios', adminRequired, (req, res) => {
@@ -1072,6 +1108,11 @@ function nominaCompleta(n) {
     totalDescuentos: n.total_descuentos,
     total: n.total,
     comentario: n.comentario || '',
+    extra: n.extra || 0,
+    extraDetalle: n.extra_detalle || '',
+    descuentoTrabajo: n.descuento_trabajo || 0,
+    descuentoTrabajoDetalle: n.descuento_trabajo_detalle || '',
+    prestamosEmpleado: n.prestamos_snapshot ? JSON.parse(n.prestamos_snapshot) : undefined,
     items: items.map((it) => ({
       productoNombre: it.producto_nombre,
       procesoNombre: it.proceso_nombre,
@@ -1099,72 +1140,26 @@ app.get('/api/nominas', permisoRequired('historial', 'ver'), (req, res) => {
 })
 
 app.post('/api/nominas', permisoRequired('nomina', 'crear'), (req, res) => {
-  const { empleadoId, fecha, items = [], descuentos = [], subtotal, totalDescuentos, total, comentario, tareaIds = [] } = req.body
-  const tx = db.transaction(() => {
-    const r = db
-      .prepare('INSERT INTO nominas (empleado_id, fecha, subtotal, total_descuentos, total, comentario) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(empleadoId, fecha, subtotal || 0, totalDescuentos || 0, total || 0, comentario || '')
-    const nid = r.lastInsertRowid
-
-    const insItem = db.prepare(
-      'INSERT INTO nomina_items (nomina_id, producto_nombre, proceso_nombre, cantidad, pago, subtotal) VALUES (?, ?, ?, ?, ?, ?)'
-    )
-    for (const it of items) {
-      insItem.run(nid, it.productoNombre, it.procesoNombre, it.cantidad, it.pago, it.subtotal)
-    }
-
-    const insDesc = db.prepare(
-      'INSERT INTO nomina_descuentos (nomina_id, prestamo_id, monto, descripcion) VALUES (?, ?, ?, ?)'
-    )
-    const updPrestamo = db.prepare('UPDATE prestamos SET saldo = MAX(0, saldo - ?) WHERE id = ?')
-    for (const d of descuentos) {
-      insDesc.run(nid, d.prestamoId, d.monto, d.descripcion || 'Préstamo')
-      if (d.prestamoId) updPrestamo.run(d.monto, d.prestamoId)
-    }
-
-    // Marca como pagadas las tareas terminadas incluidas en este pago
-    if (Array.isArray(tareaIds) && tareaIds.length > 0) {
-      const marcarPagada = db.prepare(
-        "UPDATE tareas SET estado = 'pagada', nomina_id = ?, actualizado = ? WHERE id = ? AND estado = 'terminada'"
-      )
-      const ahora = new Date().toISOString()
-      for (const tid of tareaIds) marcarPagada.run(nid, ahora, tid)
-    }
-
-    // El pago de nómina sale de caja → gasto automático (por el neto pagado)
-    const emp = db.prepare('SELECT nombre FROM empleados WHERE id = ?').get(empleadoId)
-    registrarGasto({
-      fecha,
-      categoria: 'Nómina',
-      monto: total || 0,
-      descripcion: `Pago de nómina a ${emp?.nombre || 'empleado'}`,
-      origen: 'nomina',
-      refId: nid,
+  try {
+    const nid = registrarNomina(db, req.body, req.usuario)
+    res.json(nominaCompleta(db.prepare('SELECT * FROM nominas WHERE id = ?').get(nid)))
+  } catch (error) {
+    if (!(error instanceof ErrorNomina)) console.error('Error al registrar nomina:', error)
+    res.status(error instanceof ErrorNomina ? error.status : 500).json({
+      error: error instanceof ErrorNomina ? error.message : 'No se pudo registrar el pago. Puedes reintentar la misma solicitud.',
     })
-    return nid
-  })
-  const nid = tx()
-  res.json(nominaCompleta(db.prepare('SELECT * FROM nominas WHERE id = ?').get(nid)))
+  }
 })
 
 app.delete('/api/nominas/:id', permisoRequired('historial', 'eliminar'), (req, res) => {
-  const tx = db.transaction(() => {
-    const descuentos = db.prepare('SELECT prestamo_id, monto FROM nomina_descuentos WHERE nomina_id = ?').all(req.params.id)
-    const revertirPrestamo = db.prepare('UPDATE prestamos SET saldo = saldo + ? WHERE id = ?')
-
-    for (const descuento of descuentos) {
-      if (descuento.prestamo_id) revertirPrestamo.run(Number(descuento.monto) || 0, descuento.prestamo_id)
-    }
-
-    // Devuelve a 'terminada' las tareas que se habían pagado con esta nómina
-    db.prepare("UPDATE tareas SET estado = 'terminada', nomina_id = NULL WHERE nomina_id = ?").run(req.params.id)
-
-    db.prepare('DELETE FROM nominas WHERE id = ?').run(req.params.id)
-    db.prepare("DELETE FROM movimientos WHERE origen = 'nomina' AND ref_id = ?").run(req.params.id)
-  })
-
-  tx()
-  res.json({ ok: true })
+  try {
+    anularNomina(db, req.params.id)
+    res.json({ ok: true })
+  } catch (error) {
+    res.status(error instanceof ErrorNomina ? error.status : 500).json({
+      error: error instanceof ErrorNomina ? error.message : 'No se pudo anular el pago.',
+    })
+  }
 })
 
 // ============ TAREAS (Gestión de Nómina) ============

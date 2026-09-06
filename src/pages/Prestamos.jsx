@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
-import { notify, confirmar } from '../utils/notify.js'
+import { notify, confirmar, confirmarAnulacion } from '../utils/notify.js'
 import Vacio from '../components/Vacio.jsx'
 
 export default function Prestamos() {
@@ -100,7 +100,10 @@ export default function Prestamos() {
                           title="Eliminar"
                           aria-label="Eliminar"
                           onClick={async () => {
-                            if (await confirmar('¿Eliminar este préstamo?')) deletePrestamo(p.id)
+                            const motivo = await confirmarAnulacion('Se eliminará el préstamo y su gasto en caja.')
+                            if (!motivo) return
+                            try { await deletePrestamo(p.id, motivo) }
+                            catch (e) { notify.error(e.message) }
                           }}
                         >
                           ✕

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import { puedeEn } from '../permisos.js'
 
 const AuthContext = createContext(null)
@@ -46,7 +46,7 @@ export function AuthProvider({ children }) {
     setPermisos(data.permisos || null)
   }
 
-  const logout = () => {
+  const limpiarSesion = () => {
     sessionStorage.removeItem('nomina_token')
     sessionStorage.removeItem('nomina_user')
     sessionStorage.removeItem('nomina_rol')
@@ -56,6 +56,30 @@ export function AuthProvider({ children }) {
     setRol('usuario')
     setPermisos(null)
   }
+
+  const logout = async () => {
+    const actual = sessionStorage.getItem('nomina_token')
+    limpiarSesion()
+    if (actual) {
+      await fetch('/api/logout', { method: 'POST', headers: { Authorization: `Bearer ${actual}` },
+        signal: AbortSignal.timeout(5000) }).catch(() => {})
+    }
+  }
+
+  useEffect(() => {
+    if (!token) return
+    const controller = new AbortController()
+    const comprobar = async () => {
+      try {
+        const res = await fetch('/api/sesion', { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal })
+        if (res.status === 401 && sessionStorage.getItem('nomina_token') === token) limpiarSesion()
+      } catch { /* Una desconexion temporal no elimina la sesion local. */ }
+    }
+    comprobar()
+    const timer = setInterval(comprobar, 60000)
+    window.addEventListener('focus', comprobar)
+    return () => { controller.abort(); clearInterval(timer); window.removeEventListener('focus', comprobar) }
+  }, [token])
 
   // ¿El usuario actual puede (pagina, accion)? El admin siempre puede.
   const puede = (pagina, accion = 'ver') => {
@@ -76,6 +100,9 @@ export function AuthProvider({ children }) {
       const data = await res.json().catch(() => ({}))
       throw new Error(data.error || 'No se pudo cambiar la contraseña')
     }
+    const data = await res.json()
+    sessionStorage.setItem('nomina_token', data.token)
+    setToken(data.token)
   }
 
   return (

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
-import { notify, confirmar } from '../utils/notify.js'
+import { notify, confirmar, confirmarAnulacion } from '../utils/notify.js'
 import Vacio from '../components/Vacio.jsx'
 
 const CATEGORIAS_INGRESO = ['Venta', 'Abono cliente', 'Préstamo recibido', 'Otro ingreso']
@@ -237,7 +237,10 @@ export default function ControlDinero() {
                             title="Eliminar"
                             aria-label="Eliminar"
                             onClick={async () => {
-                              if (await confirmar('¿Eliminar este movimiento?')) deleteMovimiento(m.id)
+                              const motivo = await confirmarAnulacion('Se eliminará este movimiento de caja.')
+                              if (!motivo) return
+                              try { await deleteMovimiento(m.id, motivo) }
+                              catch (e) { notify.error(e.message) }
                             }}
                           >
                             ✕

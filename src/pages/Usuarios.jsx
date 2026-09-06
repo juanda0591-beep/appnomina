@@ -132,7 +132,7 @@ export default function Usuarios() {
     setMsg(null)
     try {
       await updateUsuarioPermisos(editPerm.id, permDraft)
-      setMsg({ tipo: 'ok', texto: `✅ Permisos de ${editPerm.username} actualizados. Verá los cambios al volver a iniciar sesión.` })
+      setMsg({ tipo: 'ok', texto: `✅ Permisos de ${editPerm.username} actualizados. Sus sesiones anteriores quedaron cerradas.` })
       cerrarPermisos()
       await recargar()
     } catch (e) {

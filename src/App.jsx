@@ -20,6 +20,7 @@ import Ventas from './pages/Ventas.jsx'
 import Empresa from './pages/Empresa.jsx'
 import Usuarios from './pages/Usuarios.jsx'
 import Cuenta from './pages/Cuenta.jsx'
+import Administracion from './pages/Administracion.jsx'
 // Carga perezosa: Konva/react-konva solo pesan al entrar a esta ruta.
 const CortesPlanos = lazy(() => import('./pages/CortesPlanos.jsx'))
 import { useData } from './context/DataContext.jsx'
@@ -66,6 +67,7 @@ const links = [
   { to: '/costos', label: '💲 Costos', pagina: 'costos' },
   { to: '/empresa', label: '🏢 Empresa', pagina: 'empresa' },
   { to: '/usuarios', label: '👥 Usuarios', solo: 'admin' },
+  { to: '/administracion', label: 'Administración', solo: 'admin' },
   { to: '/cuenta', label: '🔒 Mi cuenta', solo: 'todos' },
 ]
 
@@ -235,6 +237,7 @@ export default function App() {
           <Route path="/costos" element={protegida('costos', <Costos />)} />
           <Route path="/empresa" element={protegida('empresa', <Empresa />)} />
           <Route path="/usuarios" element={esAdmin ? <Usuarios /> : <Navigate to={rutaInicio} replace />} />
+          <Route path="/administracion" element={esAdmin ? <Administracion /> : <Navigate to={rutaInicio} replace />} />
           <Route path="/cuenta" element={<Cuenta />} />
         </Routes>
       </main>

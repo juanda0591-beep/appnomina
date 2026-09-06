@@ -40,14 +40,18 @@ export function seedUsuario() {
 }
 
 // ---------- Tokens firmados (HMAC) ----------
-function makeToken(username, rol) {
-  const payload = Buffer.from(JSON.stringify({ u: username, r: rol, t: Date.now() })).toString('base64url')
+function makeToken(user) {
+  const ahora = Date.now()
+  const sesionId = crypto.randomBytes(32).toString('hex')
+  db.prepare('DELETE FROM sesiones WHERE expira <= ?').run(ahora)
+  db.prepare('INSERT INTO sesiones (id, usuario_id, expira) VALUES (?, ?, ?)').run(sesionId, user.id, ahora + TOKEN_MS)
+  const payload = Buffer.from(JSON.stringify({ u: user.username, s: sesionId, t: ahora })).toString('base64url')
   const sig = crypto.createHmac('sha256', SECRET).update(payload).digest('base64url')
   return `${payload}.${sig}`
 }
 
 function verifyToken(token) {
-  if (!token) return null
+  if (typeof token !== 'string' || token.length > 2000 || token.split('.').length !== 2) return null
   const [payload, sig] = token.split('.')
   if (!payload || !sig) return null
   const expected = crypto.createHmac('sha256', SECRET).update(payload).digest('base64url')
@@ -56,7 +60,8 @@ function verifyToken(token) {
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null
   try {
     const data = JSON.parse(Buffer.from(payload, 'base64url').toString())
-    if (Date.now() - data.t > TOKEN_MS) return null // expirado
+    if (!Number.isSafeInteger(data.t) || data.t > Date.now() || Date.now() - data.t >= TOKEN_MS
+      || typeof data.s !== 'string' || !/^[a-f0-9]{64}$/.test(data.s)) return null
     return data
   } catch {
     return null
@@ -71,7 +76,7 @@ function parsePermisos(raw) {
   try {
     return JSON.parse(raw)
   } catch {
-    return null
+    return {}
   }
 }
 
@@ -82,7 +87,7 @@ export function login(username, password) {
   if (!verifyPassword(password, user.salt, user.hash)) return null
   const rol = user.rol || 'usuario'
   return {
-    token: makeToken(user.username, rol),
+    token: makeToken(user),
     username: user.username,
     rol,
     permisos: rol === 'admin' ? null : parsePermisos(user.permisos),
@@ -95,8 +100,11 @@ export function cambiarPassword(username, actual, nueva) {
   if (!verifyPassword(actual, user.salt, user.hash)) return { ok: false, error: 'La contraseña actual es incorrecta' }
   if (!nueva || String(nueva).length < 4) return { ok: false, error: 'La nueva contraseña debe tener al menos 4 caracteres' }
   const { salt, hash } = hashPassword(nueva)
-  db.prepare('UPDATE usuarios SET salt = ?, hash = ? WHERE id = ?').run(salt, hash, user.id)
-  return { ok: true }
+  return db.transaction(() => {
+    db.prepare('UPDATE usuarios SET salt = ?, hash = ? WHERE id = ?').run(salt, hash, user.id)
+    db.prepare('DELETE FROM sesiones WHERE usuario_id = ?').run(user.id)
+    return { ok: true, token: makeToken(user) }
+  })()
 }
 
 // ---------- Gestión de usuarios (solo admin) ----------
@@ -131,7 +139,10 @@ export function actualizarPermisos(id, permisos) {
   if (!user) return { ok: false, error: 'Usuario no encontrado' }
   if (user.rol === 'admin') return { ok: false, error: 'El administrador siempre tiene acceso total' }
   const permJson = permisos ? JSON.stringify(permisos) : null
-  db.prepare('UPDATE usuarios SET permisos = ? WHERE id = ?').run(permJson, id)
+  db.transaction(() => {
+    db.prepare('UPDATE usuarios SET permisos = ? WHERE id = ?').run(permJson, id)
+    db.prepare('DELETE FROM sesiones WHERE usuario_id = ?').run(id)
+  })()
   return { ok: true }
 }
 
@@ -153,15 +164,19 @@ export function resetPassword(id, nueva) {
   if (!user) return { ok: false, error: 'Usuario no encontrado' }
   if (!nueva || String(nueva).length < 4) return { ok: false, error: 'La contraseña debe tener al menos 4 caracteres' }
   const { salt, hash } = hashPassword(nueva)
-  db.prepare('UPDATE usuarios SET salt = ?, hash = ? WHERE id = ?').run(salt, hash, id)
+  db.transaction(() => {
+    db.prepare('UPDATE usuarios SET salt = ?, hash = ? WHERE id = ?').run(salt, hash, id)
+    db.prepare('DELETE FROM sesiones WHERE usuario_id = ?').run(id)
+  })()
   return { ok: true }
 }
 
 // ---------- Middleware ----------
 export function authRequired(req, res, next) {
   // solo protegemos la API; el login queda abierto
-  if (!req.path.startsWith('/api')) return next()
-  if (req.path === '/api/login') return next()
+  const path = req.path.toLowerCase()
+  if (path !== '/api' && !path.startsWith('/api/')) return next()
+  if (path === '/api/login' && req.method === 'POST') return next()
 
   const header = req.headers.authorization || ''
   // El token llega por header (peticiones normales) o por query (?token=…),
@@ -169,8 +184,13 @@ export function authRequired(req, res, next) {
   const token = header.startsWith('Bearer ') ? header.slice(7) : (req.query?.token || null)
   const data = verifyToken(token)
   if (!data) return res.status(401).json({ error: 'No autorizado' })
-  req.usuario = data.u
-  req.rol = data.r || 'usuario'
+  const user = db.prepare(`SELECT u.id, u.username, u.rol FROM sesiones s
+    JOIN usuarios u ON u.id = s.usuario_id WHERE s.id = ? AND s.expira > ?`).get(data.s, Date.now())
+  if (!user || user.username !== data.u) return res.status(401).json({ error: 'La sesion vencio o fue revocada. Inicia sesion nuevamente.' })
+  req.usuario = user.username
+  req.usuarioId = user.id
+  req.sesionId = data.s
+  req.rol = user.rol || 'usuario'
   next()
 }
 
@@ -189,6 +209,7 @@ export function permisoRequired(pagina, accion) {
     if (pagina === 'inicio' && accion === 'ver') return next()
 
     const user = db.prepare('SELECT permisos FROM usuarios WHERE username = ?').get(req.usuario)
+    if (!user) return res.status(401).json({ error: 'Usuario no autorizado' })
     const permisos = parsePermisos(user?.permisos)
     if (!permisos) return next()
     if (permisos[pagina] && permisos[pagina][accion]) return next()
@@ -199,6 +220,7 @@ export function permisoAnyRequired(reglas) {
   return (req, res, next) => {
     if (req.rol === 'admin') return next()
     const user = db.prepare('SELECT permisos FROM usuarios WHERE username = ?').get(req.usuario)
+    if (!user) return res.status(401).json({ error: 'Usuario no autorizado' })
     const permisos = parsePermisos(user?.permisos)
     if (!permisos) return next()
 

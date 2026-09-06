@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { formatCOP, hoyISO } from '../utils/format.js'
 import { generarPdfNomina } from '../utils/pdf.js'
@@ -6,6 +6,7 @@ import { notify, confirmar } from '../utils/notify.js'
 import Vacio from '../components/Vacio.jsx'
 
 const nuevoItem = () => ({ key: Math.random().toString(36).slice(2), productoId: '', procesoId: '', cantidad: '' })
+const dinero = (n) => Math.round((n + Number.EPSILON) * 100) / 100
 
 export default function Nomina() {
   const { empleados, productos, empresa, prestamosDeEmpleado, getEmpleado, getProducto, addNomina, tareasTerminadasDeEmpleado, getTareaFotos } = useData()
@@ -20,7 +21,8 @@ export default function Nomina() {
   const [descTrabajoMonto, setDescTrabajoMonto] = useState('')
   const [descTrabajoDetalle, setDescTrabajoDetalle] = useState('')
   const [comentario, setComentario] = useState('')
-  const [tareaIds, setTareaIds] = useState([]) // tareas terminadas incluidas en este pago
+  const intentoPago = useRef(null)
+  const pagoEnCurso = useRef(false)
   const [modalTareas, setModalTareas] = useState(null) // tareas candidatas a cargar, o null
   const [fotosTareas, setFotosTareas] = useState([]) // fotos (con imagen) de las tareas cargadas, para el PDF
 
@@ -40,13 +42,18 @@ export default function Nomina() {
 
   const addItemRow = () => setItems((its) => [...its, nuevoItem()])
   const removeItemRow = (key) =>
-    setItems((its) => (its.length === 1 ? its : its.filter((it) => it.key !== key)))
+    setItems((its) => (its.length === 1 ? [nuevoItem()] : its.filter((it) => it.key !== key)))
 
   // Al elegir un empleado: si tiene tareas terminadas sin pagar, ofrecer cargarlas
   const handleEmpleadoChange = (id) => {
     setEmpleadoId(id)
     setDescuentos({})
-    setTareaIds([])
+    setItems([nuevoItem()])
+    setExtraMonto('')
+    setExtraDetalle('')
+    setDescTrabajoMonto('')
+    setDescTrabajoDetalle('')
+    setComentario('')
     setFotosTareas([])
     const terminadas = id ? tareasTerminadasDeEmpleado(id) : []
     if (terminadas.length > 0) setModalTareas(terminadas)
@@ -64,6 +71,7 @@ export default function Nomina() {
     )
     return {
       key: Math.random().toString(36).slice(2),
+      tareaId: t.id,
       // si el producto/proceso siguen existiendo, se enlazan; si no, quedan vacíos
       productoId: producto ? String(t.productoId) : '',
       procesoId: producto && proceso ? String(proceso.id) : '',
@@ -74,23 +82,24 @@ export default function Nomina() {
   // Confirma el modal: carga las tareas terminadas como filas de trabajo
   const confirmarCargarTareas = async () => {
     if (!modalTareas) return
-    const filas = modalTareas.map(tareaAItem)
+    const tareas = modalTareas
+    const filas = tareas.map(tareaAItem)
+    setModalTareas(null)
     // reemplaza las filas vacías iniciales; si ya hay trabajos, los conserva
     setItems((its) => {
       const conDatos = its.filter((it) => it.productoId || it.procesoId || it.cantidad)
-      return [...conDatos, ...filas]
+      return [...conDatos, ...filas.filter((f) => !conDatos.some((it) => it.tareaId === f.tareaId))]
     })
-    setTareaIds(modalTareas.map((t) => t.id))
 
     // Trae las fotos (con imagen) de todas las tareas cargadas, para incluirlas en el PDF
     try {
-      const listas = await Promise.all(modalTareas.map((t) => getTareaFotos(t.id, true)))
+      const listas = await Promise.all(tareas.map(async (t) =>
+        (await getTareaFotos(t.id, true)).map((f) => ({ ...f, tareaId: t.id }))))
       setFotosTareas(listas.flat())
     } catch {
       setFotosTareas([]) // si fallan las fotos, el pago sigue sin ellas
     }
 
-    setModalTareas(null)
   }
 
   // Calcula cada línea con su valor
@@ -106,24 +115,24 @@ export default function Nomina() {
         procesoNombre: proceso?.nombre || '',
         pago,
         cantidad,
-        subtotal: pago * cantidad,
+        subtotal: dinero(pago * cantidad),
       }
     })
   }, [items, productos])
 
-  const subtotal = lineas.reduce((s, l) => s + l.subtotal, 0)
+  const subtotal = dinero(lineas.reduce((s, l) => s + l.subtotal, 0))
 
   const totalDescuentos = useMemo(() => {
-    return prestamos.reduce((s, p) => {
+    return dinero(prestamos.reduce((s, p) => {
       const m = Number(descuentos[p.id]) || 0
-      return s + Math.min(m, p.saldo)
-    }, 0)
+      return s + dinero(Math.min(m, p.saldo))
+    }, 0))
   }, [descuentos, prestamos])
 
-  const extra = Math.max(0, Number(extraMonto) || 0)
-  const descuentoTrabajo = Math.max(0, Number(descTrabajoMonto) || 0)
+  const extra = dinero(Math.max(0, Number(extraMonto) || 0))
+  const descuentoTrabajo = dinero(Math.max(0, Number(descTrabajoMonto) || 0))
 
-  const total = subtotal - totalDescuentos + extra - descuentoTrabajo
+  const total = dinero(subtotal - totalDescuentos + extra - descuentoTrabajo)
 
   const setDescuento = (prestamoId, monto, saldo) => {
     const val = Math.max(0, Math.min(Number(monto) || 0, saldo))
@@ -140,7 +149,7 @@ export default function Nomina() {
     setDescTrabajoDetalle('')
     setComentario('')
     setFecha(hoy)
-    setTareaIds([])
+    intentoPago.current = null
     setModalTareas(null)
     setFotosTareas([])
   }
@@ -151,6 +160,7 @@ export default function Nomina() {
       .filter((l) => l.productoId && l.procesoId && l.cantidad > 0)
       .map((l) => ({
         productoId: l.productoId,
+        tareaId: l.tareaId ?? null,
         productoNombre: l.productoNombre,
         procesoId: l.procesoId,
         procesoNombre: l.procesoNombre,
@@ -161,7 +171,7 @@ export default function Nomina() {
 
     const descuentosArr = prestamos
       .map((p) => {
-        const m = Math.min(Number(descuentos[p.id]) || 0, p.saldo)
+        const m = dinero(Math.min(Number(descuentos[p.id]) || 0, p.saldo))
         return m > 0
           ? { prestamoId: p.id, monto: m, descripcion: p.descripcion || 'Préstamo' }
           : null
@@ -170,12 +180,12 @@ export default function Nomina() {
 
     // Estado de los préstamos del empleado (para mostrar el saldo en el PDF)
     const prestamosEmpleado = prestamos.map((p) => {
-      const descontado = Math.min(Number(descuentos[p.id]) || 0, p.saldo)
+      const descontado = dinero(Math.min(Number(descuentos[p.id]) || 0, p.saldo))
       return {
         descripcion: p.descripcion || 'Préstamo',
         saldoAnterior: p.saldo,
         descontado,
-        saldoNuevo: p.saldo - descontado,
+        saldoNuevo: dinero(p.saldo - descontado),
       }
     })
 
@@ -184,8 +194,8 @@ export default function Nomina() {
       empleadoId,
       fecha,
       comentario,
-      tareaIds,
-      fotos: fotosTareas,
+      tareaIds: itemsValidos.filter((it) => it.tareaId != null).map((it) => it.tareaId),
+      fotos: fotosTareas.filter((f) => itemsValidos.some((it) => it.tareaId === f.tareaId)),
       items: itemsValidos,
       descuentos: descuentosArr,
       prestamosEmpleado,
@@ -193,8 +203,8 @@ export default function Nomina() {
       extraDetalle: extra > 0 ? extraDetalle.trim() : '',
       descuentoTrabajo,
       descuentoTrabajoDetalle: descuentoTrabajo > 0 ? descTrabajoDetalle.trim() : '',
-      subtotal: itemsValidos.reduce((s, i) => s + i.subtotal, 0),
-      totalDescuentos: descuentosArr.reduce((s, d) => s + d.monto, 0),
+      subtotal: dinero(itemsValidos.reduce((s, i) => s + i.subtotal, 0)),
+      totalDescuentos: dinero(descuentosArr.reduce((s, d) => s + d.monto, 0)),
     }
   }
 
@@ -207,29 +217,52 @@ export default function Nomina() {
       notify.error('Agrega al menos un trabajo (producto, proceso y cantidad)')
       return false
     }
+    if (lineas.some((l) => (l.tareaId || l.productoId || l.procesoId || l.cantidad)
+      && (!l.productoNombre || !l.procesoNombre || !Number.isFinite(l.cantidad) || l.cantidad <= 0))) {
+      notify.error('Completa o quita los trabajos pendientes antes de pagar')
+      return false
+    }
+    if (!fecha || !Number.isFinite(total) || total < 0) {
+      notify.error('Revisa la fecha y los descuentos: el total no puede ser negativo')
+      return false
+    }
     return true
   }
 
   const [guardando, setGuardando] = useState(false)
 
   const handlePagar = async () => {
+    if (pagoEnCurso.current) return
     const payload = construirPayload()
     if (!validar(payload)) return
-    const total = payload.subtotal - payload.totalDescuentos + payload.extra - payload.descuentoTrabajo
-    const ok = await confirmar(
-      `Se pagará ${formatCOP(total)} a ${payload.empleado?.nombre || 'el empleado'} y se generará el PDF. ¿Continuar?`,
-      { titulo: 'Confirmar pago de nómina', textoOk: 'Sí, pagar', peligro: false }
-    )
-    if (!ok) return
+    pagoEnCurso.current = true
     setGuardando(true)
     try {
-      await addNomina({ ...payload, empleado: undefined, fotos: undefined, total }) // no enviamos copia del empleado ni las fotos (solo van al PDF)
-      generarPdfNomina({ ...payload, empresa, total })
-      notify.ok('Pago registrado y PDF generado')
+      const total = dinero(payload.subtotal - payload.totalDescuentos + payload.extra - payload.descuentoTrabajo)
+      const ok = await confirmar(
+        `Se pagará ${formatCOP(total)} a ${payload.empleado?.nombre || 'el empleado'} y se generará el PDF. ¿Continuar?`,
+        { titulo: 'Confirmar pago de nómina', textoOk: 'Sí, pagar', peligro: false }
+      )
+      if (!ok) return
+      const solicitud = { ...payload, empleado: undefined, fotos: undefined, prestamosEmpleado: undefined, total }
+      const firma = JSON.stringify(solicitud)
+      if (intentoPago.current?.firma !== firma) {
+        // getRandomValues funciona tambien al acceder por HTTP desde la red local.
+        const clave = Array.from(crypto.getRandomValues(new Uint8Array(16)), (v) => v.toString(16).padStart(2, '0')).join('')
+        intentoPago.current = { firma, clave }
+      }
+      const creada = await addNomina({ ...solicitud, solicitudId: intentoPago.current.clave })
       resetForm()
+      try {
+        generarPdfNomina({ ...payload, ...creada, empresa })
+        notify.ok('Pago registrado y PDF generado')
+      } catch {
+        notify.error('El pago quedó registrado. No vuelvas a pagarlo; reimprime el comprobante desde Historial.')
+      }
     } catch (e) {
       notify.error('Error al registrar el pago: ' + e.message)
     } finally {
+      pagoEnCurso.current = false
       setGuardando(false)
     }
   }
@@ -237,11 +270,11 @@ export default function Nomina() {
   const handleVistaPrevia = () => {
     const payload = construirPayload()
     if (!validar(payload)) return
-    generarPdfNomina({ ...payload, empresa, total: payload.subtotal - payload.totalDescuentos + payload.extra - payload.descuentoTrabajo })
+    generarPdfNomina({ ...payload, empresa, total: dinero(payload.subtotal - payload.totalDescuentos + payload.extra - payload.descuentoTrabajo) })
   }
 
   return (
-    <div>
+    <fieldset disabled={guardando} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
       <h2>🧾 Pago de Nómina</h2>
 
       <div className="card">
@@ -290,7 +323,7 @@ export default function Nomina() {
               return (
                 <tr key={it.key}>
                   <td>
-                    <select value={it.productoId} onChange={(e) => setItemField(it.key, 'productoId', e.target.value)}>
+                    <select disabled={!!it.tareaId} value={it.productoId} onChange={(e) => setItemField(it.key, 'productoId', e.target.value)}>
                       <option value="">— Producto —</option>
                       {productos.map((p) => (
                         <option key={p.id} value={p.id}>{p.nombre}</option>
@@ -300,7 +333,7 @@ export default function Nomina() {
                   <td>
                     <select
                       value={it.procesoId}
-                      disabled={!producto}
+                      disabled={!producto || !!it.tareaId}
                       onChange={(e) => setItemField(it.key, 'procesoId', e.target.value)}
                     >
                       <option value="">— Proceso —</option>
@@ -317,6 +350,7 @@ export default function Nomina() {
                       min="0"
                       step="any"
                       value={it.cantidad}
+                      disabled={!!it.tareaId}
                       onChange={(e) => setItemField(it.key, 'cantidad', e.target.value)}
                       placeholder="0"
                     />
@@ -521,6 +555,6 @@ export default function Nomina() {
           </div>
         </>
       )}
-    </div>
+    </fieldset>
   )
 }

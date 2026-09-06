@@ -191,8 +191,8 @@ export function DataProvider({ children }) {
     await recargar()
     return actualizado
   }
-  const deleteAnticipo = async (clienteId, anticipoId) => {
-    await http(`/clientes/${clienteId}/anticipos/${anticipoId}`, { method: 'DELETE' })
+  const deleteAnticipo = async (clienteId, anticipoId, motivo) => {
+    await http(`/clientes/${clienteId}/anticipos/${anticipoId}`, { method: 'DELETE', body: JSON.stringify({ motivo }) })
     await recargar()
   }
 
@@ -228,8 +228,8 @@ export function DataProvider({ children }) {
     await recargar()
     return actualizada
   }
-  const deleteVenta = async (id) => {
-    await http(`/ventas/${id}`, { method: 'DELETE' })
+  const deleteVenta = async (id, motivo) => {
+    await http(`/ventas/${id}`, { method: 'DELETE', body: JSON.stringify({ motivo }) })
     await recargar()
   }
   const registrarPagoVenta = async (id, pago) => {
@@ -275,8 +275,8 @@ export function DataProvider({ children }) {
     await http('/prestamos', { method: 'POST', body: JSON.stringify(prestamo) })
     await recargar()
   }
-  const deletePrestamo = async (id) => {
-    await http(`/prestamos/${id}`, { method: 'DELETE' })
+  const deletePrestamo = async (id, motivo) => {
+    await http(`/prestamos/${id}`, { method: 'DELETE', body: JSON.stringify({ motivo }) })
     await recargar()
   }
 
@@ -286,8 +286,8 @@ export function DataProvider({ children }) {
     await recargar()
     return creada
   }
-  const deleteNomina = async (id) => {
-    await http(`/nominas/${id}`, { method: 'DELETE' })
+  const deleteNomina = async (id, motivo) => {
+    await http(`/nominas/${id}`, { method: 'DELETE', body: JSON.stringify({ motivo }) })
     await recargar()
   }
 
@@ -297,8 +297,8 @@ export function DataProvider({ children }) {
     await recargar()
     return creado
   }
-  const deleteMovimiento = async (id) => {
-    await http(`/movimientos/${id}`, { method: 'DELETE' })
+  const deleteMovimiento = async (id, motivo) => {
+    await http(`/movimientos/${id}`, { method: 'DELETE', body: JSON.stringify({ motivo }) })
     await recargar()
   }
   const addComprobanteMovimiento = async (id, datos) => {

@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
-import { notify, confirmar } from '../utils/notify.js'
+import { notify, confirmar, confirmarAnulacion } from '../utils/notify.js'
 import Vacio from '../components/Vacio.jsx'
 import { generarPdfVenta, ventaPdfFile, imprimirVenta } from '../utils/pdf.js'
 import { abrirWhatsApp, mensajeVenta } from '../utils/whatsapp.js'
@@ -252,9 +252,10 @@ export default function Ventas() {
   }
 
   const handleAnular = async (v) => {
-    if (!(await confirmar(`¿Anular la venta ${v.codigo || '#' + v.id}? Se devuelve el stock y se revierte el ingreso a caja.`, { titulo: 'Anular venta', textoOk: 'Sí, anular', peligro: true }))) return
+    const motivo = await confirmarAnulacion(`Se anulará la venta ${v.codigo || '#' + v.id}, se devolverá el stock y se revertirá el ingreso a caja.`)
+    if (!motivo) return
     try {
-      await deleteVenta(v.id)
+      await deleteVenta(v.id, motivo)
       notify.ok('Venta anulada')
     } catch (err) {
       notify.error('Error: ' + err.message)

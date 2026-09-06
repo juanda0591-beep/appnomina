@@ -1,6 +1,9 @@
+import './env.js'
 import Database from 'better-sqlite3'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
+import { migrarNomina } from './nomina.js'
+import { instalarAuditoria } from './auditoria.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // Ruta de la base de datos: por defecto nomina.db junto a este archivo.
@@ -700,5 +703,16 @@ addCol('tareas_produccion', 'fin_real', 'fin_real TEXT')
 db.prepare(
   'INSERT OR IGNORE INTO empresa (id, nombre, direccion, telefono, correo, nit, logo) VALUES (1, ?, ?, ?, ?, ?, ?)'
 ).run('', '', '', '', '', '')
+
+migrarNomina(db)
+
+db.exec(`CREATE TABLE IF NOT EXISTS sesiones (
+  id TEXT PRIMARY KEY,
+  usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  expira INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS sesiones_usuario ON sesiones(usuario_id);`)
+
+instalarAuditoria(db)
 
 export default db

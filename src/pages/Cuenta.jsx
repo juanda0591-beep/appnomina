@@ -49,7 +49,7 @@ export default function Cuenta() {
     setGuardando(true)
     try {
       await cambiarPassword(actual, nueva)
-      setMsg({ tipo: 'ok', texto: '✅ Contraseña actualizada' })
+      setMsg({ tipo: 'ok', texto: '✅ Contraseña actualizada. Las otras sesiones quedaron cerradas.' })
       setActual(''); setNueva(''); setConfirmar('')
     } catch (err) {
       setMsg({ tipo: 'error', texto: err.message })
