@@ -9,11 +9,13 @@ export default function ProduccionDashboard() {
   const { getProduccionDashboard } = useData()
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
+  const [cargando, setCargando] = useState(true)
 
   useEffect(() => {
     getProduccionDashboard()
       .then(setData)
       .catch((e) => setError(e.message))
+      .finally(() => setCargando(false))
   }, [])
 
   if (error) {
@@ -25,7 +27,7 @@ export default function ProduccionDashboard() {
     )
   }
 
-  if (!data) {
+  if (cargando || !data) {
     return (
       <div>
         <h2>🏭 Dashboard de Producción</h2>
