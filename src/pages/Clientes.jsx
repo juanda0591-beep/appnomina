@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useLocalData } from '../hooks/useLocalData.js'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
@@ -14,8 +15,13 @@ const emptyAnticipo = () => ({ monto: '', fecha: hoy(), descripcion: '' })
 const ANT_LABEL = { abono: 'Abono', aplicado: 'Aplicado a venta', devuelto: 'Devuelto' }
 
 export default function Clientes() {
+  // Carga local de datos
+  const { data: clientes, cargando: cargandoClientes, recargar: recargarClientes } = useLocalData('/clientes')
+  const { data: pedidos, cargando: cargandoPedidos } = useLocalData('/pedidos')
+  const { data: ventas, cargando: cargandoVentas } = useLocalData('/ventas')
+
+  // Funciones de mutación del context
   const {
-    clientes, pedidos, ventas,
     addCliente, updateCliente, deleteCliente,
     getClienteAnticipos, addAnticipo, deleteAnticipo,
   } = useData()
@@ -50,9 +56,11 @@ export default function Clientes() {
     try {
       if (editando) {
         await updateCliente(editId, form)
+        await recargarClientes()
         notify.ok('Cliente actualizado')
       } else {
         await addCliente(form)
+        await recargarClientes()
         notify.ok('Cliente agregado')
       }
       resetForm()
@@ -65,10 +73,31 @@ export default function Clientes() {
     if (!(await confirmar(`¿Eliminar a "${c.nombre}"?`))) return
     try {
       await deleteCliente(c.id)
+      await recargarClientes()
       notify.ok('Cliente eliminado')
     } catch (err) {
       notify.error('Error: ' + err.message)
     }
+  }
+
+  const cargando = cargandoClientes || cargandoPedidos || cargandoVentas
+
+  if (cargando) {
+    return (
+      <div>
+        <h2>👥 Clientes</h2>
+        <div className="banner">Cargando clientes...</div>
+      </div>
+    )
+  }
+
+  if (!clientes || !pedidos || !ventas) {
+    return (
+      <div>
+        <h2>👥 Clientes</h2>
+        <div className="banner error">No se pudieron cargar los datos necesarios</div>
+      </div>
+    )
   }
 
   const q = busqueda.trim().toLowerCase()
