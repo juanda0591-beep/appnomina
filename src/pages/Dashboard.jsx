@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useLocalData } from '../hooks/useLocalData.js'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha } from '../utils/format.js'
@@ -17,15 +18,18 @@ function calcTendencia(hoy, ayer) {
 }
 
 export default function Dashboard() {
+  // Carga el dashboard desde el endpoint dedicado
   const { getDashboard } = useData()
   const { usuario } = useAuth()
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
+  const [cargando, setCargando] = useState(true)
 
   useEffect(() => {
     getDashboard()
       .then(setData)
       .catch((e) => setError(e.message))
+      .finally(() => setCargando(false))
   }, [])
 
   if (error) {
@@ -37,7 +41,7 @@ export default function Dashboard() {
     )
   }
 
-  if (!data) {
+  if (cargando || !data) {
     return (
       <div>
         <h2>📊 Inicio</h2>
