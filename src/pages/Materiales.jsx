@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useLocalData } from '../hooks/useLocalData.js'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha } from '../utils/format.js'
@@ -16,8 +17,13 @@ const emptyForm = { nombre: '', unidad: UNIDADES[0], costoUnitario: '', stockIni
 const emptyEntrada = { cantidad: '', costoUnitario: '', descripcion: '' }
 
 export default function Materiales() {
+  // Carga local de datos
+  const { data: materiales, cargando: cargandoMateriales, recargar: recargarMateriales } = useLocalData('/materiales')
+
+  // Funciones de mutación y datos globales del context
   const {
-    materiales, colores, addMaterial, updateMaterial, deleteMaterial,
+    colores,
+    addMaterial, updateMaterial, deleteMaterial,
     registrarEntradaMaterial, getMaterialMovimientos,
   } = useData()
   const { puede } = useAuth()
@@ -73,6 +79,7 @@ export default function Materiales() {
           colorId: form.colorId ? Number(form.colorId) : null,
           familia: form.familia,
         })
+        await recargarMateriales()
         notify.ok('Material actualizado')
       } else {
         await addMaterial({
@@ -84,6 +91,7 @@ export default function Materiales() {
           colorId: form.colorId ? Number(form.colorId) : null,
           familia: form.familia,
         })
+        await recargarMateriales()
         notify.ok('Material creado')
       }
       resetForm()
@@ -131,6 +139,7 @@ export default function Materiales() {
         costoUnitario: Number(entrada.costoUnitario) || 0,
         descripcion: entrada.descripcion,
       })
+      await recargarMateriales()
       notify.ok('Entrada registrada')
       cancelEntrada()
     } catch (err) {
@@ -151,8 +160,26 @@ export default function Materiales() {
     setHistorialId(null)
     setHistorial([])
   }
-  const materialHistorial = materiales.find((m) => m.id === historialId)
-  const materialEntrada = materiales.find((m) => m.id === entradaId)
+  const materialHistorial = materiales?.find((m) => m.id === historialId)
+  const materialEntrada = materiales?.find((m) => m.id === entradaId)
+
+  if (cargandoMateriales) {
+    return (
+      <div>
+        <h2>🧱 Materiales</h2>
+        <div className="banner">Cargando materiales...</div>
+      </div>
+    )
+  }
+
+  if (!materiales) {
+    return (
+      <div>
+        <h2>🧱 Materiales</h2>
+        <div className="banner error">No se pudieron cargar los materiales</div>
+      </div>
+    )
+  }
 
   return (
     <div>
