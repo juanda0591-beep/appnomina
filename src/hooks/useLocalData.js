@@ -35,13 +35,13 @@ async function http(path, options = {}) {
  * const { data: productos, cargando, error, recargar } = useLocalData('/productos')
  */
 export function useLocalData(endpoint, deps = []) {
-  const [data, setData] = useState(null)
+  const [data, setData] = useState([]) // Inicializa con array vacío
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState(null)
 
   const recargar = useCallback(async () => {
     if (!endpoint) {
-      setData(null)
+      setData([])
       setCargando(false)
       return
     }
@@ -51,10 +51,10 @@ export function useLocalData(endpoint, deps = []) {
 
     try {
       const result = await http(endpoint)
-      setData(result)
+      setData(result || []) // Asegura array vacío si result es null/undefined
     } catch (e) {
       setError(e.message)
-      setData(null)
+      setData([]) // Array vacío en caso de error
     } finally {
       setCargando(false)
     }
