@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useLocalData } from '../hooks/useLocalData.js'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { notify, confirmar } from '../utils/notify.js'
@@ -7,7 +8,11 @@ import FirmaCanvas from '../components/FirmaCanvas.jsx'
 const vacio = { nombre: '', direccion: '', telefono: '', correo: '', nit: '', logo: '', firma: '' }
 
 export default function Empresa() {
-  const { empresa, updateEmpresa } = useData()
+  // Carga local de datos
+  const { data: empresa, cargando, recargar } = useLocalData('/empresa')
+
+  // Funciones de mutación del context
+  const { updateEmpresa } = useData()
   const { puede } = useAuth()
   const puedeEditar = puede('empresa', 'editar')
   const [form, setForm] = useState(vacio)
@@ -50,6 +55,7 @@ export default function Empresa() {
     setGuardando(true)
     try {
       await updateEmpresa(form)
+      await recargar()
       setGuardado(true)
     } catch (err) {
       notify.error('Error al guardar: ' + err.message)
@@ -65,6 +71,7 @@ export default function Empresa() {
     setGuardandoFirma(true)
     try {
       await updateEmpresa({ ...form, firma: dataUrl || '' })
+      await recargar()
       setField('firma', dataUrl || '')
       notify.ok(dataUrl ? 'Firma guardada' : 'Firma eliminada')
     } catch (err) {
@@ -72,6 +79,24 @@ export default function Empresa() {
     } finally {
       setGuardandoFirma(false)
     }
+  }
+
+  if (cargando) {
+    return (
+      <div>
+        <h2>🏢 Datos de la empresa</h2>
+        <div className="banner">Cargando datos de la empresa...</div>
+      </div>
+    )
+  }
+
+  if (!empresa) {
+    return (
+      <div>
+        <h2>🏢 Datos de la empresa</h2>
+        <div className="banner error">No se pudieron cargar los datos de la empresa</div>
+      </div>
+    )
   }
 
   return (
