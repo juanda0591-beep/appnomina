@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useLocalData } from '../hooks/useLocalData.js'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
@@ -12,10 +13,13 @@ const ESTADO_LABEL = { pendiente: 'Pendiente', entregado: 'Entregado', anulado: 
 const emptyItem = () => ({ productoId: '', varianteId: '', cantidad: '', precioUnitario: '' })
 
 export default function Pedidos() {
-  const {
-    pedidos, clientes, productos, empresa,
-    addPedido, updatePedido, deletePedido,
-  } = useData()
+  // Carga local de datos
+  const { data: pedidos, cargando: cargandoPedidos, recargar: recargarPedidos } = useLocalData('/pedidos')
+  const { data: clientes, cargando: cargandoClientes } = useLocalData('/clientes')
+  const { data: productos, cargando: cargandoProductos } = useLocalData('/productos')
+
+  // Funciones de mutación y datos globales del context
+  const { empresa, addPedido, updatePedido, deletePedido } = useData()
   const { puede } = useAuth()
   const puedeCrear = puede('pedidos', 'crear')
   const puedeEditar = puede('pedidos', 'editar')
@@ -119,9 +123,11 @@ export default function Pedidos() {
       }
       if (editId) {
         await updatePedido(editId, payload)
+        await recargarPedidos()
         notify.ok('Pedido actualizado')
       } else {
         await addPedido(payload)
+        await recargarPedidos()
         notify.ok('Pedido creado')
       }
       resetForm()
@@ -136,6 +142,7 @@ export default function Pedidos() {
     if (!(await confirmar(`¿Eliminar el pedido #${p.id}?`))) return
     try {
       await deletePedido(p.id)
+      await recargarPedidos()
       notify.ok('Pedido eliminado')
     } catch (err) {
       notify.error('Error: ' + err.message)
@@ -211,6 +218,26 @@ export default function Pedidos() {
       return true
     })
   }, [pedidos, filtroEstado, busqueda])
+
+  const cargando = cargandoPedidos || cargandoClientes || cargandoProductos
+
+  if (cargando) {
+    return (
+      <div>
+        <h2>📝 Pedidos</h2>
+        <div className="banner">Cargando pedidos...</div>
+      </div>
+    )
+  }
+
+  if (!pedidos || !clientes || !productos) {
+    return (
+      <div>
+        <h2>📝 Pedidos</h2>
+        <div className="banner error">No se pudieron cargar los datos necesarios</div>
+      </div>
+    )
+  }
 
   return (
     <div>
