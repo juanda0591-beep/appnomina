@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useLocalData } from '../hooks/useLocalData.js'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
@@ -25,10 +26,20 @@ const ESTADO_HERRAMIENTA_CHIP = {
 }
 
 export default function Empleados() {
+  // Carga local de datos
+  const { data: empleados, cargando: cargandoEmpleados, recargar: recargarEmpleados } = useLocalData('/empleados')
+  const { data: prestamos, cargando: cargandoPrestamos } = useLocalData('/prestamos')
+
+  // Funciones de mutación del context
   const {
-    empleados, addEmpleado, updateEmpleado, deleteEmpleado, setEmpleadoActivo, prestamosDeEmpleado,
+    addEmpleado, updateEmpleado, deleteEmpleado, setEmpleadoActivo,
     getHerramientasEmpleado, addHerramienta, updateHerramienta, deleteHerramienta,
   } = useData()
+
+  // Helper local
+  const prestamosDeEmpleado = (empleadoId) =>
+    prestamos?.filter((p) => String(p.empleado_id) === String(empleadoId) && p.saldo > 0) || []
+
   const { puede } = useAuth()
   const puedeCrear = puede('empleados', 'crear')
   const puedeEditar = puede('empleados', 'editar')
@@ -70,9 +81,11 @@ export default function Empleados() {
     try {
       if (editando) {
         await updateEmpleado(editId, form)
+        await recargarEmpleados()
         notify.ok('Empleado actualizado')
       } else {
         await addEmpleado(form)
+        await recargarEmpleados()
         notify.ok('Empleado agregado')
       }
       resetForm()
@@ -171,6 +184,7 @@ export default function Empleados() {
     if (!(await confirmar(`¿Eliminar a "${emp.nombre}"?`))) return
     try {
       await deleteEmpleado(emp.id)
+      await recargarEmpleados()
       notify.ok('Empleado eliminado')
     } catch (err) {
       // Si tiene historial (tareas, préstamos, herramientas, nóminas), el backend
@@ -183,6 +197,7 @@ export default function Empleados() {
         if (desactivar) {
           try {
             await setEmpleadoActivo(emp.id, false)
+            await recargarEmpleados()
             notify.ok('Empleado desactivado')
           } catch (err2) {
             notify.error('Error al desactivar: ' + err2.message)
@@ -202,10 +217,31 @@ export default function Empleados() {
     ))) return
     try {
       await setEmpleadoActivo(emp.id, activar)
+      await recargarEmpleados()
       notify.ok(activar ? 'Empleado reactivado' : 'Empleado desactivado')
     } catch (err) {
       notify.error('Error: ' + err.message)
     }
+  }
+
+  const cargando = cargandoEmpleados || cargandoPrestamos
+
+  if (cargando) {
+    return (
+      <div>
+        <h2>👷 Empleados</h2>
+        <div className="banner">Cargando empleados...</div>
+      </div>
+    )
+  }
+
+  if (!empleados || !prestamos) {
+    return (
+      <div>
+        <h2>👷 Empleados</h2>
+        <div className="banner error">No se pudieron cargar los datos necesarios</div>
+      </div>
+    )
   }
 
   const q = busqueda.trim().toLowerCase()
