@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useLocalData } from '../hooks/useLocalData.js'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
@@ -6,7 +7,16 @@ import { notify, confirmar, confirmarAnulacion } from '../utils/notify.js'
 import Vacio from '../components/Vacio.jsx'
 
 export default function Prestamos() {
-  const { empleados, prestamos, addPrestamo, deletePrestamo, getEmpleado } = useData()
+  // Carga local de datos
+  const { data: empleados, cargando: cargandoEmpleados } = useLocalData('/empleados')
+  const { data: prestamos, cargando: cargandoPrestamos, recargar: recargarPrestamos } = useLocalData('/prestamos')
+
+  // Funciones de mutación del context
+  const { addPrestamo, deletePrestamo } = useData()
+
+  // Helper local
+  const getEmpleado = (id) => empleados?.find((e) => String(e.id) === String(id))
+
   const { puede } = useAuth()
   const puedeCrear = puede('prestamos', 'crear')
   const puedeEliminar = puede('prestamos', 'eliminar')
@@ -37,7 +47,28 @@ export default function Prestamos() {
     )
     if (!ok) return
     await addPrestamo({ empleadoId, monto, fecha, descripcion })
+    await recargarPrestamos()
     resetForm()
+  }
+
+  const cargando = cargandoEmpleados || cargandoPrestamos
+
+  if (cargando) {
+    return (
+      <div>
+        <h2>💵 Préstamos</h2>
+        <div className="banner">Cargando préstamos...</div>
+      </div>
+    )
+  }
+
+  if (!empleados || !prestamos) {
+    return (
+      <div>
+        <h2>💵 Préstamos</h2>
+        <div className="banner error">No se pudieron cargar los datos necesarios</div>
+      </div>
+    )
   }
 
   const totalPrestado = prestamos.reduce((s, p) => s + p.monto, 0)
@@ -102,7 +133,10 @@ export default function Prestamos() {
                           onClick={async () => {
                             const motivo = await confirmarAnulacion('Se eliminará el préstamo y su gasto en caja.')
                             if (!motivo) return
-                            try { await deletePrestamo(p.id, motivo) }
+                            try {
+                              await deletePrestamo(p.id, motivo)
+                              await recargarPrestamos()
+                            }
                             catch (e) { notify.error(e.message) }
                           }}
                         >
