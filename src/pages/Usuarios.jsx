@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useLocalData } from '../hooks/useLocalData.js'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { PAGINAS, ACCION_LABEL, TODAS_ACCIONES, permisosVacios, permisosCompletos } from '../permisos.js'
@@ -19,11 +20,14 @@ function normalizar(permisos) {
 }
 
 export default function Usuarios() {
-  const { getUsuarios, addUsuario, deleteUsuario, resetUsuarioPassword, updateUsuarioPermisos } = useData()
+  // Carga local de datos - usuarios se maneja diferente porque tiene su propio endpoint
+  const { data: usuarios, cargando, recargar, error } = useLocalData('/usuarios')
+
+  // Funciones de mutación del context
+  const { addUsuario, deleteUsuario, resetUsuarioPassword, updateUsuarioPermisos } = useData()
   const { usuario: yo } = useAuth()
-  const [usuarios, setUsuarios] = useState([])
+
   const [msg, setMsg] = useState(null)
-  const [cargando, setCargando] = useState(true)
 
   // formulario de alta
   const [username, setUsername] = useState('')
@@ -36,20 +40,6 @@ export default function Usuarios() {
   const [editPerm, setEditPerm] = useState(null) // usuario en edición
   const [permDraft, setPermDraft] = useState(null)
   const [guardandoPerm, setGuardandoPerm] = useState(false)
-
-  const recargar = async () => {
-    try {
-      setUsuarios(await getUsuarios())
-    } catch (e) {
-      setMsg({ tipo: 'error', texto: e.message })
-    } finally {
-      setCargando(false)
-    }
-  }
-
-  useEffect(() => {
-    recargar()
-  }, [])
 
   const resetForm = () => {
     setUsername(''); setPassword(''); setRol('usuario')
@@ -140,6 +130,24 @@ export default function Usuarios() {
     } finally {
       setGuardandoPerm(false)
     }
+  }
+
+  if (cargando) {
+    return (
+      <div>
+        <h2>👥 Usuarios</h2>
+        <div className="banner">Cargando usuarios...</div>
+      </div>
+    )
+  }
+
+  if (error || !usuarios) {
+    return (
+      <div>
+        <h2>👥 Usuarios</h2>
+        <div className="banner error">No se pudieron cargar los usuarios{error ? `: ${error}` : ''}</div>
+      </div>
+    )
   }
 
   return (
