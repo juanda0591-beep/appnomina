@@ -9,7 +9,7 @@
 //   pm2 startup                # (una sola vez) genera el servicio de arranque
 //
 // Para actualizar tras subir cambios:
-//   git pull && npm install && npm run build && pm2 restart nomina
+//   cd /opt/appnomina && git pull && npm install && npm run build && pm2 restart nomina
 
 module.exports = {
   apps: [

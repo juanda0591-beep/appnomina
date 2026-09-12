@@ -75,7 +75,6 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false) // cajón deslizante en móvil
   // Sidebar colapsado en escritorio (se recuerda entre sesiones)
   const [colapsado, setColapsado] = useState(() => localStorage.getItem('sidebarColapsado') === '1')
-  const { cargando, error } = useData()
   const { usuario, rol, puede, logout } = useAuth()
   const location = useLocation()
 
@@ -204,13 +203,6 @@ export default function App() {
       </aside>
 
       <main className="content">
-        {error && (
-          <div className="banner error">
-            ⚠️ No se pudo conectar con el servidor. ¿Está corriendo? ({error})
-          </div>
-        )}
-        {cargando && <div className="banner">Cargando datos…</div>}
-
         <Routes location={location}>
           <Route path="/" element={<Navigate to={rutaInicio} replace />} />
           <Route path="/inicio" element={protegida('inicio', <Dashboard />)} />

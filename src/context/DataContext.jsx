@@ -32,21 +32,10 @@ async function http(path, options = {}) {
 }
 
 export function DataProvider({ children }) {
-  const [productos, setProductos] = useState([])
-  const [empleados, setEmpleados] = useState([])
-  const [prestamos, setPrestamos] = useState([])
-  const [nominas, setNominas] = useState([])
-  const [movimientos, setMovimientos] = useState([])
+  // Estado global solo para datos pequeños/frecuentes
   const [empresa, setEmpresa] = useState(null)
-  const [tareas, setTareas] = useState([])
-  const [tareasProduccion, setTareasProduccion] = useState([])
-  const [ordenesProduccion, setOrdenesProduccion] = useState([])
-  const [materiales, setMateriales] = useState([])
   const [colores, setColores] = useState([])
   const [procesosGlobales, setProcesosGlobales] = useState([])
-  const [clientes, setClientes] = useState([])
-  const [pedidos, setPedidos] = useState([])
-  const [ventas, setVentas] = useState([])
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState(null)
 
@@ -64,50 +53,23 @@ export function DataProvider({ children }) {
     }
   }
 
-  const recargar = async () => {
+  // Carga inicial solo de datos globales pequeños
+  const recargarGlobal = async () => {
     setCargando(true)
     try {
-      const [prod, emp, pres, nom, mov, empr, tar, tarProd, ordProd, mat, procG, cli, ped, ven, col] = await Promise.all([
-        cargarSiPuede(puedeLeer(['productos', 'ver'], ['nomina', 'ver']), '/productos', []),
-        cargarSiPuede(
-          puedeLeer(['empleados', 'ver'], ['nomina', 'ver'], ['prestamos', 'ver'], ['historial', 'ver'], ['reportes', 'ver'], ['gestion-nomina', 'ver'], ['gestion-produccion', 'ver']),
-          '/empleados',
-          []
-        ),
-        cargarSiPuede(
-          puedeLeer(['prestamos', 'ver'], ['nomina', 'ver'], ['empleados', 'ver'], ['historial', 'ver']),
-          '/prestamos',
-          []
-        ),
-        cargarSiPuede(puedeLeer(['historial', 'ver']), '/nominas', []),
-        cargarSiPuede(puedeLeer(['control-dinero', 'ver']), '/movimientos', []),
+      const [empr, col, procG] = await Promise.all([
         cargarSiPuede(puedeLeer(['empresa', 'ver'], ['nomina', 'ver'], ['historial', 'ver']), '/empresa', null),
-        cargarSiPuede(puedeLeer(['gestion-nomina', 'ver'], ['nomina', 'ver'], ['reportes', 'ver']), '/tareas', []),
-        cargarSiPuede(puedeLeer(['gestion-produccion', 'ver'], ['reportes', 'ver']), '/tareas-produccion', []),
-        cargarSiPuede(puedeLeer(['gestion-produccion', 'ver'], ['reportes', 'ver']), '/ordenes-produccion', []),
-        cargarSiPuede(puedeLeer(['materiales', 'ver']), '/materiales', []),
+        cargarSiPuede(
+          puedeLeer(['colores', 'ver'], ['materiales', 'ver'], ['productos', 'ver'], ['gestion-produccion', 'ver'], ['pedidos', 'ver'], ['ventas', 'ver']),
+          '/colores',
+          []
+        ),
         cargarSiPuede(puedeLeer(['productos', 'ver']), '/procesos-globales', []),
-        cargarSiPuede(puedeLeer(['clientes', 'ver'], ['ventas', 'ver'], ['pedidos', 'ver']), '/clientes', []),
-        cargarSiPuede(puedeLeer(['pedidos', 'ver'], ['ventas', 'ver']), '/pedidos', []),
-        cargarSiPuede(puedeLeer(['ventas', 'ver']), '/ventas', []),
-        cargarSiPuede(puedeLeer(['colores', 'ver'], ['materiales', 'ver'], ['productos', 'ver'], ['gestion-produccion', 'ver'], ['pedidos', 'ver'], ['ventas', 'ver']), '/colores', []),
       ])
 
-      setProductos(prod)
-      setEmpleados(emp)
-      setPrestamos(pres)
-      setNominas(nom)
-      setMovimientos(mov)
       setEmpresa(empr)
-      setTareas(tar)
-      setTareasProduccion(tarProd)
-      setOrdenesProduccion(ordProd)
-      setMateriales(mat)
-      setProcesosGlobales(procG)
-      setClientes(cli)
-      setPedidos(ped)
-      setVentas(ven)
       setColores(col)
+      setProcesosGlobales(procG)
       setError(null)
     } catch (e) {
       setError(e.message)
@@ -117,149 +79,112 @@ export function DataProvider({ children }) {
   }
 
   useEffect(() => {
-    recargar()
+    recargarGlobal()
   }, [])
 
   // ---------- PRODUCTOS ----------
-  // `datos` incluye nombre, procesos y los campos nuevos (descripcion, valorVenta,
-  // valorCompra, stockApertura, stockMinimo). Se manda el objeto completo.
   const addProducto = async (datos) => {
-    await http('/productos', { method: 'POST', body: JSON.stringify(datos) })
-    await recargar()
+    return await http('/productos', { method: 'POST', body: JSON.stringify(datos) })
   }
   const updateProducto = async (id, datos) => {
-    await http(`/productos/${id}`, { method: 'PUT', body: JSON.stringify(datos) })
-    await recargar()
+    return await http(`/productos/${id}`, { method: 'PUT', body: JSON.stringify(datos) })
   }
   const deleteProducto = async (id) => {
     await http(`/productos/${id}`, { method: 'DELETE' })
-    await recargar()
   }
   const registrarEntradaProducto = async (id, entrada) => {
-    const actualizado = await http(`/productos/${id}/entrada`, { method: 'POST', body: JSON.stringify(entrada) })
-    await recargar()
-    return actualizado
+    return await http(`/productos/${id}/entrada`, { method: 'POST', body: JSON.stringify(entrada) })
   }
   const getProductoMovimientos = (id) => http(`/productos/${id}/movimientos`)
 
   // Variantes (colores) de un producto
   const addVariante = async (productoId, datos) => {
-    await http(`/productos/${productoId}/variantes`, { method: 'POST', body: JSON.stringify(datos) })
-    await recargar()
+    return await http(`/productos/${productoId}/variantes`, { method: 'POST', body: JSON.stringify(datos) })
   }
   const updateVariante = async (productoId, varId, datos) => {
-    await http(`/productos/${productoId}/variantes/${varId}`, { method: 'PUT', body: JSON.stringify(datos) })
-    await recargar()
+    return await http(`/productos/${productoId}/variantes/${varId}`, { method: 'PUT', body: JSON.stringify(datos) })
   }
   const deleteVariante = async (productoId, varId) => {
     await http(`/productos/${productoId}/variantes/${varId}`, { method: 'DELETE' })
-    await recargar()
   }
 
   // ---------- COLORES ----------
   const addColor = async (color) => {
-    await http('/colores', { method: 'POST', body: JSON.stringify(color) })
-    await recargar()
+    const creado = await http('/colores', { method: 'POST', body: JSON.stringify(color) })
+    await recargarGlobal()
+    return creado
   }
   const updateColor = async (id, color) => {
-    await http(`/colores/${id}`, { method: 'PUT', body: JSON.stringify(color) })
-    await recargar()
+    const actualizado = await http(`/colores/${id}`, { method: 'PUT', body: JSON.stringify(color) })
+    await recargarGlobal()
+    return actualizado
   }
   const deleteColor = async (id) => {
     await http(`/colores/${id}`, { method: 'DELETE' })
-    await recargar()
+    await recargarGlobal()
   }
 
   // ---------- CLIENTES ----------
   const addCliente = async (cliente) => {
-    const creado = await http('/clientes', { method: 'POST', body: JSON.stringify(cliente) })
-    await recargar()
-    return creado
+    return await http('/clientes', { method: 'POST', body: JSON.stringify(cliente) })
   }
   const updateCliente = async (id, cliente) => {
-    const actualizado = await http(`/clientes/${id}`, { method: 'PUT', body: JSON.stringify(cliente) })
-    await recargar()
-    return actualizado
+    return await http(`/clientes/${id}`, { method: 'PUT', body: JSON.stringify(cliente) })
   }
   const deleteCliente = async (id) => {
     await http(`/clientes/${id}`, { method: 'DELETE' })
-    await recargar()
   }
   const getClienteAnticipos = (id) => http(`/clientes/${id}/anticipos`)
   const addAnticipo = async (clienteId, anticipo) => {
-    const actualizado = await http(`/clientes/${clienteId}/anticipos`, { method: 'POST', body: JSON.stringify(anticipo) })
-    await recargar()
-    return actualizado
+    return await http(`/clientes/${clienteId}/anticipos`, { method: 'POST', body: JSON.stringify(anticipo) })
   }
   const deleteAnticipo = async (clienteId, anticipoId, motivo) => {
     await http(`/clientes/${clienteId}/anticipos/${anticipoId}`, { method: 'DELETE', body: JSON.stringify({ motivo }) })
-    await recargar()
   }
 
   // ---------- PEDIDOS ----------
   const addPedido = async (pedido) => {
-    const creado = await http('/pedidos', { method: 'POST', body: JSON.stringify(pedido) })
-    await recargar()
-    return creado
+    return await http('/pedidos', { method: 'POST', body: JSON.stringify(pedido) })
   }
   const updatePedido = async (id, pedido) => {
-    const actualizado = await http(`/pedidos/${id}`, { method: 'PUT', body: JSON.stringify(pedido) })
-    await recargar()
-    return actualizado
+    return await http(`/pedidos/${id}`, { method: 'PUT', body: JSON.stringify(pedido) })
   }
   const deletePedido = async (id) => {
     await http(`/pedidos/${id}`, { method: 'DELETE' })
-    await recargar()
   }
   const convertirPedido = async (id, opciones) => {
-    const venta = await http(`/pedidos/${id}/convertir`, { method: 'POST', body: JSON.stringify(opciones || {}) })
-    await recargar()
-    return venta
+    return await http(`/pedidos/${id}/convertir`, { method: 'POST', body: JSON.stringify(opciones || {}) })
   }
 
   // ---------- VENTAS ----------
   const addVenta = async (venta) => {
-    const creada = await http('/ventas', { method: 'POST', body: JSON.stringify(venta) })
-    await recargar()
-    return creada
+    return await http('/ventas', { method: 'POST', body: JSON.stringify(venta) })
   }
   const updateVenta = async (id, venta) => {
-    const actualizada = await http(`/ventas/${id}`, { method: 'PUT', body: JSON.stringify(venta) })
-    await recargar()
-    return actualizada
+    return await http(`/ventas/${id}`, { method: 'PUT', body: JSON.stringify(venta) })
   }
   const deleteVenta = async (id, motivo) => {
     await http(`/ventas/${id}`, { method: 'DELETE', body: JSON.stringify({ motivo }) })
-    await recargar()
   }
   const registrarPagoVenta = async (id, pago) => {
-    const actualizada = await http(`/ventas/${id}/pagos`, { method: 'POST', body: JSON.stringify(pago) })
-    await recargar()
-    return actualizada
+    return await http(`/ventas/${id}/pagos`, { method: 'POST', body: JSON.stringify(pago) })
   }
-  // Abono global: reparte un pago entre todas las facturas pendientes de un cliente
   const registrarAbonoGlobal = async (clienteId, abono) => {
-    const resultado = await http(`/clientes/${clienteId}/abono-global`, { method: 'POST', body: JSON.stringify(abono) })
-    await recargar()
-    return resultado
+    return await http(`/clientes/${clienteId}/abono-global`, { method: 'POST', body: JSON.stringify(abono) })
   }
 
   // ---------- EMPLEADOS ----------
   const addEmpleado = async (emp) => {
-    await http('/empleados', { method: 'POST', body: JSON.stringify(emp) })
-    await recargar()
+    return await http('/empleados', { method: 'POST', body: JSON.stringify(emp) })
   }
   const updateEmpleado = async (id, emp) => {
-    await http(`/empleados/${id}`, { method: 'PUT', body: JSON.stringify(emp) })
-    await recargar()
+    return await http(`/empleados/${id}`, { method: 'PUT', body: JSON.stringify(emp) })
   }
   const deleteEmpleado = async (id) => {
     await http(`/empleados/${id}`, { method: 'DELETE' })
-    await recargar()
   }
   const setEmpleadoActivo = async (id, activo) => {
     await http(`/empleados/${id}/activo`, { method: 'PUT', body: JSON.stringify({ activo }) })
-    await recargar()
   }
 
   // ---------- HERRAMIENTAS ENTREGADAS ----------
@@ -272,43 +197,32 @@ export function DataProvider({ children }) {
 
   // ---------- PRESTAMOS ----------
   const addPrestamo = async (prestamo) => {
-    await http('/prestamos', { method: 'POST', body: JSON.stringify(prestamo) })
-    await recargar()
+    return await http('/prestamos', { method: 'POST', body: JSON.stringify(prestamo) })
   }
   const deletePrestamo = async (id, motivo) => {
     await http(`/prestamos/${id}`, { method: 'DELETE', body: JSON.stringify({ motivo }) })
-    await recargar()
   }
 
   // ---------- NOMINAS ----------
   const addNomina = async (nomina) => {
-    const creada = await http('/nominas', { method: 'POST', body: JSON.stringify(nomina) })
-    await recargar()
-    return creada
+    return await http('/nominas', { method: 'POST', body: JSON.stringify(nomina) })
   }
   const deleteNomina = async (id, motivo) => {
     await http(`/nominas/${id}`, { method: 'DELETE', body: JSON.stringify({ motivo }) })
-    await recargar()
   }
 
   // ---------- MOVIMIENTOS (Control de dinero) ----------
   const addMovimiento = async (mov) => {
-    const creado = await http('/movimientos', { method: 'POST', body: JSON.stringify(mov) })
-    await recargar()
-    return creado
+    return await http('/movimientos', { method: 'POST', body: JSON.stringify(mov) })
   }
   const deleteMovimiento = async (id, motivo) => {
     await http(`/movimientos/${id}`, { method: 'DELETE', body: JSON.stringify({ motivo }) })
-    await recargar()
   }
   const addComprobanteMovimiento = async (id, datos) => {
-    const actualizado = await http(`/movimientos/${id}/comprobante`, { method: 'PUT', body: JSON.stringify(datos) })
-    await recargar()
-    return actualizado
+    return await http(`/movimientos/${id}/comprobante`, { method: 'PUT', body: JSON.stringify(datos) })
   }
   const getBalance = () => http('/movimientos/balance')
-  const getMovimientos = (desde, hasta) =>
-    http(`/movimientos?desde=${desde}&hasta=${hasta}`)
+  const getMovimientos = (desde, hasta) => http(`/movimientos?desde=${desde}&hasta=${hasta}`)
 
   // ---------- EMPRESA ----------
   const updateEmpresa = async (datos) => {
@@ -318,12 +232,9 @@ export function DataProvider({ children }) {
   }
 
   // ---------- REPORTES ----------
-  const getReporte = (desde, hasta) =>
-    http(`/reportes?desde=${desde}&hasta=${hasta}`)
-  const getReporteVentas = (desde, hasta) =>
-    http(`/reportes/ventas?desde=${desde}&hasta=${hasta}`)
-  const getReporteMateriales = (desde, hasta) =>
-    http(`/reportes/materiales?desde=${desde}&hasta=${hasta}`)
+  const getReporte = (desde, hasta) => http(`/reportes?desde=${desde}&hasta=${hasta}`)
+  const getReporteVentas = (desde, hasta) => http(`/reportes/ventas?desde=${desde}&hasta=${hasta}`)
+  const getReporteMateriales = (desde, hasta) => http(`/reportes/materiales?desde=${desde}&hasta=${hasta}`)
 
   // ---------- DASHBOARD ----------
   const getDashboard = () => http('/dashboard')
@@ -349,123 +260,84 @@ export function DataProvider({ children }) {
 
   // ---------- TAREAS (Gestión de Nómina) ----------
   const addTarea = async (tarea) => {
-    const creada = await http('/tareas', { method: 'POST', body: JSON.stringify(tarea) })
-    await recargar()
-    return creada
+    return await http('/tareas', { method: 'POST', body: JSON.stringify(tarea) })
   }
-  // Crea varias tareas (p. ej. varios productos/procesos para un mismo empleado)
-  // recargando una sola vez al final, en vez de una recarga completa por cada una.
   const addTareas = async (tareasArr) => {
     const creadas = []
     for (const t of tareasArr) {
       creadas.push(await http('/tareas', { method: 'POST', body: JSON.stringify(t) }))
     }
-    await recargar()
     return creadas
   }
   const updateTarea = async (id, datos) => {
-    const actualizada = await http(`/tareas/${id}`, { method: 'PUT', body: JSON.stringify(datos) })
-    await recargar()
-    return actualizada
+    return await http(`/tareas/${id}`, { method: 'PUT', body: JSON.stringify(datos) })
   }
   const terminarTarea = async (id) => {
     await http(`/tareas/${id}/terminar`, { method: 'POST' })
-    await recargar()
   }
   const deleteTarea = async (id) => {
     await http(`/tareas/${id}`, { method: 'DELETE' })
-    await recargar()
   }
   const getTareaHistorial = (id) => http(`/tareas/${id}/historial`)
   const getTareaFotos = (id, full = false) => http(`/tareas/${id}/fotos${full ? '?full=1' : ''}`)
-  const addTareaFoto = (id, foto) =>
-    http(`/tareas/${id}/fotos`, { method: 'POST', body: JSON.stringify(foto) })
-  const deleteTareaFoto = (fotoId) =>
-    http(`/tareas/fotos/${fotoId}`, { method: 'DELETE' })
-
-  // Checklist de verificación de piezas de una tarea (control de calidad).
-  // Se cargan on-demand y se togglean localmente, sin recargar toda la data.
+  const addTareaFoto = (id, foto) => http(`/tareas/${id}/fotos`, { method: 'POST', body: JSON.stringify(foto) })
+  const deleteTareaFoto = (fotoId) => http(`/tareas/fotos/${fotoId}`, { method: 'DELETE' })
   const getTareaPiezas = (id) => http(`/tareas/${id}/piezas`)
   const setTareaPiezaVerificada = (piezaId, verificada) =>
     http(`/tareas/piezas/${piezaId}`, { method: 'PUT', body: JSON.stringify({ verificada }) })
 
   // ---------- TAREAS DE PRODUCCIÓN (Gestión de Producción) ----------
   const addTareaProduccion = async (tarea) => {
-    const creada = await http('/tareas-produccion', { method: 'POST', body: JSON.stringify(tarea) })
-    await recargar()
-    return creada
+    return await http('/tareas-produccion', { method: 'POST', body: JSON.stringify(tarea) })
   }
   const updateTareaProduccion = async (id, datos) => {
-    const actualizada = await http(`/tareas-produccion/${id}`, { method: 'PUT', body: JSON.stringify(datos) })
-    await recargar()
-    return actualizada
+    return await http(`/tareas-produccion/${id}`, { method: 'PUT', body: JSON.stringify(datos) })
   }
   const terminarTareaProduccion = async (id) => {
     await http(`/tareas-produccion/${id}/terminar`, { method: 'POST' })
-    await recargar()
   }
   const deleteTareaProduccion = async (id) => {
     await http(`/tareas-produccion/${id}`, { method: 'DELETE' })
-    await recargar()
   }
   const getTareaProduccionHistorial = (id) => http(`/tareas-produccion/${id}/historial`)
 
   // ---------- ÓRDENES DE PRODUCCIÓN ----------
   const addOrdenProduccion = async (orden) => {
-    const creada = await http('/ordenes-produccion', { method: 'POST', body: JSON.stringify(orden) })
-    await recargar()
-    return creada
+    return await http('/ordenes-produccion', { method: 'POST', body: JSON.stringify(orden) })
   }
   const updateOrdenProduccion = async (id, datos) => {
-    const actualizada = await http(`/ordenes-produccion/${id}`, { method: 'PUT', body: JSON.stringify(datos) })
-    await recargar()
-    return actualizada
+    return await http(`/ordenes-produccion/${id}`, { method: 'PUT', body: JSON.stringify(datos) })
   }
   const terminarOrdenProduccion = async (id) => {
     await http(`/ordenes-produccion/${id}/terminar`, { method: 'POST' })
-    await recargar()
   }
   const deleteOrdenProduccion = async (id) => {
     await http(`/ordenes-produccion/${id}`, { method: 'DELETE' })
-    await recargar()
   }
   const cambiarEstadoOrden = async (id, estado) => {
-    const actualizada = await http(`/ordenes-produccion/${id}/estado`, { method: 'POST', body: JSON.stringify({ estado }) })
-    await recargar()
-    return actualizada
+    return await http(`/ordenes-produccion/${id}/estado`, { method: 'POST', body: JSON.stringify({ estado }) })
   }
   const cancelarOrdenProduccion = async (id) => {
-    const actualizada = await http(`/ordenes-produccion/${id}/cancelar`, { method: 'POST' })
-    await recargar()
-    return actualizada
+    return await http(`/ordenes-produccion/${id}/cancelar`, { method: 'POST' })
   }
-  // Chequeo preventivo de materiales (MRP): no muta nada, solo consulta faltantes.
   const chequearMaterialOrden = (params) =>
     http('/produccion/chequeo-material', { method: 'POST', body: JSON.stringify(params) })
-  // Unidades (folios) de una orden terminada, para imprimir las pegatinas QR.
   const getUnidadesOrden = (id) => http(`/ordenes-produccion/${id}/unidades`)
   const setGarantiaOrden = (id, garantiaMeses) =>
     http(`/ordenes-produccion/${id}/garantia`, { method: 'PUT', body: JSON.stringify({ garantiaMeses }) })
 
   // ---------- MATERIALES ----------
   const addMaterial = async (material) => {
-    const creado = await http('/materiales', { method: 'POST', body: JSON.stringify(material) })
-    await recargar()
-    return creado
+    return await http('/materiales', { method: 'POST', body: JSON.stringify(material) })
   }
   const updateMaterial = async (id, material) => {
-    const actualizado = await http(`/materiales/${id}`, { method: 'PUT', body: JSON.stringify(material) })
-    await recargar()
-    return actualizado
+    return await http(`/materiales/${id}`, { method: 'PUT', body: JSON.stringify(material) })
   }
   const deleteMaterial = async (id) => {
     await http(`/materiales/${id}`, { method: 'DELETE' })
-    await recargar()
   }
   const registrarEntradaMaterial = async (id, entrada) => {
-    const actualizado = await http(`/materiales/${id}/entrada`, { method: 'POST', body: JSON.stringify(entrada) })
-    await recargar()
-    return actualizado
+    return await http(`/materiales/${id}/entrada`, { method: 'POST', body: JSON.stringify(entrada) })
   }
   const getMaterialMovimientos = (id) => http(`/materiales/${id}/movimientos`)
 
@@ -486,37 +358,19 @@ export function DataProvider({ children }) {
   // ---------- PROCESOS GLOBALES ----------
   const addProcesoGlobal = async (nombre) => {
     const creado = await http('/procesos-globales', { method: 'POST', body: JSON.stringify({ nombre }) })
-    await recargar()
+    await recargarGlobal()
     return creado
   }
 
-  // Helpers de consulta (sobre estado en memoria)
-  const getEmpleado = (id) => empleados.find((e) => String(e.id) === String(id))
-  const getProducto = (id) => productos.find((p) => String(p.id) === String(id))
-  const prestamosDeEmpleado = (empleadoId) =>
-    prestamos.filter((p) => String(p.empleado_id) === String(empleadoId) && p.saldo > 0)
-  const tareasTerminadasDeEmpleado = (empleadoId) =>
-    tareas.filter((t) => String(t.empleadoId) === String(empleadoId) && t.estado === 'terminada')
-
   const value = {
-    productos,
-    empleados,
-    prestamos,
-    nominas,
-    movimientos,
+    // Estado global (solo datos pequeños/frecuentes)
     empresa,
-    tareas,
-    tareasProduccion,
-    ordenesProduccion,
-    materiales,
     colores,
     procesosGlobales,
-    clientes,
-    pedidos,
-    ventas,
     cargando,
     error,
-    recargar,
+    recargarGlobal,
+    // Funciones API
     updateEmpresa,
     addProducto,
     updateProducto,
@@ -617,10 +471,6 @@ export function DataProvider({ children }) {
     guardarPlano,
     deletePlano,
     addProcesoGlobal,
-    getEmpleado,
-    getProducto,
-    prestamosDeEmpleado,
-    tareasTerminadasDeEmpleado,
   }
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>

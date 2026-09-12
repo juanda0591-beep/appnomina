@@ -23,6 +23,14 @@ npm run dev
 npm start
 ```
 
+### Actualizar el VPS
+
+El proyecto está en `/opt/appnomina`. Comando de actualización:
+
+```bash
+cd /opt/appnomina && git pull && npm install && npm run build && pm2 restart nomina
+```
+
 ### Acceder desde el celular o la tablet
 1. Ejecuta `npm start` en tu PC.
 2. Asegúrate de que el celular esté en la **misma red WiFi**.

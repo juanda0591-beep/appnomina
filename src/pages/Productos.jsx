@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useLocalData } from '../hooks/useLocalData.js'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
@@ -22,11 +23,15 @@ const emptyDatos = () => ({
 const stockBajo = (p) => p.stockMinimo > 0 && p.stock <= p.stockMinimo
 
 export default function Productos() {
+  // Carga local de datos
+  const { data: productos, cargando: cargandoProductos, recargar: recargarProductos } = useLocalData('/productos')
+  const { data: materiales, cargando: cargandoMateriales } = useLocalData('/materiales')
+
+  // Funciones de mutación y datos globales del context
   const {
-    productos, procesosGlobales, materiales, addProducto, updateProducto, deleteProducto, addProcesoGlobal,
-    registrarEntradaProducto, getProductoMovimientos,
+    procesosGlobales, colores, addProducto, updateProducto, deleteProducto, addProcesoGlobal,
+    registrarEntradaProducto, getProductoMovimientos, addVariante, updateVariante, deleteVariante
   } = useData()
-  const { colores, addVariante, updateVariante, deleteVariante } = useData()
   const { puede } = useAuth()
   const puedeCrear = puede('productos', 'crear')
   const puedeEditar = puede('productos', 'editar')
@@ -56,6 +61,7 @@ export default function Productos() {
     if (!nuevaVarColor) { notify.error('Elige un color'); return }
     try {
       await addVariante(detalleId, { colorId: Number(nuevaVarColor), stockApertura: 0, stockMinimo: 0 })
+      await recargarProductos()
       setNuevaVarColor('')
       notify.ok('Color agregado al producto')
     } catch (err) {
@@ -68,6 +74,7 @@ export default function Productos() {
         stockApertura: cambios.stockApertura != null ? cambios.stockApertura : v.stockApertura,
         stockMinimo: cambios.stockMinimo != null ? cambios.stockMinimo : v.stockMinimo,
       })
+      await recargarProductos()
       notify.ok('Variante actualizada')
     } catch (err) {
       notify.error('Error: ' + err.message)
@@ -77,6 +84,7 @@ export default function Productos() {
     if (!(await confirmar(`¿Quitar el color "${v.colorNombre || 'sin color'}" de este producto?`))) return
     try {
       await deleteVariante(detalleId, v.id)
+      await recargarProductos()
       notify.ok('Color quitado')
     } catch (err) {
       notify.error('Error: ' + err.message)
@@ -144,6 +152,7 @@ export default function Productos() {
         descripcion: entradaForm.descripcion,
         varianteId: entradaForm.varianteId ? Number(entradaForm.varianteId) : null,
       })
+      await recargarProductos()
       notify.ok('Entrada registrada')
       cerrarEntrada()
     } catch (err) {
@@ -290,9 +299,11 @@ export default function Productos() {
     try {
       if (editando) {
         await updateProducto(editId, payload)
+        await recargarProductos()
         notify.ok('Producto actualizado')
       } else {
         await addProducto(payload)
+        await recargarProductos()
         notify.ok('Producto creado')
       }
       resetForm()
@@ -365,6 +376,26 @@ export default function Productos() {
         (p.descripcion || '').toLowerCase().includes(q)
       )
     : productos
+
+  const cargando = cargandoProductos || cargandoMateriales
+
+  if (cargando) {
+    return (
+      <div>
+        <h2>📦 Productos y procesos</h2>
+        <div className="banner">Cargando productos...</div>
+      </div>
+    )
+  }
+
+  if (!productos || !materiales) {
+    return (
+      <div>
+        <h2>📦 Productos y procesos</h2>
+        <div className="banner error">No se pudieron cargar los datos necesarios</div>
+      </div>
+    )
+  }
 
   return (
     <div>

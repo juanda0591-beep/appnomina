@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocalData } from '../hooks/useLocalData.js'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
@@ -19,7 +20,13 @@ const ESTADO_PAGO = {
 }
 
 export default function Ventas() {
-  const { ventas, clientes, productos, empresa, addVenta, updateVenta, deleteVenta, registrarPagoVenta, registrarAbonoGlobal, convertirPedido } = useData()
+  // Carga local de datos
+  const { data: ventas, cargando: cargandoVentas, recargar: recargarVentas } = useLocalData('/ventas')
+  const { data: clientes, cargando: cargandoClientes } = useLocalData('/clientes')
+  const { data: productos, cargando: cargandoProductos } = useLocalData('/productos')
+
+  // Funciones de mutación y datos globales del context
+  const { empresa, colores, addVenta, updateVenta, deleteVenta, registrarPagoVenta, registrarAbonoGlobal, convertirPedido } = useData()
   const { puede } = useAuth()
   const puedeCrear = puede('ventas', 'crear')
   const puedeEditar = puede('ventas', 'editar')
@@ -199,6 +206,7 @@ export default function Ventas() {
           descuentoPct: descuentoTipo === 'global' ? clamp(descuentoGlobal) : undefined,
           items: itemsPayload,
         })
+        await recargarVentas()
         notify.ok('Venta actualizada')
         for (const aviso of venta?.avisos || []) notify.error(`⚠️ ${aviso}`)
         resetForm()
@@ -241,6 +249,7 @@ export default function Ventas() {
       const venta = pedidoOrigenId
         ? await convertirPedido(pedidoOrigenId, payloadVenta)
         : await addVenta(payloadVenta)
+      await recargarVentas()
       notify.ok(pedidoOrigenId ? 'Pedido convertido en venta' : 'Venta registrada')
       for (const aviso of venta?.avisos || []) notify.error(`⚠️ ${aviso}`)
       resetForm()
@@ -256,6 +265,7 @@ export default function Ventas() {
     if (!motivo) return
     try {
       await deleteVenta(v.id, motivo)
+      await recargarVentas()
       notify.ok('Venta anulada')
     } catch (err) {
       notify.error('Error: ' + err.message)
@@ -286,6 +296,7 @@ export default function Ventas() {
     setGuardandoPago(true)
     try {
       await registrarPagoVenta(pagoVentaId, { monto, fecha: pagoFecha, comentario: pagoComentario, metodo: pagoMetodo })
+      await recargarVentas()
       notify.ok('Abono registrado')
       cerrarPago()
     } catch (err) {
@@ -347,6 +358,7 @@ export default function Ventas() {
     setGuardandoAg(true)
     try {
       await registrarAbonoGlobal(agClienteId, { monto, fecha: agFecha, metodo: agMetodo, comentario: agComentario })
+      await recargarVentas()
       notify.ok('Abono global registrado')
       cerrarAbonoGlobal()
     } catch (err) {
@@ -409,6 +421,26 @@ export default function Ventas() {
     pagado: acc.pagado + (v.pagado || 0),
     saldo: acc.saldo + (v.saldo || 0),
   }), { cantidad: 0, total: 0, pagado: 0, saldo: 0 }), [ventasFiltradas])
+
+  const cargando = cargandoVentas || cargandoClientes || cargandoProductos
+
+  if (cargando) {
+    return (
+      <div>
+        <h2>🛒 Ventas</h2>
+        <div className="banner">Cargando ventas...</div>
+      </div>
+    )
+  }
+
+  if (!ventas || !clientes || !productos) {
+    return (
+      <div>
+        <h2>🛒 Ventas</h2>
+        <div className="banner error">No se pudieron cargar los datos necesarios</div>
+      </div>
+    )
+  }
 
   return (
     <div>

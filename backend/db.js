@@ -497,6 +497,26 @@ db.exec(`
   }
 }
 
+// Índices para optimizar consultas frecuentes y mejorar el rendimiento
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas(fecha);
+  CREATE INDEX IF NOT EXISTS idx_ventas_cliente ON ventas(cliente_id);
+  CREATE INDEX IF NOT EXISTS idx_ventas_estado ON ventas(estado_pago);
+  CREATE INDEX IF NOT EXISTS idx_movimientos_fecha ON movimientos(fecha);
+  CREATE INDEX IF NOT EXISTS idx_movimientos_tipo ON movimientos(tipo);
+  CREATE INDEX IF NOT EXISTS idx_tareas_empleado ON tareas(empleado_id);
+  CREATE INDEX IF NOT EXISTS idx_tareas_estado ON tareas(estado);
+  CREATE INDEX IF NOT EXISTS idx_nominas_fecha ON nominas(fecha);
+  CREATE INDEX IF NOT EXISTS idx_nominas_empleado ON nominas(empleado_id);
+  CREATE INDEX IF NOT EXISTS idx_pedidos_estado ON pedidos(estado);
+  CREATE INDEX IF NOT EXISTS idx_pedidos_cliente ON pedidos(cliente_id);
+  CREATE INDEX IF NOT EXISTS idx_ordenes_produccion_estado ON ordenes_produccion(estado);
+  CREATE INDEX IF NOT EXISTS idx_tareas_produccion_empleado ON tareas_produccion(empleado_id);
+  CREATE INDEX IF NOT EXISTS idx_tareas_produccion_estado ON tareas_produccion(estado);
+  CREATE INDEX IF NOT EXISTS idx_material_movimientos_material ON material_movimientos(material_id);
+  CREATE INDEX IF NOT EXISTS idx_producto_movimientos_producto ON producto_movimientos(producto_id);
+`)
+
 // Migraciones suaves para bases de datos creadas antes de agregar columnas nuevas
 const colsNominas = db.prepare("PRAGMA table_info(nominas)").all()
 if (!colsNominas.some((c) => c.name === 'comentario')) {
