@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
+import { useLocalData } from '../hooks/useLocalData.js'
 import { useData } from '../context/DataContext.jsx'
 import { formatCOP, hoyISO } from '../utils/format.js'
 import { generarPdfNomina } from '../utils/pdf.js'
@@ -9,7 +10,22 @@ const nuevoItem = () => ({ key: Math.random().toString(36).slice(2), productoId:
 const dinero = (n) => Math.round((n + Number.EPSILON) * 100) / 100
 
 export default function Nomina() {
-  const { empleados, productos, empresa, prestamosDeEmpleado, getEmpleado, getProducto, addNomina, tareasTerminadasDeEmpleado, getTareaFotos } = useData()
+  // Carga local de datos
+  const { data: empleados, cargando: cargandoEmpleados } = useLocalData('/empleados')
+  const { data: productos, cargando: cargandoProductos } = useLocalData('/productos')
+  const { data: prestamos, cargando: cargandoPrestamos } = useLocalData('/prestamos')
+  const { data: tareas, cargando: cargandoTareas } = useLocalData('/tareas')
+
+  // Funciones de mutación y datos globales del context
+  const { empresa, addNomina, getTareaFotos } = useData()
+
+  // Helpers locales
+  const getEmpleado = (id) => empleados?.find((e) => String(e.id) === String(id))
+  const getProducto = (id) => productos?.find((p) => String(p.id) === String(id))
+  const prestamosDeEmpleado = (empleadoId) =>
+    prestamos?.filter((p) => String(p.empleado_id) === String(empleadoId) && p.saldo > 0) || []
+  const tareasTerminadasDeEmpleado = (empleadoId) =>
+    tareas?.filter((t) => String(t.empleadoId) === String(empleadoId) && t.estado === 'terminada') || []
 
   const hoy = hoyISO()
   const [empleadoId, setEmpleadoId] = useState('')
@@ -26,7 +42,7 @@ export default function Nomina() {
   const [modalTareas, setModalTareas] = useState(null) // tareas candidatas a cargar, o null
   const [fotosTareas, setFotosTareas] = useState([]) // fotos (con imagen) de las tareas cargadas, para el PDF
 
-  const prestamos = empleadoId ? prestamosDeEmpleado(empleadoId) : []
+  const prestamosEmpleado = empleadoId ? prestamosDeEmpleado(empleadoId) : []
 
   const setItemField = (key, field, val) => {
     setItems((its) =>
@@ -123,11 +139,11 @@ export default function Nomina() {
   const subtotal = dinero(lineas.reduce((s, l) => s + l.subtotal, 0))
 
   const totalDescuentos = useMemo(() => {
-    return dinero(prestamos.reduce((s, p) => {
+    return dinero(prestamosEmpleado.reduce((s, p) => {
       const m = Number(descuentos[p.id]) || 0
       return s + dinero(Math.min(m, p.saldo))
     }, 0))
-  }, [descuentos, prestamos])
+  }, [descuentos, prestamosEmpleado])
 
   const extra = dinero(Math.max(0, Number(extraMonto) || 0))
   const descuentoTrabajo = dinero(Math.max(0, Number(descTrabajoMonto) || 0))
@@ -169,7 +185,7 @@ export default function Nomina() {
         subtotal: l.subtotal,
       }))
 
-    const descuentosArr = prestamos
+    const descuentosArr = prestamosEmpleado
       .map((p) => {
         const m = dinero(Math.min(Number(descuentos[p.id]) || 0, p.saldo))
         return m > 0
@@ -179,7 +195,7 @@ export default function Nomina() {
       .filter(Boolean)
 
     // Estado de los préstamos del empleado (para mostrar el saldo en el PDF)
-    const prestamosEmpleado = prestamos.map((p) => {
+    const prestamosParaPdf = prestamosEmpleado.map((p) => {
       const descontado = dinero(Math.min(Number(descuentos[p.id]) || 0, p.saldo))
       return {
         descripcion: p.descripcion || 'Préstamo',
@@ -198,7 +214,7 @@ export default function Nomina() {
       fotos: fotosTareas.filter((f) => itemsValidos.some((it) => it.tareaId === f.tareaId)),
       items: itemsValidos,
       descuentos: descuentosArr,
-      prestamosEmpleado,
+      prestamosEmpleado: prestamosParaPdf,
       extra,
       extraDetalle: extra > 0 ? extraDetalle.trim() : '',
       descuentoTrabajo,
@@ -271,6 +287,26 @@ export default function Nomina() {
     const payload = construirPayload()
     if (!validar(payload)) return
     generarPdfNomina({ ...payload, empresa, total: dinero(payload.subtotal - payload.totalDescuentos + payload.extra - payload.descuentoTrabajo) })
+  }
+
+  const cargando = cargandoEmpleados || cargandoProductos || cargandoPrestamos || cargandoTareas
+
+  if (cargando) {
+    return (
+      <div>
+        <h2>🧾 Pago de Nómina</h2>
+        <div className="banner">Cargando datos de nómina...</div>
+      </div>
+    )
+  }
+
+  if (!empleados || !productos || !prestamos || !tareas) {
+    return (
+      <div>
+        <h2>🧾 Pago de Nómina</h2>
+        <div className="banner error">No se pudieron cargar los datos necesarios</div>
+      </div>
+    )
   }
 
   return (
@@ -380,10 +416,10 @@ export default function Nomina() {
             Elige un empleado arriba para ver sus préstamos.
           </Vacio>
         )}
-        {empleadoId && prestamos.length === 0 && (
+        {empleadoId && prestamosEmpleado.length === 0 && (
           <Vacio icono="🎉" titulo="Sin préstamos pendientes" />
         )}
-        {prestamos.map((p) => (
+        {prestamosEmpleado.map((p) => (
           <div className="row prestamo-row" key={p.id}>
             <div style={{ flex: 2 }}>
               <strong>{p.descripcion || 'Préstamo'}</strong>
@@ -410,7 +446,7 @@ export default function Nomina() {
             </button>
           </div>
         ))}
-        {prestamos.length > 0 && (
+        {prestamosEmpleado.length > 0 && (
           <div className="totals-row" style={{ marginTop: 12 }}>
             <span>Total descuentos: <strong className="danger-text">-{formatCOP(totalDescuentos)}</strong></span>
           </div>
