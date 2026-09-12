@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useLocalData } from '../hooks/useLocalData.js'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { notify, confirmar } from '../utils/notify.js'
@@ -7,7 +8,13 @@ import Vacio from '../components/Vacio.jsx'
 const emptyForm = { nombre: '', hex: '#333333' }
 
 export default function Colores() {
-  const { colores, materiales, productos, addColor, updateColor, deleteColor } = useData()
+  // Carga local de datos
+  const { data: colores, cargando: cargandoColores, recargar: recargarColores } = useLocalData('/colores')
+  const { data: materiales, cargando: cargandoMateriales } = useLocalData('/materiales')
+  const { data: productos, cargando: cargandoProductos } = useLocalData('/productos')
+
+  // Funciones de mutación del context
+  const { addColor, updateColor, deleteColor } = useData()
   const { puede } = useAuth()
   const puedeCrear = puede('colores', 'crear')
   const puedeEditar = puede('colores', 'editar')
@@ -33,9 +40,11 @@ export default function Colores() {
     try {
       if (editId) {
         await updateColor(editId, { nombre: form.nombre, hex: form.hex, activo: true })
+        await recargarColores()
         notify.ok('Color actualizado')
       } else {
         await addColor({ nombre: form.nombre, hex: form.hex })
+        await recargarColores()
         notify.ok('Color creado')
       }
       resetForm()
@@ -58,10 +67,31 @@ export default function Colores() {
     if (!(await confirmar(`¿Eliminar el color "${c.nombre}"?${aviso}`))) return
     try {
       await deleteColor(c.id)
+      await recargarColores()
       notify.ok('Color eliminado')
     } catch (err) {
       notify.error('Error: ' + err.message)
     }
+  }
+
+  const cargando = cargandoColores || cargandoMateriales || cargandoProductos
+
+  if (cargando) {
+    return (
+      <div>
+        <h2>🎨 Colores</h2>
+        <div className="banner">Cargando colores...</div>
+      </div>
+    )
+  }
+
+  if (!colores || !materiales || !productos) {
+    return (
+      <div>
+        <h2>🎨 Colores</h2>
+        <div className="banner error">No se pudieron cargar los datos necesarios</div>
+      </div>
+    )
   }
 
   return (
