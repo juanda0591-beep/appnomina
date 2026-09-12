@@ -12,7 +12,7 @@ export default function Prestamos() {
   const { data: prestamos, cargando: cargandoPrestamos, recargar: recargarPrestamos } = useLocalData('/prestamos')
 
   // Funciones de mutación del context
-  const { addPrestamo, deletePrestamo } = useData()
+  const { addPrestamo, abonarPrestamo, deletePrestamo } = useData()
 
   // Helper local
   const getEmpleado = (id) => empleados?.find((e) => String(e.id) === String(id))
@@ -27,6 +27,12 @@ export default function Prestamos() {
   const [monto, setMonto] = useState('')
   const [fecha, setFecha] = useState(hoy)
   const [descripcion, setDescripcion] = useState('')
+
+  // Estado para el formulario de abono
+  const [abonoAbierto, setAbonoAbierto] = useState(null) // guarda el préstamo seleccionado
+  const [montoAbono, setMontoAbono] = useState('')
+  const [fechaAbono, setFechaAbono] = useState(hoy)
+  const [descripcionAbono, setDescripcionAbono] = useState('')
 
   const resetForm = () => {
     setEmpleadoId('')
@@ -49,6 +55,45 @@ export default function Prestamos() {
     await addPrestamo({ empleadoId, monto, fecha, descripcion })
     await recargarPrestamos()
     resetForm()
+  }
+
+  const abrirFormularioAbono = (prestamo) => {
+    setAbonoAbierto(prestamo)
+    setMontoAbono('')
+    setFechaAbono(hoy)
+    setDescripcionAbono('')
+  }
+
+  const cerrarFormularioAbono = () => {
+    setAbonoAbierto(null)
+    setMontoAbono('')
+    setFechaAbono(hoy)
+    setDescripcionAbono('')
+  }
+
+  const handleAbonar = async (e) => {
+    e.preventDefault()
+    if (!abonoAbierto) return
+    const m = Number(montoAbono)
+    if (!(m > 0)) { notify.error('Ingresa un monto válido'); return }
+    if (m > abonoAbierto.saldo) {
+      notify.error(`El abono no puede ser mayor al saldo (${formatCOP(abonoAbierto.saldo)})`)
+      return
+    }
+    const emp = getEmpleado(abonoAbierto.empleado_id)
+    const ok = await confirmar(
+      `¿Registrar un abono de ${formatCOP(m)} al préstamo de ${emp?.nombre || 'el empleado'}?\n\nSaldo actual: ${formatCOP(abonoAbierto.saldo)}\nSaldo después del abono: ${formatCOP(abonoAbierto.saldo - m)}`,
+      { titulo: 'Confirmar abono', textoOk: 'Sí, abonar', peligro: false }
+    )
+    if (!ok) return
+    try {
+      await abonarPrestamo(abonoAbierto.id, { monto: m, fecha: fechaAbono, descripcion: descripcionAbono })
+      await recargarPrestamos()
+      notify.ok('Abono registrado exitosamente')
+      cerrarFormularioAbono()
+    } catch (e) {
+      notify.error(e.message)
+    }
   }
 
   const cargando = cargandoEmpleados || cargandoPrestamos
@@ -78,8 +123,8 @@ export default function Prestamos() {
     <div>
       <h2>💵 Préstamos</h2>
       <p className="muted">
-        Registra los préstamos. El saldo se va descontando automáticamente cuando
-        aplicas un descuento en el pago de nómina.
+        Registra los préstamos. Puedes abonarlos directamente con el botón 💰 o descontarlos
+        automáticamente cuando aplicas un descuento en el pago de nómina.
       </p>
 
       {puedeCrear && (
@@ -125,6 +170,16 @@ export default function Prestamos() {
                     <td className="num">{formatCOP(p.monto)}</td>
                     <td className="num">{p.saldo === 0 ? '✅ Pagado' : formatCOP(p.saldo)}</td>
                     <td>
+                      {puedeCrear && p.saldo > 0 && (
+                        <button
+                          className="btn-icon"
+                          title="Abonar"
+                          aria-label="Abonar"
+                          onClick={() => abrirFormularioAbono(p)}
+                        >
+                          💰
+                        </button>
+                      )}
                       {puedeEliminar && (
                         <button
                           className="btn-icon danger"
@@ -188,6 +243,47 @@ export default function Prestamos() {
               <div className="form-actions">
                 <button type="submit" className="btn-primary">Registrar préstamo</button>
                 <button type="button" className="btn-secondary" onClick={resetForm}>Cancelar</button>
+              </div>
+            </form>
+          </div>
+        </>
+      )}
+
+      {abonoAbierto && (
+        <>
+          <div className="overlay" onClick={cerrarFormularioAbono} />
+          <div className="modal">
+            <h3>Abonar a préstamo</h3>
+            <div className="banner" style={{ marginBottom: 16 }}>
+              <strong>Empleado:</strong> {getEmpleado(abonoAbierto.empleado_id)?.nombre || '— (empleado eliminado)'}<br />
+              <strong>Préstamo original:</strong> {formatCOP(abonoAbierto.monto)}<br />
+              <strong>Saldo pendiente:</strong> {formatCOP(abonoAbierto.saldo)}
+            </div>
+            <form onSubmit={handleAbonar}>
+              <div className="row">
+                <div style={{ flex: 1 }}>
+                  <label>Monto del abono</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={montoAbono}
+                    onChange={(e) => setMontoAbono(e.target.value)}
+                    placeholder={`Máximo: ${formatCOP(abonoAbierto.saldo)}`}
+                    autoFocus
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label>Fecha</label>
+                  <input type="date" value={fechaAbono} onChange={(e) => setFechaAbono(e.target.value)} />
+                </div>
+              </div>
+              <label>Descripción (opcional)</label>
+              <input value={descripcionAbono} onChange={(e) => setDescripcionAbono(e.target.value)} placeholder="Ej: Abono voluntario" />
+
+              <div className="form-actions">
+                <button type="submit" className="btn-primary">Registrar abono</button>
+                <button type="button" className="btn-secondary" onClick={cerrarFormularioAbono}>Cancelar</button>
               </div>
             </form>
           </div>

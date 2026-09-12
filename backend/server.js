@@ -1096,6 +1096,42 @@ app.delete('/api/prestamos/:id', permisoRequired('prestamos', 'eliminar'), (req,
   res.json({ ok: true })
 })
 
+// Abonar a un préstamo directamente
+app.post('/api/prestamos/:id/abonar', permisoRequired('prestamos', 'crear'), (req, res) => {
+  const { monto, fecha, descripcion } = req.body
+  const prestamoId = req.params.id
+  const m = Number(monto) || 0
+
+  if (m <= 0) return res.status(400).json({ error: 'El monto debe ser mayor a cero' })
+
+  const tx = db.transaction(() => {
+    const prestamo = db.prepare('SELECT * FROM prestamos WHERE id = ?').get(prestamoId)
+    if (!prestamo) throw new Error('Préstamo no encontrado')
+    if (prestamo.saldo <= 0) throw new Error('Este préstamo ya está saldado')
+    if (m > prestamo.saldo) throw new Error(`El abono (${formatCOP(m)}) no puede ser mayor al saldo (${formatCOP(prestamo.saldo)})`)
+
+    // Actualizar el saldo del préstamo
+    const nuevoSaldo = prestamo.saldo - m
+    db.prepare('UPDATE prestamos SET saldo = ? WHERE id = ?').run(nuevoSaldo, prestamoId)
+
+    // Registrar el ingreso en caja (porque el empleado está devolviendo dinero)
+    const emp = db.prepare('SELECT nombre FROM empleados WHERE id = ?').get(prestamo.empleado_id)
+    registrarIngreso({
+      fecha: fecha || new Date().toISOString().split('T')[0],
+      categoria: 'Abono préstamo',
+      monto: m,
+      descripcion: `Abono de ${emp?.nombre || 'empleado'} al préstamo #${prestamoId}${descripcion ? ' — ' + descripcion : ''}`,
+      origen: 'abono_prestamo',
+      refId: prestamoId,
+    })
+
+    return nuevoSaldo
+  })
+
+  const nuevoSaldo = tx()
+  res.json({ ok: true, nuevoSaldo, prestamo: db.prepare('SELECT * FROM prestamos WHERE id = ?').get(prestamoId) })
+})
+
 // ============ NOMINAS ============
 function nominaCompleta(n) {
   const items = db.prepare('SELECT * FROM nomina_items WHERE nomina_id = ?').all(n.id)

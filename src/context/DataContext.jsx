@@ -199,6 +199,9 @@ export function DataProvider({ children }) {
   const addPrestamo = async (prestamo) => {
     return await http('/prestamos', { method: 'POST', body: JSON.stringify(prestamo) })
   }
+  const abonarPrestamo = async (id, abono) => {
+    return await http(`/prestamos/${id}/abonar`, { method: 'POST', body: JSON.stringify(abono) })
+  }
   const deletePrestamo = async (id, motivo) => {
     await http(`/prestamos/${id}`, { method: 'DELETE', body: JSON.stringify({ motivo }) })
   }
@@ -392,6 +395,7 @@ export function DataProvider({ children }) {
     updateHerramienta,
     deleteHerramienta,
     addPrestamo,
+    abonarPrestamo,
     deletePrestamo,
     addNomina,
     deleteNomina,
