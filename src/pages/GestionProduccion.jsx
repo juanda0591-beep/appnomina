@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useLocalData } from '../hooks/useLocalData.js'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha, formatDuracion } from '../utils/format.js'
@@ -73,16 +74,25 @@ function procesoActualDe(orden) {
 }
 
 export default function GestionProduccion() {
+  // Carga local de datos
+  const { data: empleados, cargando: cargandoEmpleados } = useLocalData('/empleados')
+  const { data: productos, cargando: cargandoProductos } = useLocalData('/productos')
+  const { data: tareasProduccion, cargando: cargandoTareas, recargar: recargarTareas } = useLocalData('/tareas-produccion')
+  const { data: ordenesProduccion, cargando: cargandoOrdenes, recargar: recargarOrdenes } = useLocalData('/ordenes-produccion')
+
+  // Funciones de mutación y datos globales del context
   const {
-    empleados, productos, tareasProduccion, ordenesProduccion,
+    empresa,
     addTareaProduccion, updateTareaProduccion, terminarTareaProduccion, deleteTareaProduccion,
     getTareaProduccionHistorial,
     addOrdenProduccion, terminarOrdenProduccion, deleteOrdenProduccion,
     cambiarEstadoOrden, cancelarOrdenProduccion, chequearMaterialOrden,
-    getUnidadesOrden, setGarantiaOrden, empresa,
-    getEmpleado,
+    getUnidadesOrden, setGarantiaOrden,
   } = useData()
   const { puede } = useAuth()
+
+  // Helper local para obtener empleado
+  const getEmpleado = (id) => empleados?.find((e) => String(e.id) === String(id))
 
   const puedeCrear = puede('gestion-produccion', 'crear')
   const puedeEditar = puede('gestion-produccion', 'editar')
@@ -259,6 +269,7 @@ export default function GestionProduccion() {
         comentario: ordenComentario,
         fechaEntrega: ordenFechaEntrega || null,
       })
+      await recargarOrdenes()
       resetOrdenForm()
       notify.ok('Orden de producción creada')
     } catch (e) {
@@ -277,6 +288,7 @@ export default function GestionProduccion() {
     }
     try {
       await cambiarEstadoOrden(orden.id, estado)
+      await recargarOrdenes()
     } catch (e) {
       notify.error('Error: ' + e.message)
     }
@@ -292,6 +304,7 @@ export default function GestionProduccion() {
     if (!(await confirmar('¿Marcar esta orden como terminada? Se sumará al stock del producto.', { titulo: 'Terminar orden', textoOk: 'Sí, terminar', peligro: false }))) return
     try {
       await terminarOrdenProduccion(orden.id)
+      await recargarOrdenes()
     } catch (e) {
       notify.error('Error: ' + e.message)
     }
@@ -354,6 +367,7 @@ export default function GestionProduccion() {
     if (!(await confirmar(`¿Eliminar la orden de "${orden.productoNombre}"?`, { titulo: 'Eliminar orden', textoOk: 'Sí, eliminar', peligro: true }))) return
     try {
       await deleteOrdenProduccion(orden.id)
+      await recargarOrdenes()
       notify.ok('Orden eliminada')
     } catch (e) {
       notify.error('Error: ' + e.message)
@@ -370,6 +384,7 @@ export default function GestionProduccion() {
     ))) return
     try {
       await cancelarOrdenProduccion(orden.id)
+      await recargarOrdenes()
       notify.ok('Orden cancelada')
     } catch (e) {
       notify.error('Error: ' + e.message)
@@ -408,6 +423,8 @@ export default function GestionProduccion() {
         comentario: taComentario,
         ordenProduccionId: ordenSel.id,
       })
+      await recargarTareas()
+      await recargarOrdenes()
       resetTareaForm()
       notify.ok('Proceso agregado a la orden')
       for (const aviso of creada?.avisos || []) {
@@ -473,6 +490,8 @@ export default function GestionProduccion() {
         motivoMerma: valorMotivoMerma(t),
         empleadoId: Number(valorEmpleadoId(t)),
       })
+      await recargarTareas()
+      await recargarOrdenes()
       setBorradores((b) => {
         const next = { ...b }
         delete next[t.id]
@@ -487,6 +506,8 @@ export default function GestionProduccion() {
     if (!(await confirmar('¿Marcar este proceso como terminado?', { titulo: 'Terminar proceso', textoOk: 'Sí, terminar', peligro: false }))) return
     try {
       await terminarTareaProduccion(t.id)
+      await recargarTareas()
+      await recargarOrdenes()
     } catch (e) {
       notify.error('Error: ' + e.message)
     }
@@ -496,6 +517,8 @@ export default function GestionProduccion() {
     if (!(await confirmar('¿Eliminar este proceso? El stock ya descontado no se repone automáticamente.'))) return
     try {
       await deleteTareaProduccion(t.id)
+      await recargarTareas()
+      await recargarOrdenes()
     } catch (e) {
       notify.error('Error: ' + e.message)
     }
@@ -678,6 +701,26 @@ export default function GestionProduccion() {
   const cerrarDetalleTarea = () => {
     setTareaDetalleId(null)
     setHistorialAbierto(null)
+  }
+
+  const cargando = cargandoEmpleados || cargandoProductos || cargandoTareas || cargandoOrdenes
+
+  if (cargando) {
+    return (
+      <div>
+        <h2>🏭 Gestión de Producción</h2>
+        <div className="banner">Cargando órdenes de producción...</div>
+      </div>
+    )
+  }
+
+  if (!empleados || !productos || !tareasProduccion || !ordenesProduccion) {
+    return (
+      <div>
+        <h2>🏭 Gestión de Producción</h2>
+        <div className="banner error">No se pudieron cargar los datos necesarios</div>
+      </div>
+    )
   }
 
   return (
