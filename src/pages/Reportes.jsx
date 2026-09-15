@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState } from 'react'
+import { useLocalData } from '../hooks/useLocalData.js'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
@@ -12,7 +13,13 @@ function inicioDeMes() {
 }
 
 export default function Reportes() {
-  const { getReporte, getReporteVentas, getReporteMateriales, getMovimientos, empresa, ordenesProduccion, productos } = useData()
+  // Cargar datos con useLocalData
+  const { data: ordenesProduccion = [], cargando: cargandoOrdenes } = useLocalData('/ordenes-produccion')
+  const { data: productos = [], cargando: cargandoProductos } = useLocalData('/productos')
+
+  // Funciones de mutación y datos globales del context
+  const { getReporte, getReporteVentas, getReporteMateriales, getMovimientos, empresa } = useData()
+
   const { puede } = useAuth()
   const puedeExportar = puede('reportes', 'exportar')
   const hoy = hoyISO()

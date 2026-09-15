@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useLocalData } from '../hooks/useLocalData.js'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha } from '../utils/format.js'
@@ -34,18 +35,22 @@ function BarraProgreso({ valor }) {
 }
 
 export default function GestionNomina() {
+  const { data: empleados, cargando: cargandoEmpleados, recargar: recargarEmpleados } = useLocalData('/empleados')
+  const { data: productos, cargando: cargandoProductos, recargar: recargarProductos } = useLocalData('/productos')
+  const { data: tareas, cargando: cargandoTareas, recargar: recargarTareas } = useLocalData('/tareas')
+
   const {
-    empleados, productos, tareas,
     addTareas, updateTarea, terminarTarea, deleteTarea, getTareaHistorial,
     getTareaFotos, addTareaFoto, deleteTareaFoto,
     getTareaPiezas, setTareaPiezaVerificada,
-    getEmpleado,
   } = useData()
   const { puede } = useAuth()
 
   const puedeCrear = puede('gestion-nomina', 'crear')
   const puedeEditar = puede('gestion-nomina', 'editar')
   const puedeEliminar = puede('gestion-nomina', 'eliminar')
+
+  const getEmpleado = (id) => empleados?.find(e => e.id === id)
 
   // --- Formulario de asignación ---
   // Un empleado puede recibir varios trabajos (producto+proceso+cantidad) de una sola vez;
@@ -86,13 +91,14 @@ export default function GestionNomina() {
   const [piezas, setPiezas] = useState([]) // piezas de la tarea abierta
 
   const cargos = useMemo(
-    () => [...new Set(empleados.map((e) => e.cargo).filter(Boolean))].sort(),
+    () => [...new Set((empleados || []).map((e) => e.cargo).filter(Boolean))].sort(),
     [empleados]
   )
 
   const nombreEmpleado = (id) => getEmpleado(id)?.nombre || '— (eliminado)'
 
   const tareasFiltradas = useMemo(() => {
+    if (!tareas) return []
     const q = filtroBuscar.trim().toLowerCase()
     return tareas.filter((t) => {
       if (filtroEmpleado && String(t.empleadoId) !== String(filtroEmpleado)) return false
@@ -119,6 +125,7 @@ export default function GestionNomina() {
 
   // Resumen por empleado: progreso promedio y conteo por estado
   const resumen = useMemo(() => {
+    if (!tareas) return []
     const map = {}
     for (const t of tareas) {
       const key = t.empleadoId
@@ -170,6 +177,7 @@ export default function GestionNomina() {
         cantidad: Number(it.cantidad),
         comentario: nuevaComentario,
       })))
+      await recargarTareas()
       resetForm()
     } catch (e) {
       notify.error('Error al asignar la tarea: ' + e.message)
@@ -196,6 +204,7 @@ export default function GestionNomina() {
         cantidad: Number(valorCantidad(t)),
         empleadoId: Number(valorEmpleadoId(t)),
       })
+      await recargarTareas()
       // limpiar el borrador de esa tarea
       setBorradores((b) => {
         const next = { ...b }
@@ -211,6 +220,7 @@ export default function GestionNomina() {
     if (!(await confirmar('¿Marcar esta tarea como terminada? Pasará a estar lista para pago de nómina.', { titulo: 'Terminar tarea', textoOk: 'Sí, terminar', peligro: false }))) return
     try {
       await terminarTarea(t.id)
+      await recargarTareas()
     } catch (e) {
       notify.error('Error: ' + e.message)
     }
@@ -220,6 +230,7 @@ export default function GestionNomina() {
     if (!(await confirmar('¿Reabrir esta tarea? Volverá a "en progreso".', { titulo: 'Reabrir tarea', textoOk: 'Sí, reabrir', peligro: false }))) return
     try {
       await updateTarea(t.id, { estado: 'en_progreso' })
+      await recargarTareas()
     } catch (e) {
       notify.error('Error: ' + e.message)
     }
@@ -229,6 +240,7 @@ export default function GestionNomina() {
     if (!(await confirmar('¿Eliminar esta tarea?'))) return
     try {
       await deleteTarea(t.id)
+      await recargarTareas()
     } catch (e) {
       notify.error('Error: ' + e.message)
     }
@@ -352,7 +364,7 @@ export default function GestionNomina() {
     setPiezasAbierto(null)
   }
 
-  const tareaDetalle = tareas.find((t) => t.id === tareaDetalleId)
+  const tareaDetalle = tareas?.find((t) => t.id === tareaDetalleId)
 
   // Detalle de una tarea: edición de progreso/comentario, historial y fotos.
   // Se muestra dentro de un modal al tocar la tarea en la tabla.
@@ -394,7 +406,7 @@ export default function GestionNomina() {
             <div style={{ flex: 2 }}>
               <label className="small">Empleado asignado</label>
               <select value={valorEmpleadoId(t)} onChange={(e) => setBorrador(t.id, 'empleadoId', e.target.value)}>
-                {empleados.filter((emp) => emp.activo || String(emp.id) === valorEmpleadoId(t)).map((emp) => (
+                {(empleados || []).filter((emp) => emp.activo || String(emp.id) === valorEmpleadoId(t)).map((emp) => (
                   <option key={emp.id} value={emp.id}>
                     {emp.nombre}{emp.cargo ? ` (${emp.cargo})` : ''}{!emp.activo ? ' (inactivo)' : ''}
                   </option>
@@ -562,6 +574,15 @@ export default function GestionNomina() {
     )
   }
 
+  if (cargandoEmpleados || cargandoProductos || cargandoTareas) {
+    return (
+      <div>
+        <h2>📋 Gestión de Nómina</h2>
+        <div className="banner">Cargando datos...</div>
+      </div>
+    )
+  }
+
   return (
     <div>
       <h2>📋 Gestión de Nómina</h2>
@@ -600,7 +621,7 @@ export default function GestionNomina() {
             <label className="small">Empleado</label>
             <select value={filtroEmpleado} onChange={(e) => setFiltroEmpleado(e.target.value)}>
               <option value="">Todos</option>
-              {empleados.map((emp) => (
+              {(empleados || []).map((emp) => (
                 <option key={emp.id} value={emp.id}>{emp.nombre}</option>
               ))}
             </select>
@@ -751,7 +772,7 @@ export default function GestionNomina() {
                 <label>Empleado</label>
                 <select value={nuevaEmpleadoId} onChange={(e) => setNuevaEmpleadoId(e.target.value)}>
                   <option value="">— Seleccionar —</option>
-                  {empleados.filter((emp) => emp.activo).map((emp) => (
+                  {(empleados || []).filter((emp) => emp.activo).map((emp) => (
                     <option key={emp.id} value={emp.id}>
                       {emp.nombre}{emp.cargo ? ` (${emp.cargo})` : ''}
                     </option>
@@ -781,7 +802,7 @@ export default function GestionNomina() {
                         <td>
                           <select value={it.productoId} onChange={(e) => setNuevoItemField(it.key, 'productoId', e.target.value)}>
                             <option value="">— Producto —</option>
-                            {productos.map((p) => (
+                            {(productos || []).map((p) => (
                               <option key={p.id} value={p.id}>{p.nombre}</option>
                             ))}
                           </select>
@@ -793,7 +814,7 @@ export default function GestionNomina() {
                             onChange={(e) => setNuevoItemField(it.key, 'procesoId', e.target.value)}
                           >
                             <option value="">— Proceso —</option>
-                            {producto?.procesos.map((p) => (
+                            {(producto?.procesos || []).map((p) => (
                               <option key={p.id} value={p.id}>{p.nombre} ({formatCOP(p.pago)})</option>
                             ))}
                           </select>

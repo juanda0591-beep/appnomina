@@ -90,15 +90,6 @@ export default function Empresa() {
     )
   }
 
-  if (!empresa) {
-    return (
-      <div>
-        <h2>🏢 Datos de la empresa</h2>
-        <div className="banner error">No se pudieron cargar los datos de la empresa</div>
-      </div>
-    )
-  }
-
   return (
     <div>
       <h2>🏢 Datos de la empresa</h2>

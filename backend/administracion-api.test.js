@@ -55,6 +55,15 @@ test('API: sesiones revocables, auditoria financiera y respaldo descargable rest
   assert.equal((await request('/sesion', 'GET', undefined, consulta)).status, 401)
 
   const movimiento = (await request('/movimientos', 'POST', { tipo: 'ingreso', fecha: '2026-09-05', monto: 5000, descripcion: 'Ingreso de prueba' })).data
+  await request('/movimientos', 'POST', { tipo: 'ingreso', fecha: '2026-09-06', monto: 2500,
+    descripcion: 'Con comprobante', comprobante: 'data:image/png;base64,cHJ1ZWJh', comprobanteTipo: 'image/png' })
+  await request('/movimientos', 'POST', { tipo: 'gasto', fecha: '2026-09-07', monto: 1000, descripcion: 'Gasto de prueba' })
+  const paginaMovimientos = (await request('/movimientos?pagina=1&limite=1&tipo=ingreso&desde=2026-09-01&hasta=2026-09-30')).data
+  assert.equal(paginaMovimientos.total, 2)
+  assert.equal(paginaMovimientos.registros.length, 1)
+  assert.equal(paginaMovimientos.registros[0].tieneComprobante, true)
+  assert.equal('comprobante' in paginaMovimientos.registros[0], false)
+  assert.equal((await request('/movimientos?desde=2026-09-01&hasta=2026-09-30')).data.length, 3)
   assert.equal((await request(`/movimientos/${movimiento.id}`, 'DELETE')).status, 400)
   assert.equal((await request(`/movimientos/${movimiento.id}`, 'DELETE', { motivo: 'Registro equivocado' })).status, 200)
   const historial = (await request('/auditoria?entidad=movimientos&accion=eliminar&usuario=admin')).data
@@ -81,6 +90,39 @@ test('API: sesiones revocables, auditoria financiera y respaldo descargable rest
   assert.equal((await request(`/ventas/${ventaCredito.id}/pagos`, 'POST', { monto: 5000, metodo: 'efectivo' })).status, 200)
   assert.equal((await request(`/ventas/${ventaCredito.id}/pagos`, 'POST', { monto: 20000 })).status, 400)
   assert.equal((await request('/auditoria?entidad=venta_pagos')).data.registros[0].posterior.monto, 5000)
+
+  // El historial incluye el dia completo y calcula totales sobre todas las paginas.
+  for (const [monto, fecha] of [[1000, '2026-09-14'], [2000, '2026-09-14T23:59:59.000Z'], [500, '2026-09-15T00:00:00.000Z']]) {
+    assert.equal((await request(`/ventas/${ventaCredito.id}/pagos`, 'POST', { monto, fecha })).status, 200)
+  }
+  const filtroPagos = `/historial-pagos?clienteId=${cliente.id}&fechaDesde=2026-09-14&fechaHasta=2026-09-14&porPagina=1`
+  const primeraPagina = await request(filtroPagos)
+  assert.equal(primeraPagina.status, 200)
+  assert.equal(primeraPagina.data.paginacion.total, 2)
+  assert.equal(primeraPagina.data.paginacion.totalPaginas, 2)
+  assert.equal(primeraPagina.data.totalAbonado, 3000)
+  assert.equal(primeraPagina.data.pagos.length, 1)
+  assert.equal(primeraPagina.data.pagos[0].monto, 2000)
+  assert.equal(primeraPagina.data.pagos[0].venta_codigo, ventaCredito.codigo)
+  const ultimaPagina = (await request(filtroPagos + '&pagina=999')).data
+  assert.equal(ultimaPagina.paginacion.pagina, 2)
+  assert.equal(ultimaPagina.pagos[0].monto, 1000)
+  assert.equal(ultimaPagina.totalAbonado, 3000)
+  const otroCliente = (await request('/clientes', 'POST', { nombre: 'Sin pagos' })).data
+  const sinPagos = (await request(`/historial-pagos?clienteId=${otroCliente.id}`)).data
+  assert.deepEqual(sinPagos.pagos, [])
+  assert.equal(sinPagos.totalAbonado, 0)
+  assert.equal(sinPagos.paginacion.totalPaginas, 1)
+  for (const query of ['', 'clienteId=no', `clienteId=${cliente.id}&pagina=0`, `clienteId=${cliente.id}&pagina=1.5`,
+    `clienteId=${cliente.id}&porPagina=-1`, `clienteId=${cliente.id}&porPagina=101`,
+    `clienteId=${cliente.id}&fechaDesde=2026-02-30`, `clienteId=${cliente.id}&fechaHasta=no`,
+    `clienteId=${cliente.id}&fechaDesde=2026-09-15&fechaHasta=2026-09-14`]) {
+    assert.equal((await request(`/historial-pagos?${query}`)).status, 400, query)
+  }
+  assert.equal((await request(filtroPagos, 'GET', undefined, '')).status, 401)
+  await request('/usuarios', 'POST', { username: 'sinventas', password: 'prueba123', permisos: { nomina: { ver: true } } })
+  const sinVentas = (await request('/login', 'POST', { username: 'sinventas', password: 'prueba123' })).data.token
+  assert.equal((await request(filtroPagos, 'GET', undefined, sinVentas)).status, 403)
 
   const copia = await request('/respaldos', 'POST')
   assert.equal(copia.status, 201, JSON.stringify(copia.data))

@@ -37,9 +37,9 @@ const allowedOrigins = (process.env.ALLOWED_ORIGIN || '')
   .map((s) => s.trim())
   .filter(Boolean)
 if (allowedOrigins.length > 0) {
-  app.use(cors({ origin: allowedOrigins }))
+  app.use(cors({ origin: allowedOrigins, credentials: true }))
 } else {
-  app.use(cors())
+  app.use(cors({ credentials: true }))
 }
 
 // Confía en el proxy (Caddy/Nginx) para leer la IP real del cliente (X-Forwarded-For)
@@ -404,6 +404,10 @@ function registrarIngreso({ fecha, categoria, monto, descripcion, origen = 'manu
   })
 }
 
+const MOVIMIENTO_COLUMNAS = `id, tipo, fecha, categoria, monto, descripcion,
+  CASE WHEN comprobante IS NOT NULL THEN 1 ELSE 0 END AS tiene_comprobante,
+  comprobante_tipo, origen, ref_id`
+
 function movimientoSalida(m) {
   return {
     id: m.id,
@@ -412,7 +416,9 @@ function movimientoSalida(m) {
     categoria: m.categoria || '',
     monto: m.monto,
     descripcion: m.descripcion || '',
-    tieneComprobante: !!m.comprobante,
+    // Las listas consultan solo este indicador para no leer comprobantes pesados.
+    // Las respuestas de creación conservan compatibilidad con la fila completa.
+    tieneComprobante: m.tiene_comprobante == null ? !!m.comprobante : !!m.tiene_comprobante,
     comprobanteTipo: m.comprobante_tipo || '',
     origen: m.origen || 'manual',
     refId: m.ref_id,
@@ -2284,20 +2290,56 @@ app.delete('/api/push/suscribir', adminRequired, (req, res) => {
 
 // ============ MOVIMIENTOS (Control de dinero) ============
 app.get('/api/movimientos', permisoRequired('control-dinero', 'ver'), (req, res) => {
-  const { desde, hasta } = req.query
-  let rows
-  if (desde && hasta) {
-    rows = db.prepare('SELECT * FROM movimientos WHERE fecha BETWEEN ? AND ? ORDER BY fecha DESC, id DESC').all(desde, hasta)
-  } else {
-    rows = db.prepare('SELECT * FROM movimientos ORDER BY fecha DESC, id DESC').all()
+  const { desde, hasta, tipo } = req.query
+  const fechaValida = (valor) => {
+    if (typeof valor !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(valor)) return false
+    const fecha = new Date(`${valor}T00:00:00Z`)
+    return !Number.isNaN(fecha.getTime()) && fecha.toISOString().slice(0, 10) === valor
   }
-  res.json(rows.map(movimientoSalida))
+  if (desde && !fechaValida(desde)) return res.status(400).json({ error: 'Fecha desde inválida' })
+  if (hasta && !fechaValida(hasta)) return res.status(400).json({ error: 'Fecha hasta inválida' })
+  if (tipo && tipo !== 'ingreso' && tipo !== 'gasto') return res.status(400).json({ error: 'Tipo de movimiento inválido' })
+  if (desde && hasta && desde > hasta) return res.status(400).json({ error: 'La fecha desde no puede ser posterior a hasta' })
+
+  const condiciones = []
+  const valores = []
+  if (desde) { condiciones.push('fecha >= ?'); valores.push(desde) }
+  if (hasta) {
+    // Límite superior exclusivo: incluye tanto fechas simples como timestamps del día.
+    condiciones.push('fecha < ?')
+    const diaSiguiente = new Date(`${hasta}T00:00:00Z`)
+    diaSiguiente.setUTCDate(diaSiguiente.getUTCDate() + 1)
+    valores.push(diaSiguiente.toISOString().slice(0, 10))
+  }
+  if (tipo) { condiciones.push('tipo = ?'); valores.push(tipo) }
+  const where = condiciones.length ? `WHERE ${condiciones.join(' AND ')}` : ''
+  // Sin pagina se mantiene el array histórico que consume Reportes.
+  const paginado = req.query.pagina != null || req.query.limite != null
+  if (!paginado) {
+    const rows = db.prepare(`SELECT ${MOVIMIENTO_COLUMNAS} FROM movimientos ${where} ORDER BY fecha DESC, id DESC`).all(...valores)
+    return res.json(rows.map(movimientoSalida))
+  }
+
+  const limite = Math.max(1, Math.min(100, Math.floor(Number(req.query.limite) || 50)))
+  const paginaSolicitada = Math.max(1, Math.min(1000000, Math.floor(Number(req.query.pagina) || 1)))
+  const total = db.prepare(`SELECT COUNT(*) AS n FROM movimientos ${where}`).get(...valores).n
+  const paginas = Math.max(1, Math.ceil(total / limite))
+  const pagina = Math.min(paginaSolicitada, paginas)
+  const rows = db.prepare(
+    `SELECT ${MOVIMIENTO_COLUMNAS} FROM movimientos ${where} ORDER BY fecha DESC, id DESC LIMIT ? OFFSET ?`
+  ).all(...valores, limite, (pagina - 1) * limite)
+
+  res.json({ registros: rows.map(movimientoSalida), total, pagina, paginas, limite })
 })
 
 // Balance global: total ingresos, gastos y saldo actual
 app.get('/api/movimientos/balance', permisoRequired('control-dinero', 'ver'), (req, res) => {
-  const ingresos = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'ingreso'").get().t
-  const gastos = db.prepare("SELECT COALESCE(SUM(monto), 0) AS t FROM movimientos WHERE tipo = 'gasto'").get().t
+  const totales = db.prepare(`SELECT
+    COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN monto ELSE 0 END), 0) AS ingresos,
+    COALESCE(SUM(CASE WHEN tipo = 'gasto' THEN monto ELSE 0 END), 0) AS gastos
+    FROM movimientos`).get()
+  const ingresos = totales.ingresos
+  const gastos = totales.gastos
   res.json({ ingresos, gastos, balance: ingresos - gastos })
 })
 
@@ -2337,12 +2379,12 @@ app.post('/api/movimientos', permisoRequired('control-dinero', 'crear'), (req, r
       cuerpo: `${montoTexto}${categoria ? ' — ' + categoria : ''}${descripcion ? ' — ' + descripcion : ''}`,
     }).catch(() => {})
   }
-  res.json(movimientoSalida(db.prepare('SELECT * FROM movimientos WHERE id = ?').get(r.lastInsertRowid)))
+  res.json(movimientoSalida(db.prepare(`SELECT ${MOVIMIENTO_COLUMNAS} FROM movimientos WHERE id = ?`).get(r.lastInsertRowid)))
 })
 
 // Adjunta (o reemplaza) el comprobante de un movimiento ya registrado
 app.put('/api/movimientos/:id/comprobante', permisoRequired('control-dinero', 'crear'), (req, res) => {
-  const m = db.prepare('SELECT * FROM movimientos WHERE id = ?').get(req.params.id)
+  const m = db.prepare('SELECT id FROM movimientos WHERE id = ?').get(req.params.id)
   if (!m) return res.status(404).json({ error: 'Movimiento no encontrado' })
   const { comprobante, comprobanteTipo } = req.body
   if (!comprobante || !/^data:(.+?);base64,(.+)$/s.test(comprobante)) {
@@ -2350,7 +2392,7 @@ app.put('/api/movimientos/:id/comprobante', permisoRequired('control-dinero', 'c
   }
   db.prepare('UPDATE movimientos SET comprobante = ?, comprobante_tipo = ? WHERE id = ?')
     .run(comprobante, comprobanteTipo || null, m.id)
-  res.json(movimientoSalida(db.prepare('SELECT * FROM movimientos WHERE id = ?').get(m.id)))
+  res.json(movimientoSalida(db.prepare(`SELECT ${MOVIMIENTO_COLUMNAS} FROM movimientos WHERE id = ?`).get(m.id)))
 })
 
 app.delete('/api/movimientos/:id', permisoRequired('control-dinero', 'eliminar'), (req, res) => {
@@ -3298,6 +3340,85 @@ app.delete('/api/ventas/:id', permisoRequired('ventas', 'eliminar'), (req, res) 
   })
   anular()
   res.json({ ok: true })
+})
+
+// ============ HISTORIAL DE PAGOS ============
+// Obtiene todos los pagos/abonos de un cliente en un rango de fechas, paginado
+app.get('/api/historial-pagos', permisoRequired('ventas', 'ver'), (req, res) => {
+  const { clienteId, fechaDesde, fechaHasta, pagina = 1, porPagina = 50 } = req.query
+
+  const enteroPositivo = (valor) => typeof valor === 'string' && /^\d+$/.test(valor)
+    && Number.isSafeInteger(Number(valor)) && Number(valor) > 0
+  const fechaValida = (valor) => typeof valor === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(valor)
+    && !Number.isNaN(Date.parse(valor)) && new Date(valor).toISOString().slice(0, 10) === valor
+  if (!enteroPositivo(clienteId)) return res.status(400).json({ error: 'clienteId inválido' })
+  if (!enteroPositivo(String(pagina)) || !enteroPositivo(String(porPagina)) || Number(porPagina) > 100) {
+    return res.status(400).json({ error: 'Paginación inválida (máximo 100 registros por página)' })
+  }
+  if ((fechaDesde && !fechaValida(fechaDesde)) || (fechaHasta && !fechaValida(fechaHasta))) {
+    return res.status(400).json({ error: 'Fecha inválida' })
+  }
+  if (fechaDesde && fechaHasta && fechaDesde > fechaHasta) {
+    return res.status(400).json({ error: 'La fecha desde no puede ser posterior a hasta' })
+  }
+  const limit = Number(porPagina)
+
+  let whereClause = 'WHERE v.cliente_id = ?'
+  const params = [clienteId]
+
+  if (fechaDesde) {
+    whereClause += ' AND vp.fecha >= ?'
+    params.push(fechaDesde)
+  }
+
+  if (fechaHasta) {
+    whereClause += " AND vp.fecha < datetime(?, '+1 day')"
+    params.push(fechaHasta)
+  }
+
+  // Contar total de registros
+  const countQuery = `
+    SELECT COUNT(*) as total, COALESCE(SUM(vp.monto), 0) as totalAbonado
+    FROM venta_pagos vp
+    INNER JOIN ventas v ON vp.venta_id = v.id
+    ${whereClause}
+  `
+  const { total, totalAbonado } = db.prepare(countQuery).get(...params)
+  const totalPaginas = Math.max(1, Math.ceil(total / limit))
+  const paginaActual = Math.min(Number(pagina), totalPaginas)
+  const offset = (paginaActual - 1) * limit
+
+  // Obtener registros paginados
+  const query = `
+    SELECT
+      vp.id,
+      vp.venta_id,
+      vp.monto,
+      vp.fecha,
+      vp.comentario,
+      vp.creado,
+      v.codigo as venta_codigo,
+      v.total as venta_total,
+      v.cliente_nombre
+    FROM venta_pagos vp
+    INNER JOIN ventas v ON vp.venta_id = v.id
+    ${whereClause}
+    ORDER BY vp.fecha DESC, vp.creado DESC, vp.id DESC
+    LIMIT ? OFFSET ?
+  `
+
+  const pagos = db.prepare(query).all(...params, limit, offset)
+
+  res.json({
+    pagos,
+    totalAbonado,
+    paginacion: {
+      total,
+      pagina: paginaActual,
+      porPagina: Number(porPagina),
+      totalPaginas
+    }
+  })
 })
 
 // ============ Servir frontend compilado (producción / acceso LAN) ============

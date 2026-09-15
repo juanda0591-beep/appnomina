@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useLocalData } from '../hooks/useLocalData.js'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP } from '../utils/format.js'
@@ -67,7 +68,13 @@ function PieChart({ datos, size = 180 }) {
 }
 
 export default function Costos() {
-  const { getCosteos, addCosteo, updateCosteo, deleteCosteo, empresa, productos, materiales } = useData()
+  // Cargar datos con useLocalData
+  const { data: productos = [], cargando: cargandoProductos } = useLocalData('/productos')
+  const { data: materiales = [], cargando: cargandoMateriales } = useLocalData('/materiales')
+
+  // Funciones de mutación y datos globales del context
+  const { getCosteos, addCosteo, updateCosteo, deleteCosteo, empresa } = useData()
+
   const { puede } = useAuth()
 
   const puedeCrear = puede('costos', 'crear')

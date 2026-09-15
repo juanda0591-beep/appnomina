@@ -85,15 +85,6 @@ export default function Colores() {
     )
   }
 
-  if (!colores || !materiales || !productos) {
-    return (
-      <div>
-        <h2>🎨 Colores</h2>
-        <div className="banner error">No se pudieron cargar los datos necesarios</div>
-      </div>
-    )
-  }
-
   return (
     <div>
       <h2>🎨 Colores</h2>

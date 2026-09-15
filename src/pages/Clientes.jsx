@@ -36,6 +36,16 @@ export default function Clientes() {
   const [editId, setEditId] = useState(null)
   const [busqueda, setBusqueda] = useState('')
 
+  // --- Modal de Anticipos (por cliente) ---
+  const [anticiposCliente, setAnticiposCliente] = useState(null)
+  const [anticipos, setAnticipos] = useState([])
+  const [antForm, setAntForm] = useState(emptyAnticipo())
+  const [antFormAbierto, setAntFormAbierto] = useState(false)
+  const [guardandoAnt, setGuardandoAnt] = useState(false)
+
+  // --- Modal de Historial de transacciones ---
+  const [historialCliente, setHistorialCliente] = useState(null)
+
   const setField = (campo, val) => setForm((f) => ({ ...f, [campo]: val }))
   const resetForm = () => { setForm(emptyCliente()); setEditId(null); setFormAbierto(false) }
 
@@ -91,29 +101,13 @@ export default function Clientes() {
     )
   }
 
-  if (!clientes || !pedidos || !ventas) {
-    return (
-      <div>
-        <h2>👥 Clientes</h2>
-        <div className="banner error">No se pudieron cargar los datos necesarios</div>
-      </div>
-    )
-  }
-
   const q = busqueda.trim().toLowerCase()
   const clientesFiltrados = q
-    ? clientes.filter((c) =>
+    ? (clientes || []).filter((c) =>
         [c.nombre, c.apellidos, c.cedula, c.correo, c.municipio, c.telefono]
           .some((v) => (v || '').toLowerCase().includes(q))
       )
-    : clientes
-
-  // --- Modal de Anticipos (por cliente) ---
-  const [anticiposCliente, setAnticiposCliente] = useState(null) // cliente con el modal abierto
-  const [anticipos, setAnticipos] = useState([])
-  const [antForm, setAntForm] = useState(emptyAnticipo())
-  const [antFormAbierto, setAntFormAbierto] = useState(false)
-  const [guardandoAnt, setGuardandoAnt] = useState(false)
+    : (clientes || [])
 
   const setAntField = (campo, val) => setAntForm((f) => ({ ...f, [campo]: val }))
 
@@ -175,16 +169,13 @@ export default function Clientes() {
 
   // Saldo a favor "en vivo" del cliente del modal (el objeto de la lista puede quedar viejo tras recargar)
   const clienteAnticiposActual = anticiposCliente
-    ? clientes.find((c) => c.id === anticiposCliente.id) || anticiposCliente
+    ? (clientes || []).find((c) => c.id === anticiposCliente.id) || anticiposCliente
     : null
-
-  // --- Modal de Historial de transacciones (pedidos + ventas del cliente) ---
-  const [historialCliente, setHistorialCliente] = useState(null)
 
   // Combina pedidos y ventas del cliente en una sola línea de tiempo, más recientes primero.
   const transaccionesDe = (clienteId) => {
     const lista = []
-    for (const p of pedidos) {
+    for (const p of (pedidos || [])) {
       if (String(p.clienteId) !== String(clienteId)) continue
       lista.push({
         key: 'ped-' + p.id, clase: 'pedido', id: p.id,
@@ -192,7 +183,7 @@ export default function Clientes() {
         total: p.total, items: p.items || [],
       })
     }
-    for (const v of ventas) {
+    for (const v of (ventas || [])) {
       if (String(v.clienteId) !== String(clienteId)) continue
       lista.push({
         key: 'ven-' + v.id, clase: 'venta', id: v.id,
@@ -411,7 +402,7 @@ export default function Clientes() {
                     </tr>
                   </thead>
                   <tbody>
-                    {anticipos.map((a) => (
+                    {(anticipos || []).map((a) => (
                       <tr key={a.id}>
                         <td>{formatFecha(a.fecha)}</td>
                         <td>
@@ -467,7 +458,7 @@ export default function Clientes() {
                     </tr>
                   </thead>
                   <tbody>
-                    {transacciones.map((t) => (
+                    {(transacciones || []).map((t) => (
                       <tr key={t.key}>
                         <td>{formatFecha(t.fecha)}</td>
                         <td>
@@ -477,7 +468,7 @@ export default function Clientes() {
                           )}
                         </td>
                         <td className="muted small">
-                          {t.items.map((it) => `${it.productoNombre} ×${it.cantidad}`).join(', ') || '—'}
+                          {(t.items || []).map((it) => `${it.productoNombre} ×${it.cantidad}`).join(', ') || '—'}
                           {t.clase === 'venta' && t.anticipoAplicado > 0 && (
                             <div>Anticipo aplicado: {formatCOP(t.anticipoAplicado)} · Pagado: {formatCOP(t.pagado)}</div>
                           )}

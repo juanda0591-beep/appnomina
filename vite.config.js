@@ -69,7 +69,19 @@ export default defineConfig({
     open: true,
     host: true, // accesible en la red local durante desarrollo
     proxy: {
-      '/api': 'http://127.0.0.1:3001',
+      '/api': {
+        target: 'http://127.0.0.1:3001',
+        changeOrigin: true,
+        secure: false,
+        configure: (proxy, options) => {
+          proxy.on('proxyReq', (proxyReq, req, res) => {
+            // Preservar las cookies en el proxy
+            if (req.headers.cookie) {
+              proxyReq.setHeader('cookie', req.headers.cookie)
+            }
+          })
+        }
+      },
     },
   },
 })

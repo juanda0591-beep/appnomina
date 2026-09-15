@@ -172,15 +172,6 @@ export default function Materiales() {
     )
   }
 
-  if (!materiales) {
-    return (
-      <div>
-        <h2>🧱 Materiales</h2>
-        <div className="banner error">No se pudieron cargar los materiales</div>
-      </div>
-    )
-  }
-
   return (
     <div>
       <h2>🧱 Materiales</h2>

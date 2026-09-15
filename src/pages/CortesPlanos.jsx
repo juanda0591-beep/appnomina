@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useLocalData } from '../hooks/useLocalData.js'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP } from '../utils/format.js'
@@ -20,7 +21,12 @@ const LAMINAS_ESTANDAR = [
 const emptyPieza = () => ({ nombre: '', ancho: '', alto: '', cantidad: '1', permiteRotar: true, canto: '' })
 
 export default function CortesPlanos() {
-  const { productos, calcularCorte, getPiezas, guardarPiezas, empresa } = useData()
+  // Cargar datos con useLocalData
+  const { data: productos = [], cargando: cargandoProductos } = useLocalData('/productos')
+
+  // Funciones de mutación y datos globales del context
+  const { calcularCorte, getPiezas, guardarPiezas, empresa } = useData()
+
   const { puede } = useAuth()
   const puedeEditar = puede('cortes-planos', 'editar')
 

@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useLocalData } from "../hooks/useLocalData.js"
 import { useData } from "../context/DataContext.jsx"
 import { useAuth } from "../context/AuthContext.jsx"
 import { formatCOP, formatFecha } from "../utils/format.js"
@@ -7,14 +8,24 @@ import { notify, confirmarAnulacion } from "../utils/notify.js"
 import Vacio from "../components/Vacio.jsx"
 
 export default function Historial() {
-  const { nominas, empresa, prestamos, getEmpleado, deleteNomina } = useData()
+  // Cargar datos con useLocalData
+  const { data: nominas = [], cargando: cargandoNominas, error: errorNominas, recargar: recargarNominas } = useLocalData("/nominas")
+  const { data: empleados = [], cargando: cargandoEmpleados, error: errorEmpleados } = useLocalData("/empleados")
+  const { data: prestamos = [], cargando: cargandoPrestamos, error: errorPrestamos, recargar: recargarPrestamos } = useLocalData("/prestamos")
+
+  // Funciones de mutación y datos globales del context
+  const { empresa, deleteNomina } = useData()
+
   const { puede } = useAuth()
   const puedeEliminar = puede("historial", "eliminar")
   const puedeExportar = puede("historial", "exportar")
 
+  // Función para obtener empleado por id
+  const getEmpleado = (id) => empleados.find(e => String(e.id) === String(id))
+
   // Saldo actual (de hoy) de los préstamos pendientes de un empleado
   const saldoActualEmpleado = (empleadoId) =>
-    prestamos
+    (prestamos || [])
       .filter((p) => String(p.empleado_id) === String(empleadoId) && p.saldo > 0)
       .reduce((s, p) => s + p.saldo, 0)
 
@@ -31,18 +42,19 @@ export default function Historial() {
   // =========================
   // FILTRADO PRINCIPAL
   // =========================
-  const filtrado = nominas
+  const filtrado = (nominas || [])
     .filter((n) => {
       const emp = getEmpleado(n.empleadoId)
 
       const matchTexto =
+        !buscar.trim() ||
         emp?.nombre?.toLowerCase().includes(buscar.toLowerCase()) ||
-        emp?.documento?.includes(buscar) ||
+        emp?.cedula?.includes(buscar) ||
         emp?.cargo?.toLowerCase().includes(buscar.toLowerCase())
 
-      const fecha = new Date(n.fecha)
-      const desde = fechaInicio ? fecha >= new Date(fechaInicio) : true
-      const hasta = fechaFin ? fecha <= new Date(fechaFin) : true
+      const fecha = n.fecha?.slice(0, 10) || ''
+      const desde = fechaInicio ? fecha >= fechaInicio : true
+      const hasta = fechaFin ? fecha <= fechaFin : true
 
       return matchTexto && desde && hasta
     })
@@ -51,11 +63,12 @@ export default function Historial() {
   // =========================
   // PAGINACIÓN
   // =========================
-  const totalPaginas = Math.ceil(filtrado.length / porPagina)
+  const totalPaginas = Math.max(1, Math.ceil(filtrado.length / porPagina))
+  const paginaActual = Math.min(pagina, totalPaginas)
 
   const datosPagina = filtrado.slice(
-    (pagina - 1) * porPagina,
-    pagina * porPagina
+    (paginaActual - 1) * porPagina,
+    paginaActual * porPagina
   )
 
   // =========================
@@ -75,7 +88,7 @@ export default function Historial() {
     const mensaje =
       `*COMPROBANTE DE PAGO*\n\n` +
       `Empleado: ${emp?.nombre}\n` +
-      `Documento: ${emp?.documento}\n` +
+      `Documento: ${emp?.cedula || ''}\n` +
       `Cargo: ${emp?.cargo}\n\n` +
       `Fecha: ${formatFecha(n.fecha)}\n` +
       `Total: ${formatCOP(n.total)}\n\n` +
@@ -104,9 +117,12 @@ export default function Historial() {
     filtrado.forEach((n) => {
       const emp = getEmpleado(n.empleadoId)
 
-      csv += `${n.id},${n.fecha},${emp?.nombre || ""},${emp?.documento || ""},${
-        emp?.cargo || ""
-      },${n.subtotal},${n.totalDescuentos},${n.total}\n`
+      csv += [n.id, n.fecha, emp?.nombre, emp?.cedula, emp?.cargo, n.subtotal, n.totalDescuentos, n.total]
+        .map((valor) => {
+          const texto = String(valor ?? '')
+          const seguro = /^[=+@\-\t\r]/.test(texto) ? `'${texto}` : texto
+          return `"${seguro.replaceAll('"', '""')}"`
+        }).join(',') + '\n'
     })
 
     const blob = new Blob([csv], { type: "text/csv" })
@@ -116,6 +132,7 @@ export default function Historial() {
     a.href = url
     a.download = "historial_nomina.csv"
     a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
   // =========================
@@ -126,6 +143,13 @@ export default function Historial() {
     setFechaInicio("")
     setFechaFin("")
     setPagina(1)
+  }
+
+  if (cargandoNominas || cargandoEmpleados || cargandoPrestamos) {
+    return <div className="banner">Cargando historial de pagos...</div>
+  }
+  if (errorNominas || errorEmpleados || errorPrestamos) {
+    return <div className="banner error">{errorNominas || errorEmpleados || errorPrestamos}</div>
   }
 
   return (
@@ -140,7 +164,7 @@ export default function Historial() {
           type="text"
           placeholder="🔎 Buscar empleado, documento o cargo"
           value={buscar}
-          onChange={(e) => setBuscar(e.target.value)}
+          onChange={(e) => { setBuscar(e.target.value); setPagina(1) }}
         />
 
         <div className="row" style={{ marginTop: 10 }}>
@@ -150,7 +174,8 @@ export default function Historial() {
               id="historial-desde"
               type="date"
               value={fechaInicio}
-              onChange={(e) => setFechaInicio(e.target.value)}
+              max={fechaFin || undefined}
+              onChange={(e) => { setFechaInicio(e.target.value); setPagina(1) }}
             />
           </div>
           <div style={{ flex: 1 }}>
@@ -159,7 +184,8 @@ export default function Historial() {
               id="historial-hasta"
               type="date"
               value={fechaFin}
-              onChange={(e) => setFechaFin(e.target.value)}
+              min={fechaInicio || undefined}
+              onChange={(e) => { setFechaFin(e.target.value); setPagina(1) }}
             />
           </div>
           <button className="btn-secondary" onClick={limpiar}>Limpiar</button>
@@ -202,7 +228,7 @@ export default function Historial() {
                 <strong>{emp?.nombre || "Empleado eliminado"}</strong>
 
                 <div className="muted small">
-                  CC: {emp?.documento} | {emp?.cargo}
+                  CC: {emp?.cedula} | {emp?.cargo}
                 </div>
 
                 <div className="muted small">
@@ -224,7 +250,10 @@ export default function Historial() {
                     onClick={async () => {
                       const motivo = await confirmarAnulacion('Se anulará el pago y se devolverán los descuentos a los préstamos.')
                       if (!motivo) return
-                      try { await deleteNomina(n.id, motivo) }
+                      try {
+                        await deleteNomina(n.id, motivo)
+                        await Promise.all([recargarNominas(), recargarPrestamos()])
+                      }
                       catch (e) { notify.error(e.message) }
                     }}
                   >
@@ -264,6 +293,8 @@ export default function Historial() {
             {/* DESGLOSE */}
             <div className="muted small" style={{ marginTop: 10 }}>
               Subtotal: {formatCOP(n.subtotal)} <br />
+              {n.extra > 0 && <>{n.extraDetalle || "Extra"}: +{formatCOP(n.extra)} <br /></>}
+              {n.descuentoTrabajo > 0 && <>{n.descuentoTrabajoDetalle || "Descuento por trabajo"}: -{formatCOP(n.descuentoTrabajo)} <br /></>}
               {n.descuentos?.length > 0 ? (
                 n.descuentos.map((d, i) => (
                   <span key={i}>
@@ -290,20 +321,20 @@ export default function Historial() {
         <div className="card actions">
           <button
             className="btn-secondary btn-sm"
-            disabled={pagina === 1}
-            onClick={() => setPagina(pagina - 1)}
+            disabled={paginaActual === 1}
+            onClick={() => setPagina(paginaActual - 1)}
           >
             ⬅ Anterior
           </button>
 
           <span className="muted small">
-            Página {pagina} de {totalPaginas || 1}
+            Página {paginaActual} de {totalPaginas}
           </span>
 
           <button
             className="btn-secondary btn-sm"
-            disabled={pagina === totalPaginas}
-            onClick={() => setPagina(pagina + 1)}
+            disabled={paginaActual === totalPaginas}
+            onClick={() => setPagina(paginaActual + 1)}
           >
             Siguiente ➡
           </button>

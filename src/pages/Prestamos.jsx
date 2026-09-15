@@ -107,15 +107,6 @@ export default function Prestamos() {
     )
   }
 
-  if (!empleados || !prestamos) {
-    return (
-      <div>
-        <h2>💵 Préstamos</h2>
-        <div className="banner error">No se pudieron cargar los datos necesarios</div>
-      </div>
-    )
-  }
-
   const totalPrestado = prestamos.reduce((s, p) => s + p.monto, 0)
   const totalSaldo = prestamos.reduce((s, p) => s + p.saldo, 0)
 

@@ -235,15 +235,6 @@ export default function Empleados() {
     )
   }
 
-  if (!empleados || !prestamos) {
-    return (
-      <div>
-        <h2>👷 Empleados</h2>
-        <div className="banner error">No se pudieron cargar los datos necesarios</div>
-      </div>
-    )
-  }
-
   const q = busqueda.trim().toLowerCase()
   const empleadosFiltrados = empleados
     .filter((e) => verInactivos || e.activo)

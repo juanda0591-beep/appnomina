@@ -13,8 +13,8 @@ export default function Nomina() {
   // Carga local de datos
   const { data: empleados, cargando: cargandoEmpleados } = useLocalData('/empleados')
   const { data: productos, cargando: cargandoProductos } = useLocalData('/productos')
-  const { data: prestamos, cargando: cargandoPrestamos } = useLocalData('/prestamos')
-  const { data: tareas, cargando: cargandoTareas } = useLocalData('/tareas')
+  const { data: prestamos, cargando: cargandoPrestamos, recargar: recargarPrestamos } = useLocalData('/prestamos')
+  const { data: tareas, cargando: cargandoTareas, recargar: recargarTareas } = useLocalData('/tareas')
 
   // Funciones de mutación y datos globales del context
   const { empresa, addNomina, getTareaFotos } = useData()
@@ -269,6 +269,7 @@ export default function Nomina() {
       }
       const creada = await addNomina({ ...solicitud, solicitudId: intentoPago.current.clave })
       resetForm()
+      await Promise.all([recargarPrestamos(), recargarTareas()])
       try {
         generarPdfNomina({ ...payload, ...creada, empresa })
         notify.ok('Pago registrado y PDF generado')

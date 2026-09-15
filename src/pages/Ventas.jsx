@@ -25,6 +25,11 @@ export default function Ventas() {
   const { data: clientes, cargando: cargandoClientes } = useLocalData('/clientes')
   const { data: productos, cargando: cargandoProductos } = useLocalData('/productos')
 
+  // Asegurar que siempre sean arrays
+  const ventasSeguras = ventas || []
+  const clientesSeguras = clientes || []
+  const productosSeguras = productos || []
+
   // Funciones de mutación y datos globales del context
   const { empresa, colores, addVenta, updateVenta, deleteVenta, registrarPagoVenta, registrarAbonoGlobal, convertirPedido } = useData()
   const { puede } = useAuth()
@@ -50,6 +55,11 @@ export default function Ventas() {
   const [descuentoGlobal, setDescuentoGlobal] = useState('')    // % sobre toda la venta
   const [guardando, setGuardando] = useState(false)
   const [detalleId, setDetalleId] = useState(null)
+
+  useEffect(() => {
+    const ventaId = Number(new URLSearchParams(location.search).get('ventaId'))
+    if (Number.isSafeInteger(ventaId) && ventaId > 0) setDetalleId(ventaId)
+  }, [location.search])
 
   // Filtros de la lista
   const [periodo, setPeriodo] = useState('mes')     // mes | anio | rango | todo
@@ -78,12 +88,12 @@ export default function Ventas() {
   const [agComentario, setAgComentario] = useState('')
   const [guardandoAg, setGuardandoAg] = useState(false)
 
-  const ventaDetalle = ventas.find((v) => v.id === detalleId)
-  const ventaPago = ventas.find((v) => v.id === pagoVentaId)
-  const ventaEditando = ventas.find((v) => v.id === editandoId)
-  const clienteSel = clientes.find((c) => String(c.id) === String(clienteId))
+  const ventaDetalle = ventasSeguras.find((v) => v.id === detalleId)
+  const ventaPago = ventasSeguras.find((v) => v.id === pagoVentaId)
+  const ventaEditando = ventasSeguras.find((v) => v.id === editandoId)
+  const clienteSel = clientesSeguras.find((c) => String(c.id) === String(clienteId))
   const saldoCliente = clienteSel?.saldoFavor || 0
-  const clienteDeVenta = (v) => clientes.find((c) => String(c.id) === String(v?.clienteId)) || null
+  const clienteDeVenta = (v) => clientesSeguras.find((c) => String(c.id) === String(v?.clienteId)) || null
   // Nombre completo del cliente de una venta: se arma desde el cliente actual
   // (nombre + apellidos) y, si no existe, cae al nombre guardado en la venta.
   const nombreClienteVenta = (v) => {
@@ -429,15 +439,6 @@ export default function Ventas() {
       <div>
         <h2>🛒 Ventas</h2>
         <div className="banner">Cargando ventas...</div>
-      </div>
-    )
-  }
-
-  if (!ventas || !clientes || !productos) {
-    return (
-      <div>
-        <h2>🛒 Ventas</h2>
-        <div className="banner error">No se pudieron cargar los datos necesarios</div>
       </div>
     )
   }

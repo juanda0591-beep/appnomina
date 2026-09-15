@@ -17,6 +17,7 @@ import Costos from './pages/Costos.jsx'
 import Clientes from './pages/Clientes.jsx'
 import Pedidos from './pages/Pedidos.jsx'
 import Ventas from './pages/Ventas.jsx'
+import HistorialPagos from './pages/HistorialPagos.jsx'
 import Empresa from './pages/Empresa.jsx'
 import Usuarios from './pages/Usuarios.jsx'
 import Cuenta from './pages/Cuenta.jsx'
@@ -59,6 +60,7 @@ const links = [
       { to: '/clientes', label: '🧑‍🤝‍🧑 Clientes', pagina: 'clientes' },
       { to: '/pedidos', label: '📝 Pedidos', pagina: 'pedidos' },
       { to: '/ventas', label: '🛒 Ventas', pagina: 'ventas' },
+      { to: '/historial-pagos', label: '💳 Historial de Pagos', pagina: 'ventas' },
     ],
   },
   { to: '/control-dinero', label: '💰 Control de Dinero', pagina: 'control-dinero' },
@@ -212,6 +214,7 @@ export default function App() {
           <Route path="/clientes" element={protegida('clientes', <Clientes />)} />
           <Route path="/pedidos" element={protegida('pedidos', <Pedidos />)} />
           <Route path="/ventas" element={protegida('ventas', <Ventas />)} />
+          <Route path="/historial-pagos" element={protegida('ventas', <HistorialPagos />)} />
           <Route path="/materiales" element={protegida('materiales', <Materiales />)} />
           <Route path="/colores" element={protegida('colores', <Colores />)} />
           <Route path="/cortes-planos" element={protegida('cortes-planos', (

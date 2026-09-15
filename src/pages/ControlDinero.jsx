@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
+import { useLocalData } from '../hooks/useLocalData.js'
 import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
 import { notify, confirmar, confirmarAnulacion } from '../utils/notify.js'
 import Vacio from '../components/Vacio.jsx'
@@ -10,12 +11,18 @@ const CATEGORIAS_GASTO = ['Materiales', 'Servicios', 'Arriendo', 'Transporte', '
 
 const hoy = hoyISO
 const formVacio = () => ({ fecha: hoy(), categoria: '', monto: '', descripcion: '', comprobante: '', comprobanteTipo: '' })
+const POR_PAGINA = 50
+
+function inicioMesISO() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+}
 
 // Etiqueta legible del origen de un movimiento automático
 const ORIGEN_LABEL = { nomina: 'Pago de nómina', prestamo: 'Adelanto' }
 
 export default function ControlDinero() {
-  const { movimientos, addMovimiento, deleteMovimiento, addComprobanteMovimiento } = useData()
+  const { addMovimiento, deleteMovimiento, addComprobanteMovimiento } = useData()
   const { puede } = useAuth()
   const puedeCrear = puede('control-dinero', 'crear')
   const puedeEliminar = puede('control-dinero', 'eliminar')
@@ -25,14 +32,42 @@ export default function ControlDinero() {
   const [formAbierto, setFormAbierto] = useState(false)
   const [guardando, setGuardando] = useState(false)
   const [subiendoId, setSubiendoId] = useState(null) // id del movimiento al que se le sube comprobante
-  const [balance, setBalance] = useState({ ingresos: 0, gastos: 0, balance: 0 })
+  const [pagina, setPagina] = useState(1)
+  const [desde, setDesde] = useState(inicioMesISO)
+  const [hasta, setHasta] = useState(hoy)
 
-  // Balance recalculado en memoria a partir de los movimientos cargados
-  useEffect(() => {
-    const ingresos = movimientos.filter((m) => m.tipo === 'ingreso').reduce((s, m) => s + m.monto, 0)
-    const gastos = movimientos.filter((m) => m.tipo === 'gasto').reduce((s, m) => s + m.monto, 0)
-    setBalance({ ingresos, gastos, balance: ingresos - gastos })
-  }, [movimientos])
+  const endpointMovimientos = useMemo(() => {
+    const params = new URLSearchParams({ pagina: String(pagina), limite: String(POR_PAGINA) })
+    if (desde) params.set('desde', desde)
+    if (hasta) params.set('hasta', hasta)
+    if (tab !== 'balance') params.set('tipo', tab)
+    return `/movimientos?${params}`
+  }, [pagina, desde, hasta, tab])
+
+  const {
+    data: resultado,
+    cargando: cargandoMovimientos,
+    error: errorMovimientos,
+    recargar: recargarMovimientos,
+  } = useLocalData(endpointMovimientos)
+  const {
+    data: balanceRemoto,
+    cargando: cargandoBalance,
+    error: errorBalance,
+    recargar: recargarBalance,
+  } = useLocalData('/movimientos/balance')
+
+  const movimientos = Array.isArray(resultado) ? resultado : (resultado.registros || [])
+  const totalMovimientos = Array.isArray(resultado) ? movimientos.length : (resultado.total || 0)
+  const totalPaginas = Array.isArray(resultado) ? 1 : (resultado.paginas || 1)
+  const paginaActual = Array.isArray(resultado) ? 1 : (resultado.pagina || pagina)
+  const balance = {
+    ingresos: Number(balanceRemoto?.ingresos) || 0,
+    gastos: Number(balanceRemoto?.gastos) || 0,
+    balance: Number(balanceRemoto?.balance) || 0,
+  }
+
+  const recargarTodo = () => Promise.all([recargarMovimientos(), recargarBalance()])
 
   const setField = (field, val) => setForm((f) => ({ ...f, [field]: val }))
 
@@ -72,6 +107,7 @@ export default function ControlDinero() {
     setSubiendoId(movId)
     try {
       await addComprobanteMovimiento(movId, datos)
+      await recargarMovimientos()
       notify.ok('Comprobante adjuntado')
     } catch (err) {
       notify.error('Error al subir el comprobante: ' + err.message)
@@ -97,6 +133,11 @@ export default function ControlDinero() {
     setGuardando(true)
     try {
       await addMovimiento({ ...form, tipo: tab })
+      if (pagina === 1) await recargarTodo()
+      else {
+        setPagina(1)
+        await recargarBalance()
+      }
       resetForm()
       notify.ok(esIngreso ? 'Ingreso registrado' : 'Gasto registrado')
     } catch (err) {
@@ -117,13 +158,8 @@ export default function ControlDinero() {
       .catch((err) => notify.error(err.message))
   }
 
-  // Filtra los movimientos según la pestaña (en balance se muestran todos)
-  const listaActual = useMemo(() => {
-    if (tab === 'balance') return movimientos
-    return movimientos.filter((m) => m.tipo === tab)
-  }, [movimientos, tab])
-
   const categorias = tab === 'ingreso' ? CATEGORIAS_INGRESO : CATEGORIAS_GASTO
+  const cambiarTab = (nuevoTab) => { setTab(nuevoTab); setPagina(1) }
 
   return (
     <div>
@@ -131,13 +167,13 @@ export default function ControlDinero() {
 
       {/* Pestañas */}
       <div className="tabs">
-        <button className={`tab ${tab === 'ingreso' ? 'active' : ''}`} onClick={() => setTab('ingreso')}>
+        <button className={`tab ${tab === 'ingreso' ? 'active' : ''}`} onClick={() => cambiarTab('ingreso')}>
           ⬆️ Ingresos
         </button>
-        <button className={`tab ${tab === 'gasto' ? 'active' : ''}`} onClick={() => setTab('gasto')}>
+        <button className={`tab ${tab === 'gasto' ? 'active' : ''}`} onClick={() => cambiarTab('gasto')}>
           ⬇️ Gastos
         </button>
-        <button className={`tab ${tab === 'balance' ? 'active' : ''}`} onClick={() => setTab('balance')}>
+        <button className={`tab ${tab === 'balance' ? 'active' : ''}`} onClick={() => cambiarTab('balance')}>
           📊 Balance
         </button>
       </div>
@@ -158,6 +194,24 @@ export default function ControlDinero() {
         </div>
       </div>
 
+      <div className="card">
+        <div className="row" style={{ alignItems: 'end' }}>
+          <div style={{ flex: 1 }}>
+            <label htmlFor="movimientos-desde">Desde</label>
+            <input id="movimientos-desde" type="date" value={desde} max={hasta || undefined}
+              onChange={(e) => { setDesde(e.target.value); setPagina(1) }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label htmlFor="movimientos-hasta">Hasta</label>
+            <input id="movimientos-hasta" type="date" value={hasta} min={desde || undefined}
+              onChange={(e) => { setHasta(e.target.value); setPagina(1) }} />
+          </div>
+          <button type="button" className="btn-secondary" onClick={() => { setDesde(''); setHasta(''); setPagina(1) }}>
+            Ver todo
+          </button>
+        </div>
+      </div>
+
       {/* Botón para registrar ingreso / gasto */}
       {tab !== 'balance' && puedeCrear && (
         <div className="form-actions">
@@ -171,14 +225,16 @@ export default function ControlDinero() {
       <div className="card">
         <h3>
           {tab === 'balance' ? 'Historial de movimientos' : tab === 'ingreso' ? 'Ingresos registrados' : 'Gastos registrados'}{' '}
-          ({listaActual.length})
+          ({totalMovimientos})
         </h3>
-        {listaActual.length === 0 && (
+        {(errorMovimientos || errorBalance) && <div className="banner error">{errorMovimientos || errorBalance}</div>}
+        {(cargandoMovimientos || cargandoBalance) && <p className="muted">Cargando movimientos...</p>}
+        {!cargandoMovimientos && movimientos.length === 0 && !errorMovimientos && (
           <Vacio icono="💰" titulo="Aún no hay movimientos">
             Registra un ingreso o gasto para empezar.
           </Vacio>
         )}
-        {listaActual.length > 0 && (
+        {movimientos.length > 0 && (
           <div className="table-wrap">
             <table className="table">
               <thead>
@@ -193,7 +249,7 @@ export default function ControlDinero() {
                 </tr>
               </thead>
               <tbody>
-                {listaActual.map((m) => (
+                {movimientos.map((m) => (
                   <tr key={m.id}>
                     <td>{formatFecha(m.fecha)}</td>
                     <td>
@@ -239,7 +295,13 @@ export default function ControlDinero() {
                             onClick={async () => {
                               const motivo = await confirmarAnulacion('Se eliminará este movimiento de caja.')
                               if (!motivo) return
-                              try { await deleteMovimiento(m.id, motivo) }
+                              try {
+                                await deleteMovimiento(m.id, motivo)
+                                if (movimientos.length === 1 && pagina > 1) {
+                                  setPagina((p) => p - 1)
+                                  await recargarBalance()
+                                } else await recargarTodo()
+                              }
                               catch (e) { notify.error(e.message) }
                             }}
                           >
@@ -256,6 +318,19 @@ export default function ControlDinero() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {totalPaginas > 1 && (
+          <div className="form-actions" style={{ justifyContent: 'space-between' }}>
+            <button type="button" className="btn-secondary" disabled={cargandoMovimientos || paginaActual <= 1}
+              onClick={() => setPagina((p) => Math.max(1, p - 1))}>
+              Anterior
+            </button>
+            <span className="muted small">Página {paginaActual} de {totalPaginas}</span>
+            <button type="button" className="btn-secondary" disabled={cargandoMovimientos || paginaActual >= totalPaginas}
+              onClick={() => setPagina((p) => p + 1)}>
+              Siguiente
+            </button>
           </div>
         )}
       </div>

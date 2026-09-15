@@ -714,15 +714,6 @@ export default function GestionProduccion() {
     )
   }
 
-  if (!empleados || !productos || !tareasProduccion || !ordenesProduccion) {
-    return (
-      <div>
-        <h2>🏭 Gestión de Producción</h2>
-        <div className="banner error">No se pudieron cargar los datos necesarios</div>
-      </div>
-    )
-  }
-
   return (
     <div>
       <h2>🏭 Gestión de Producción</h2>
@@ -775,7 +766,7 @@ export default function GestionProduccion() {
                   }}
                 >
                   <option value="">— Producto —</option>
-                  {productos.map((p) => (
+                  {(productos || []).map((p) => (
                     <option key={p.id} value={p.id}>{p.nombre}</option>
                   ))}
                 </select>

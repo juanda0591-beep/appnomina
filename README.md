@@ -209,4 +209,10 @@ sesiones, reintentos de nómina, ventas, inventario, auditoría y restauración 
 un respaldo descargado. Usa la versión de Node compatible con `better-sqlite3`;
 en este entorno la dependencia instalada corresponde a Node 22.
 
+Con Playwright y su navegador instalados, después de compilar se pueden comprobar
+ambos historiales y el pago de nómina en el navegador:
+`node --test tests/historial-ui.test.mjs`. La prueba crea una base temporal y la
+elimina al terminar. Opcionalmente, `PLAYWRIGHT_MODULE` indica la ruta del paquete,
+`BROWSER_EXECUTABLE` la del navegador y `UI_SCREENSHOT_DIR` dónde guardar capturas.
+
 La moneda está en pesos colombianos (COP); se cambia en `src/utils/format.js`.

@@ -503,6 +503,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_ventas_cliente ON ventas(cliente_id);
   CREATE INDEX IF NOT EXISTS idx_movimientos_fecha ON movimientos(fecha);
   CREATE INDEX IF NOT EXISTS idx_movimientos_tipo ON movimientos(tipo);
+  CREATE INDEX IF NOT EXISTS idx_movimientos_fecha_id ON movimientos(fecha DESC, id DESC);
+  CREATE INDEX IF NOT EXISTS idx_movimientos_tipo_fecha_id ON movimientos(tipo, fecha DESC, id DESC);
   CREATE INDEX IF NOT EXISTS idx_tareas_empleado ON tareas(empleado_id);
   CREATE INDEX IF NOT EXISTS idx_tareas_estado ON tareas(estado);
   CREATE INDEX IF NOT EXISTS idx_nominas_fecha ON nominas(fecha);
