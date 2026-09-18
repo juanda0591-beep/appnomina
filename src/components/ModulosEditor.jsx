@@ -1,4 +1,6 @@
 import { nuevoModulo } from '../utils/despiece.js'
+import { configurarDiseno } from '../utils/construccionMueble.js'
+import { ModuloConfigurable } from './ConfiguracionMueble.jsx'
 
 // Editor de módulos: cada columna del mueble se configura por separado
 // (puerta, entrepaños a distintas alturas, cajones). Los cambios son en vivo.
@@ -11,13 +13,13 @@ export default function ModulosEditor({ f, setModulos }) {
   const editarMod = (idx, campo, val) =>
     setModulos((ms) => ms.map((m, i) => (i === idx ? { ...m, [campo]: val } : m)))
 
-  const agregarModulo = () => setModulos((ms) => [...ms, nuevoModulo()])
+  const agregarModulo = () => setModulos((ms) => [...ms, f.construccionVersion === 2 ? configurarDiseno({ ...f, modulos: [nuevoModulo()] }).modulos[0] : nuevoModulo()])
   const quitarModulo = (idx) => setModulos((ms) => ms.length > 1 ? ms.filter((_, i) => i !== idx) : ms)
 
   // Agrega un entrepaño a media altura del hueco disponible por defecto (en cm).
   const agregarEntrepano = (idx) => setModulos((ms) => ms.map((m, i) => {
     if (i !== idx) return m
-    const zona = m.cajones > 0 ? n(m.zonaCajones) : 0
+    const zona = m.cajones > 0 && !(n(m.anchoCajon) > 0) ? n(m.zonaCajones) + n(m.configuracionCajon?.inicio) : 0
     const nueva = Math.round((zona + (altoInterior - zona) / 2) * 10) / 10
     return { ...m, alturas: [...m.alturas, nueva].sort((a, b) => a - b) }
   }))
@@ -36,7 +38,9 @@ export default function ModulosEditor({ f, setModulos }) {
       </div>
       <div className="modulos-cards">
         {f.modulos.map((m, idx) => (
-          <ModuloCard key={idx} idx={idx} m={m} api={api} puedeQuitar={f.modulos.length > 1} />
+          f.construccionVersion === 2
+            ? <ModuloConfigurable key={idx} f={f} idx={idx} m={m} api={api} puedeQuitar={f.modulos.length > 1} />
+            : <ModuloCard key={idx} idx={idx} m={m} api={api} puedeQuitar={f.modulos.length > 1} />
         ))}
       </div>
     </div>

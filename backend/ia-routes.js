@@ -1,18 +1,21 @@
 import { Router } from 'express'
 import { generarMaterial, ErrorIA } from './ia-materiales.js'
 import { generarProducto } from './ia-productos.js'
+import { generarPlanos } from './ia-planos.js'
 
-export function rutasIA({ db, permisoRequired, generar = generarMaterial, generarProd = generarProducto }) {
+export function rutasIA({ db, permisoRequired, generar = generarMaterial, generarProd = generarProducto, generarPlano = generarPlanos }) {
   const router = Router()
   const solicitudes = new Map()
   let activas = 0
   const permisosMaterial = [permisoRequired('materiales', 'ver'), permisoRequired('materiales', 'crear')]
   const permisosProducto = [permisoRequired('productos', 'ver'), permisoRequired('productos', 'crear'), permisoRequired('materiales', 'ver')]
+  const permisosPlanos = [permisoRequired('cortes-planos', 'ver')]
   const estado = (req, res) => {
     res.json({ configurada: Boolean(process.env.OPENAI_API_KEY && process.env.OPENAI_MODEL) })
   }
   router.get('/estado', ...permisosMaterial, estado)
   router.get('/producto/estado', ...permisosProducto, estado)
+  router.get('/planos/estado', ...permisosPlanos, estado)
   const preparar = (generador) => async (req, res) => {
     const ahora = Date.now()
     for (const [usuario, registro] of solicitudes) {
@@ -27,7 +30,7 @@ export function rutasIA({ db, permisoRequired, generar = generarMaterial, genera
     solicitudes.set(req.usuario, registro)
     activas++
     try {
-      res.json(await generador(req.body?.descripcion))
+      res.json(await generador(req.body?.descripcion, req.body))
     } catch (error) {
       res.status(error instanceof ErrorIA ? error.status : 500).json({
         error: error instanceof ErrorIA ? error.message : 'No se pudo preparar el borrador.',
@@ -49,5 +52,6 @@ export function rutasIA({ db, permisoRequired, generar = generarMaterial, genera
     const productos = db.prepare('SELECT id, nombre FROM productos').all()
     return generarProd({ descripcion, materiales, procesosGlobales, productos })
   }))
+  router.post('/planos', ...permisosPlanos, preparar((descripcion, body) => generarPlano(body)))
   return router
 }

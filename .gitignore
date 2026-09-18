@@ -6,3 +6,8 @@ backend/nomina.db
 backend/nomina.db-wal
 backend/nomina.db-shm
 backend/respaldos/
+backend/whatsapp-privado/
+whatsapp-privado/
+.npm-cache/
+.node-gyp/
+artifacts/

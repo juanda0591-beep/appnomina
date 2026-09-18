@@ -18,8 +18,8 @@ async function http(path, options = {}) {
     throw new Error('Sesión expirada')
   }
   if (!res.ok) {
-    const msg = await res.text().catch(() => '')
-    throw new Error(`Error ${res.status}: ${msg}`)
+    const datos = await res.json().catch(() => null)
+    throw new Error(typeof datos?.error === 'string' ? datos.error : `No se pudo completar la solicitud (error ${res.status}).`)
   }
   return res.status === 204 ? null : res.json()
 }

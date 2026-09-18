@@ -1,0 +1,54 @@
+.mueble3d { border: 1px solid #cddcde; border-radius: 6px; overflow: hidden; background: #fff; margin: 16px 0; min-width: 0; }
+.mueble3d-header, .mueble3d-header > div, .mueble3d-toolbar, .mueble3d-buttons { display: flex; align-items: center; gap: 8px; }
+.mueble3d-header { justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid #d4dfe2; color: #344e57; flex-wrap: wrap; }
+.mueble3d-header strong { font-size: 14px; }
+.mueble3d-header span { color: #6b7f86; font-size: 11px; margin-left: 8px; }
+.mueble3d-toolbar { padding: 5px 10px; border-bottom: 1px solid #d4dfe2; flex-wrap: wrap; gap: 3px; }
+.mueble3d-toolbar output { width: 42px; text-align: center; font-size: 12px; color: #546c76; }
+.mueble3d-cameras { display: flex; border-left: 1px solid #d4dfe2; margin-left: 8px; padding-left: 8px; gap: 4px; }
+.mueble3d-cameras button { padding: 7px 9px; border: 1px solid #d4dfe2; background: #fff; color: #546c76; border-radius: 4px; font-size: 12px; }
+.mueble3d-cameras button:hover { background: #e7f0f1; }
+.mueble3d-body { display: grid; grid-template-columns: minmax(0, 1fr) 215px; }
+.mueble3d-stage { position: relative; height: 530px; min-width: 0; background: #ecf2f2; }
+.mueble3d-stage canvas { display: block; width: 100%; height: 100%; outline-offset: -3px; touch-action: none; cursor: grab; }
+.mueble3d-stage canvas:active { cursor: grabbing; }
+.mueble3d-stage canvas:focus-visible { outline: 2px solid #087f8c; }
+.mueble3d-dim { position: absolute; bottom: 14px; left: 14px; font-size: 12px; color: #536b75; pointer-events: none; background: #ffffffc4; padding: 6px 9px; border-radius: 4px; }
+.mueble3d-controls { border-left: 1px solid #d4dfe2; padding: 6px 14px 14px; overflow: auto; max-height: 530px; }
+.mueble3d-controls label { display: block; font-size: 12px; color: #536b75; margin: 10px 0; }
+.mueble3d-controls select { width: 100%; font-size: 13px; padding: 8px 6px; border-radius: 4px; }
+.mueble3d-controls .mueble3d-check { display: flex; align-items: center; gap: 8px; }
+.mueble3d-check input { width: 15px; height: 15px; margin: 0; accent-color: #087f8c; }
+.mueble3d-controls input[type="range"] { width: 100%; padding: 0; accent-color: #087f8c; margin: 12px 0 4px; }
+.mueble3d-explode output { float: right; font-weight: normal; }
+.mueble3d-detail { margin-top: 16px; border-top: 1px solid #d4dfe2; padding-top: 14px; }
+.mueble3d-detail strong, .mueble3d-detail span { display: block; font-size: 12px; color: #344e57; margin-bottom: 6px; overflow-wrap: anywhere; }
+.mueble3d-note { font-size: 11px; color: #788b92; line-height: 1.5; margin-top: 20px; }
+.mueble3d-footer { padding: 9px 12px; border-top: 1px solid #d4dfe2; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 11px; color: #647c84; }
+.mueble3d-error { position: absolute; inset: 0; display: flex; justify-content: center; align-items: center; flex-direction: column; padding: 24px; background: #f3f6f6; text-align: center; font-size: 13px; }
+.mueble3d-empty { display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 250px; padding: 30px; text-align: center; color: #6b828b; }
+.mueble3d.fullscreen { position: fixed; inset: 14px; z-index: 90; display: flex; flex-direction: column; margin: 0; box-shadow: 0 0 0 30px rgba(0,0,0,.4); }
+.mueble3d.fullscreen .mueble3d-body { flex: 1; min-height: 0; }
+.mueble3d.fullscreen .mueble3d-stage { height: 100%; }
+.mueble3d.compacto .mueble3d-body { grid-template-columns: minmax(0, 1fr); }
+.mueble3d.compacto .mueble3d-stage { height: 400px; }
+.mueble3d.compacto .mueble3d-controls { border-left: 0; border-top: 1px solid #d4dfe2; display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.mueble3d.compacto .mueble3d-controls { max-height: none; }
+.mueble3d.fullscreen .mueble3d-controls { max-height: calc(100vh - 165px); }
+.mueble3d.compacto .mueble3d-header span { display: none; }
+.mueble3d.compacto .mueble3d-note { margin: 6px 0; }
+.mueble3d.compacto.fullscreen .mueble3d-body { grid-template-columns: minmax(0, 1fr) 240px; }
+.mueble3d.compacto.fullscreen .mueble3d-stage { height: 100%; }
+.mueble3d.compacto.fullscreen .mueble3d-controls { display: block; }
+@media (max-width: 720px) {
+  .mueble3d-controls, .mueble3d.fullscreen .mueble3d-controls { max-height: none; }
+  .mueble3d-body, .mueble3d.compacto.fullscreen .mueble3d-body { grid-template-columns: minmax(0, 1fr); }
+  .mueble3d-stage { height: 400px; }
+  .mueble3d-controls { border-left: 0; border-top: 1px solid #d4dfe2; display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+  .mueble3d-controls > * { min-width: 0; }
+  .mueble3d-controls select { font-size: 16px; }
+  .mueble3d-header span { display: none; }
+  .mueble3d.fullscreen { inset: 5px; }
+  .mueble3d.fullscreen .mueble3d-body { overflow: auto; display: block; }
+  .mueble3d.fullscreen .mueble3d-stage { height: 55vh; }
+}

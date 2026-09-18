@@ -1,41 +1,51 @@
-import { useState, useMemo, useRef } from 'react'
-import { generarDespiece, nuevoModulo } from '../utils/despiece.js'
-import { cmAMm, fmtCm } from '../utils/unidades.js'
+import { lazy, Suspense, useState, useMemo, useRef } from 'react'
+import { generarDespiece, nuevoModulo, paramsParaDespiece } from '../utils/despiece.js'
+import { fmtCm } from '../utils/unidades.js'
 import VistaFrontal from './VistaFrontal.jsx'
-import VistaIso from './VistaIso.jsx'
 import ModulosEditor from './ModulosEditor.jsx'
+import { ConfiguracionCarcasa } from './ConfiguracionMueble.jsx'
+import { configurarDiseno } from '../utils/construccionMueble.js'
+import VistasTecnicas from './VistasTecnicas.jsx'
+import { confirmar } from '../utils/notify.js'
+import FabricacionMDF from './FabricacionMDF.jsx'
+import { editarPanelDiseno } from '../utils/fabricacionMDF.js'
+import { construirMueble } from '../utils/construccionMueble.js'
+const VistaMueble3D = lazy(() => import('./VistaMueble3D.jsx'))
 
-const inicial = (espesor) => ({
+const inicial = (espesor) => configurarDiseno({
   alto: '', ancho: '', fondo: '', espesor: espesor || '18',
   gap: '3', holguraFondo: '10',
   armado: 'laterales-completos', tipoFondo: 'superpuesto',
   modulos: [nuevoModulo()],
 })
 
-// Convierte el estado del formulario (medidas en cm) a los parámetros del motor,
-// que trabaja en mm. Espesor, gap y holgura ya están en mm.
-const paramsParaDespiece = (f) => ({
-  ancho: cmAMm(f.ancho), alto: cmAMm(f.alto), fondo: cmAMm(f.fondo),
-  espesor: Number(f.espesor) || 18, gap: Number(f.gap) || 0,
-  holguraFondo: Number(f.holguraFondo) || 0,
-  armado: f.armado, tipoFondo: f.tipoFondo,
-  modulos: f.modulos.map((m) => ({
-    entrepanos: m.alturas.length, cajones: m.cajones,
-    zonaCajones: cmAMm(m.zonaCajones), puerta: m.puerta,
-    anchoCajon: cmAMm(m.anchoCajon), ladoCajon: m.ladoCajon,
-  })),
-})
-
-export default function GeneradorDespiece({ espesorInicial, onGenerar }) {
-  const [f, setF] = useState(() => inicial(espesorInicial))
+export default function GeneradorDespiece({ espesorInicial, onGenerar, disenoInicial, onModificar }) {
+  const [f, setF] = useState(() => disenoInicial || inicial(espesorInicial))
   const stageRef = useRef(null) // lienzo Konva de la vista activa (para exportar)
-  const set = (campo, val) => setF((prev) => ({ ...prev, [campo]: val }))
-  const setModulos = (fn) => setF((prev) => ({ ...prev, modulos: fn(prev.modulos) }))
+  const set = (campo, val) => { onModificar?.(); setF((prev) => ({ ...prev, [campo]: val })) }
+  const setModulos = (fn) => { onModificar?.(); setF((prev) => {
+    const modulos = fn(prev.modulos)
+    if (!prev.fabricacion || modulos.length >= prev.modulos.length) return { ...prev, modulos }
+    const reubicar = (mapa) => Object.fromEntries(Object.entries(mapa || {}).flatMap(([key, valor]) => {
+      const partes = key.split('|'), anterior = Number(partes[1])
+      if (partes.length !== 3 || partes[1] === 'global' || !Number.isInteger(anterior)) return [[key, valor]]
+      const nuevo = modulos.indexOf(prev.modulos[anterior])
+      if (nuevo < 0) return []
+      partes[1] = String(nuevo); return [[partes.join('|'), valor]]
+    }))
+    return { ...prev, modulos, fabricacion: { ...prev.fabricacion, perfiles: reubicar(prev.fabricacion.perfiles), ajustes: reubicar(prev.fabricacion.ajustes) } }
+  }) }
+  const cambiarCompleto = (nuevo) => { onModificar?.(); setF(nuevo) }
+  const editarPieza = (clave, datos) => {
+    const nuevo = editarPanelDiseno(f, clave, datos), c = construirMueble(nuevo)
+    if (c.avisos.length) throw new Error(c.avisos[0])
+    cambiarCompleto(nuevo)
+  }
 
   const preview = useMemo(() => generarDespiece(paramsParaDespiece(f)), [f])
   const totalTipos = preview.piezas.length
   const totalUnidades = preview.piezas.reduce((s, p) => s + p.cantidad, 0)
-  const listo = f.ancho && f.alto && f.fondo && preview.piezas.length > 0
+  const listo = f.ancho && f.alto && f.fondo && preview.piezas.length > 0 && preview.avisos.length === 0
 
   // Al generar, captura la vista (2D o 3D) como PNG para incrustarla en el PDF.
   const aplicar = () => {
@@ -44,7 +54,7 @@ export default function GeneradorDespiece({ espesorInicial, onGenerar }) {
     try {
       if (stageRef.current) imagen = stageRef.current.toDataURL({ pixelRatio: 2 })
     } catch { /* si el lienzo no está listo, se exporta sin imagen */ }
-    onGenerar(preview.piezas, imagen)
+    onGenerar(preview.piezas, imagen, f)
   }
 
   return (
@@ -54,12 +64,19 @@ export default function GeneradorDespiece({ espesorInicial, onGenerar }) {
         y el despiece se actualizan en vivo. Al generar, podrás editar la tabla.
       </p>
       <GeneradorForm f={f} set={set} />
+      {f.construccionVersion === 2 && <FabricacionMDF f={f} cambiar={cambiarCompleto} />}
+      {f.construccionVersion === 2 ? <ConfiguracionCarcasa f={f} set={set} /> : <div className="banner">
+        <p>Este diseño conserva las reglas de armado anteriores.</p>
+        <button type="button" className="btn-secondary" onClick={async () => {
+          if (!(await confirmar('Se habilitarán nuevas reglas para cajas de cajón, frentes y sobresalientes. Revisa las medidas antes de generar y guardar una nueva versión.', { titulo: 'Adaptar diseño', textoOk: 'Adaptar', peligro: false }))) return
+          onModificar?.(); setF(configurarDiseno(f))
+        }}>Personalizar construcción</button></div>}
       <div className="generador-layout">
         <div style={{ flex: 1, minWidth: 300 }}>
           <ModulosEditor f={f} setModulos={setModulos} />
         </div>
-        <div style={{ flex: '0 0 auto' }}>
-          <PanelVista f={f} setModulos={setModulos} stageRef={stageRef} />
+        <div style={{ flex: '1 1 480px', minWidth: 0 }}>
+          <PanelVista f={f} setModulos={setModulos} stageRef={stageRef} editarPieza={editarPieza} />
         </div>
       </div>
       <PreviewGenerador {...{ preview, totalTipos, totalUnidades, listo, aplicar }} />
@@ -67,10 +84,9 @@ export default function GeneradorDespiece({ espesorInicial, onGenerar }) {
   )
 }
 
-// Panel de visualización: alterna entre alzado 2D (editable) y vista 3D isométrica.
-function PanelVista({ f, setModulos, stageRef }) {
-  const [vista, setVista] = useState('2d')
-  const [lado, setLado] = useState('der')
+// El mismo visor 3D se usa en el generador y al reabrir un proyecto guardado.
+function PanelVista({ f, setModulos, stageRef, editarPieza }) {
+  const [vista, setVista] = useState(f.construccionVersion === 2 ? '3d' : '2d')
   return (
     <div className="card" style={{ background: '#f8fafc' }}>
       <div className="tabs" style={{ marginBottom: 10 }}>
@@ -82,23 +98,11 @@ function PanelVista({ f, setModulos, stageRef }) {
         </button>
       </div>
       {vista === '2d' ? (
-        <VistaFrontal f={f} setModulos={setModulos} embebido stageRef={stageRef} />
+        f.construccionVersion === 2 ? <VistasTecnicas diseno={f} /> : <VistaFrontal f={f} setModulos={setModulos} embebido stageRef={stageRef} />
       ) : (
-        <div>
-          <div className="tabs" style={{ marginBottom: 8 }}>
-            <button className={lado === 'izq' ? 'tab active' : 'tab'} onClick={() => setLado('izq')}>
-              ◀ Desde la izquierda
-            </button>
-            <button className={lado === 'der' ? 'tab active' : 'tab'} onClick={() => setLado('der')}>
-              Desde la derecha ▶
-            </button>
-          </div>
-          <VistaIso f={f} lado={lado} stageRef={stageRef} />
-          <p className="muted small" style={{ marginTop: 8 }}>
-            Proyección 3D del mueble. El frente muestra puertas y cajones; el volumen
-            indica la profundidad ({f.fondo || '—'} cm).
-          </p>
-        </div>
+        <Suspense fallback={<p className="muted">Cargando visor 3D...</p>}>
+          <VistaMueble3D diseno={f} compacto onEditarPieza={f.construccionVersion === 2 ? editarPieza : undefined} />
+        </Suspense>
       )}
     </div>
   )
@@ -108,7 +112,7 @@ function Campo({ label, valor, onChange, min = '0', step = '1', hint }) {
   return (
     <div style={{ flex: 1, minWidth: 120 }}>
       <label>{label}</label>
-      <input type="number" min={min} step={step} value={valor} onChange={(e) => onChange(e.target.value)} />
+      <input aria-label={label} type="number" min={min} step={step} value={valor} onChange={(e) => onChange(e.target.value)} />
       {hint && <span className="muted small">{hint}</span>}
     </div>
   )
@@ -126,13 +130,13 @@ function GeneradorForm({ f, set }) {
       <div className="row">
         <Campo label="Holgura puerta (mm)" valor={f.gap} onChange={(v) => set('gap', v)} step="0.5" />
         <Campo label="Holgura fondo (mm)" valor={f.holguraFondo} onChange={(v) => set('holguraFondo', v)} />
-        <div style={{ flex: 1, minWidth: 180 }}>
+        {f.construccionVersion !== 2 && <div style={{ flex: 1, minWidth: 180 }}>
           <label>Método de armado</label>
           <select value={f.armado} onChange={(e) => set('armado', e.target.value)}>
             <option value="laterales-completos">Laterales completos</option>
             <option value="techo-piso-cubren">Techo y piso cubren</option>
           </select>
-        </div>
+        </div>}
         <div style={{ flex: 1, minWidth: 150 }}>
           <label>Fondo (trasera)</label>
           <select value={f.tipoFondo} onChange={(e) => set('tipoFondo', e.target.value)}>

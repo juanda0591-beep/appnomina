@@ -4,6 +4,8 @@ import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { migrarNomina } from './nomina.js'
 import { instalarAuditoria } from './auditoria.js'
+import { migrarPortal } from './portal.js'
+import { migrarWhatsApp } from './whatsapp.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // Ruta de la base de datos: por defecto nomina.db junto a este archivo.
@@ -666,6 +668,11 @@ const addCol = (tabla, col, ddl) => {
   const cols = db.prepare(`PRAGMA table_info(${tabla})`).all()
   if (!cols.some((c) => c.name === col)) db.exec(`ALTER TABLE ${tabla} ADD COLUMN ${ddl}`)
 }
+addCol('planos_corte', 'proyecto_json', 'proyecto_json TEXT')
+addCol('producto_piezas', 'espesor', 'espesor REAL')
+addCol('planos_corte', 'raiz_id', 'raiz_id INTEGER')
+addCol('planos_corte', 'revision', 'revision INTEGER NOT NULL DEFAULT 1')
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_planos_revision ON planos_corte(raiz_id, revision)')
 addCol('ordenes_produccion', 'variante_id', 'variante_id INTEGER')
 addCol('ordenes_produccion', 'color_nombre', 'color_nombre TEXT')
 addCol('producto_movimientos', 'variante_id', 'variante_id INTEGER')
@@ -735,5 +742,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS sesiones (
 CREATE INDEX IF NOT EXISTS sesiones_usuario ON sesiones(usuario_id);`)
 
 instalarAuditoria(db)
+migrarPortal(db)
+migrarWhatsApp(db)
 
 export default db

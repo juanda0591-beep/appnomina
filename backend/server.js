@@ -18,8 +18,12 @@ import {
   eliminarUsuario,
   resetPassword,
 } from './auth.js'
-import { optimizarCorte } from './corte.js'
+import { optimizarCorte, optimizarLote } from './corte.js'
+import { guardarProyectoCorte } from './planos.js'
+import { validarPiezas } from '../src/utils/proyectoCorte.js'
 import { rutasIA } from './ia-routes.js'
+import { rutasPortal, rutasPortalAdmin } from './portal.js'
+import { rutasWhatsApp, encolarPedidoWhatsApp } from './whatsapp.js'
 import { registrarNomina, anularNomina, ErrorNomina } from './nomina.js'
 import { auditarSolicitud, consultarAuditoria } from './auditoria.js'
 import { gestorRespaldos, verificarRespaldo, ErrorRespaldo } from './respaldos.js'
@@ -45,11 +49,19 @@ if (allowedOrigins.length > 0) {
 // Confía en el proxy (Caddy/Nginx) para leer la IP real del cliente (X-Forwarded-For)
 app.set('trust proxy', 1)
 
+app.use('/api/portal', express.json({ limit: '64kb' }), (err, req, res, next) => {
+  if (!err) return next()
+  res.status(err.status === 413 ? 413 : 400).json({ error: 'La solicitud es demasiado grande o no tiene un formato válido.' })
+})
 app.use(express.json({ limit: '20mb' })) // amplio para logo y comprobantes en base64
 
 seedUsuario() // crea el usuario admin la primera vez
+// Portal con sesiones exclusivas de clientes; nunca reutiliza la autenticación interna.
+app.use('/api/portal', rutasPortal(db))
 app.use(authRequired) // protege todas las rutas /api excepto /api/login
 app.use(auditarSolicitud)
+app.use('/api/portal-admin', rutasPortalAdmin(db, adminRequired))
+app.use('/api/whatsapp', rutasWhatsApp(db, adminRequired))
 app.use('/api/ia', rutasIA({ db, permisoRequired }))
 
 const PORT = process.env.PORT || 3001
@@ -429,6 +441,7 @@ function movimientoSalida(m) {
 app.get('/api/productos', permisoAnyRequired([
   ['productos', 'ver'],
   ['nomina', 'ver'],
+  ['cortes-planos', 'ver'],
 ]), (req, res) => {
   const productos = db.prepare('SELECT * FROM productos ORDER BY nombre').all()
   res.json(productos.map(productoConProcesos))
@@ -760,6 +773,7 @@ function laminaSalida(l) {
 
 function piezaSalida(p) {
   return {
+    ...(p.espesor == null ? {} : { espesor: p.espesor }),
     id: p.id,
     productoId: p.producto_id,
     nombre: p.nombre,
@@ -834,15 +848,17 @@ app.get('/api/productos/:id/piezas', permisoAnyRequired([
 // Reemplaza el despiece completo del producto (recibe el array de piezas).
 app.put('/api/productos/:id/piezas', permisoRequired('cortes-planos', 'editar'), (req, res) => {
   const { id } = req.params
-  const { piezas = [] } = req.body
+  let { piezas = [] } = req.body
   const producto = db.prepare('SELECT id FROM productos WHERE id = ?').get(id)
   if (!producto) return res.status(404).json({ error: 'Producto no encontrado' })
+  try { piezas = validarPiezas(piezas) }
+  catch (error) { return res.status(400).json({ error: error.message }) }
 
   const guardar = db.transaction(() => {
     db.prepare('DELETE FROM producto_piezas WHERE producto_id = ?').run(id)
     const insert = db.prepare(
-      `INSERT INTO producto_piezas (producto_id, nombre, ancho, alto, cantidad, material_id, canto, permite_rotar, orden)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO producto_piezas (producto_id, nombre, ancho, alto, cantidad, material_id, canto, permite_rotar, orden, espesor)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     piezas.forEach((p, i) => {
       if (!p.nombre || !p.nombre.trim()) return
@@ -850,7 +866,7 @@ app.put('/api/productos/:id/piezas', permisoRequired('cortes-planos', 'editar'),
         id, p.nombre.trim(), Number(p.ancho) || 0, Number(p.alto) || 0,
         Math.max(1, Number(p.cantidad) || 1),
         p.materialId || null, (p.canto || '').trim() || null,
-        p.permiteRotar === false || p.permiteRotar === 0 ? 0 : 1, i
+        p.permiteRotar === false || p.permiteRotar === 0 ? 0 : 1, i, p.espesor ?? null
       )
     })
   })
@@ -871,19 +887,20 @@ app.post('/api/cortes/calcular', permisoRequired('cortes-planos', 'ver'), (req, 
   if (!lamina || !(Number(lamina.ancho) > 0) || !(Number(lamina.largo) > 0)) {
     return res.status(400).json({ error: 'Debes indicar las medidas de la lámina' })
   }
-  if (!piezas.length) return res.status(400).json({ error: 'No hay piezas para optimizar' })
-  const resultado = optimizarCorte(piezas, lamina, opciones)
-  res.json(resultado)
+  if (!Array.isArray(piezas) || !piezas.length) return res.status(400).json({ error: 'No hay piezas para optimizar' })
+  try { res.json(optimizarLote(piezas, lamina, opciones, req.body.laminasPorEspesor)) }
+  catch (error) { res.status(400).json({ error: error.message }) }
 })
 
 // ---- Planos guardados ----
 app.get('/api/planos-corte', permisoRequired('cortes-planos', 'ver'), (req, res) => {
   const planos = db.prepare(
-    'SELECT id, nombre, origen, origen_id, desperdicio_pct, creado FROM planos_corte ORDER BY id DESC'
+    'SELECT id, nombre, origen, origen_id, desperdicio_pct, creado, raiz_id, revision, proyecto_json IS NOT NULL AS editable FROM planos_corte ORDER BY id DESC'
   ).all()
   res.json(planos.map((p) => ({
     id: p.id, nombre: p.nombre, origen: p.origen, origenId: p.origen_id,
     desperdicioPct: p.desperdicio_pct, creado: p.creado,
+    raizId: p.raiz_id || p.id, revision: p.revision, editable: !!p.editable,
   })))
 })
 
@@ -894,20 +911,15 @@ app.get('/api/planos-corte/:id', permisoRequired('cortes-planos', 'ver'), (req, 
     id: p.id, nombre: p.nombre, origen: p.origen, origenId: p.origen_id,
     desperdicioPct: p.desperdicio_pct, creado: p.creado,
     resultado: JSON.parse(p.resultado_json),
+    proyecto: p.proyecto_json ? JSON.parse(p.proyecto_json) : null,
+    raizId: p.raiz_id || p.id, revision: p.revision,
   })
 })
 
-app.post('/api/planos-corte', permisoRequired('cortes-planos', 'crear'), (req, res) => {
-  const { nombre, origen = 'manual', origenId = null, resultado, desperdicioPct = 0 } = req.body
-  if (!resultado) return res.status(400).json({ error: 'Falta el resultado del cálculo' })
-  const r = db.prepare(
-    `INSERT INTO planos_corte (nombre, origen, origen_id, resultado_json, desperdicio_pct, creado)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(
-    (nombre || '').trim() || 'Plano sin nombre', origen, origenId || null,
-    JSON.stringify(resultado), Number(desperdicioPct) || 0, new Date().toISOString()
-  )
-  res.json({ id: r.lastInsertRowid, ok: true })
+app.post('/api/planos-corte', (req, res, next) =>
+  permisoRequired('cortes-planos', req.body.proyectoId != null ? 'editar' : 'crear')(req, res, next), (req, res) => {
+  try { res.json(guardarProyectoCorte(db, req.body)) }
+  catch (error) { res.status(error.status || 400).json({ error: error.message }) }
 })
 
 app.delete('/api/planos-corte/:id', permisoRequired('cortes-planos', 'eliminar'), (req, res) => {
@@ -2669,6 +2681,9 @@ app.delete('/api/clientes/:id', permisoRequired('clientes', 'eliminar'), (req, r
   // ese ingreso huérfano en Control de Dinero. Se bloquea para no descuadrar la caja.
   const anticipos = db.prepare('SELECT COUNT(*) c FROM cliente_anticipos WHERE cliente_id = ?').get(cliente.id)
   if (anticipos.c > 0) return res.status(400).json({ error: 'No se puede eliminar: el cliente tiene anticipos registrados.' })
+  if (db.prepare('SELECT id FROM portal_cuentas WHERE cliente_id = ?').get(cliente.id)) {
+    return res.status(409).json({ error: 'Este cliente tiene una cuenta mayorista. Suspéndela desde Portal mayorista para conservar su historial.' })
+  }
   db.prepare('DELETE FROM clientes WHERE id = ?').run(cliente.id) // pedidos (sin venta) caen por quedar sueltos
   res.json({ ok: true })
 })
@@ -2735,6 +2750,7 @@ app.delete('/api/clientes/:clienteId/anticipos/:anticipoId', permisoRequired('cl
 
 // ============ PEDIDOS (encargos del cliente) ============
 function pedidoSalida(p) {
+  const portal = db.prepare('SELECT direccion, municipio, telefono FROM portal_pedidos WHERE pedido_id = ?').get(p.id)
   const items = db.prepare('SELECT * FROM pedido_items WHERE pedido_id = ? ORDER BY id ASC').all(p.id).map((it) => ({
     id: it.id,
     productoId: it.producto_id,
@@ -2753,6 +2769,8 @@ function pedidoSalida(p) {
     id: p.id,
     clienteId: p.cliente_id,
     clienteNombre: p.cliente_nombre || '',
+    origen: portal ? 'portal' : 'interno',
+    entregaPortal: portal || null,
     estado: p.estado,
     atrasado,
     fechaEntrega: p.fecha_entrega || '',
@@ -2828,6 +2846,9 @@ app.put('/api/pedidos/:id', permisoRequired('pedidos', 'editar'), (req, res) => 
   if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' })
   if (pedido.estado === 'entregado') return res.status(400).json({ error: 'Un pedido ya convertido en venta no se puede editar.' })
   const { clienteId, fechaEntrega, comentario, items } = req.body
+  if (db.prepare('SELECT id FROM portal_pedidos WHERE pedido_id = ?').get(pedido.id) && Number(clienteId) !== pedido.cliente_id) {
+    return res.status(409).json({ error: 'Un pedido del portal debe conservar su cliente original.' })
+  }
   const cliente = clienteId ? db.prepare('SELECT * FROM clientes WHERE id = ?').get(clienteId) : null
   const itemsValidos = (items || []).filter((it) => (Number(it.cantidad) || 0) > 0)
   if (itemsValidos.length === 0) return res.status(400).json({ error: 'Agrega al menos un producto al pedido' })
@@ -2837,6 +2858,7 @@ app.put('/api/pedidos/:id', permisoRequired('pedidos', 'editar'), (req, res) => 
     const total = insertarItems('pedido_items', 'pedido_id', pedido.id, itemsValidos)
     db.prepare('UPDATE pedidos SET cliente_id = ?, cliente_nombre = ?, fecha_entrega = ?, comentario = ?, total = ?, actualizado = ? WHERE id = ?')
       .run(clienteId || null, cliente ? `${cliente.nombre || ''} ${cliente.apellidos || ''}`.trim() : '', fechaEntrega || null, (comentario || '').trim(), total, ahora, pedido.id)
+    if ((pedido.fecha_entrega || '') !== (fechaEntrega || '')) encolarPedidoWhatsApp(db, pedido.id, 'fecha')
   })
   actualizar()
   res.json(pedidoSalida(db.prepare('SELECT * FROM pedidos WHERE id = ?').get(pedido.id)))
@@ -2846,7 +2868,10 @@ app.delete('/api/pedidos/:id', permisoRequired('pedidos', 'eliminar'), (req, res
   const pedido = db.prepare('SELECT * FROM pedidos WHERE id = ?').get(req.params.id)
   if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' })
   if (pedido.estado === 'entregado') return res.status(400).json({ error: 'Un pedido ya convertido en venta no se puede eliminar.' })
-  db.prepare('DELETE FROM pedidos WHERE id = ?').run(pedido.id) // items caen por FK
+  db.transaction(() => {
+    encolarPedidoWhatsApp(db, pedido.id, 'anulado')
+    db.prepare('DELETE FROM pedidos WHERE id = ?').run(pedido.id)
+  })()
   res.json({ ok: true })
 })
 
@@ -3062,6 +3087,10 @@ app.post('/api/pedidos/:id/convertir', permisoRequired('ventas', 'crear'), (req,
   const pedido = db.prepare('SELECT * FROM pedidos WHERE id = ?').get(req.params.id)
   if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' })
   if (pedido.estado === 'entregado') return res.status(400).json({ error: 'Este pedido ya fue convertido en venta.' })
+  if (db.prepare('SELECT id FROM portal_pedidos WHERE pedido_id = ?').get(pedido.id)
+      && req.body.clienteId != null && Number(req.body.clienteId) !== pedido.cliente_id) {
+    return res.status(409).json({ error: 'Un pedido del portal debe conservar su cliente original.' })
+  }
   // Ítems: los editados desde el formulario de venta si vienen; si no, los del pedido.
   const itemsBody = (req.body.items || []).filter((it) => (Number(it.cantidad) || 0) > 0)
   const items = itemsBody.length > 0 ? itemsBody : db.prepare('SELECT * FROM pedido_items WHERE pedido_id = ?').all(pedido.id).map((it) => ({
@@ -3090,6 +3119,7 @@ app.post('/api/pedidos/:id/convertir', permisoRequired('ventas', 'crear'), (req,
     })
     db.prepare("UPDATE pedidos SET estado = 'entregado', venta_id = ?, actualizado = ? WHERE id = ?")
       .run(resultado.ventaId, new Date().toISOString(), pedido.id)
+    encolarPedidoWhatsApp(db, pedido.id, 'venta')
   })
   try {
     convertir()
@@ -3424,6 +3454,7 @@ app.get('/api/historial-pagos', permisoRequired('ventas', 'ver'), (req, res) => 
 // ============ Servir frontend compilado (producción / acceso LAN) ============
 const distPath = join(__dirname, '..', 'dist')
 if (existsSync(distPath)) {
+  app.get(['/catalogo', '/catalogo/*'], (req, res) => res.sendFile(join(distPath, 'catalogo', 'index.html')))
   app.use(express.static(distPath))
   app.get('*', (req, res) => res.sendFile(join(distPath, 'index.html')))
 }

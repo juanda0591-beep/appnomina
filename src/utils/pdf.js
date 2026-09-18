@@ -1340,12 +1340,12 @@ export function generarPdfCortes({ empresa, resultado: r, config = {}, disenoImg
 // `piezas` = filas de la tabla del generador/manual: { nombre, ancho, alto,
 // cantidad, permiteRotar }. Se asume ancho/alto ya en cm (como los muestra la UI).
 export function exportarDespieceCSV({ productoNombre, piezas }) {
-  const filas = [['Pieza', 'Ancho (cm)', 'Alto (cm)', 'Cantidad', 'Veta']]
+  const filas = [['Pieza', 'Ancho (cm)', 'Alto (cm)', 'Cantidad', 'Veta', 'Espesor MDF (mm)']]
   for (const p of piezas) {
     if (!String(p.nombre || '').trim()) continue
     filas.push([
       p.nombre, p.ancho, p.alto, p.cantidad || 1,
-      p.permiteRotar ? 'libre' : 'fija',
+      p.permiteRotar ? 'libre' : 'fija', p.espesor || '',
     ])
   }
   const nombre = (productoNombre || 'mueble').replace(/\s+/g, '_')
@@ -1491,4 +1491,3 @@ function dibujarUnaPegatina(doc, x, y, w, h, qrSize, { empresaNombre, ordenId, p
   }
   doc.setTextColor(...C.dark)
 }
-

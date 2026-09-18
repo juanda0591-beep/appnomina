@@ -1,3 +1,5 @@
+import { validarPiezas, validarLamina } from '../src/utils/proyectoCorte.js'
+
 // Motor de optimización de corte tipo GUILLOTINA para láminas de melamina/MDF.
 //
 // Por qué guillotina y no "nesting libre": una sierra escuadradora solo hace cortes
@@ -60,6 +62,8 @@ function colocarEnLamina(lamina, pieza, sierra, direccion) {
   const anchoUsado = mejor.rotada ? pieza.largo : pieza.ancho
   const largoUsado = mejor.rotada ? pieza.ancho : pieza.largo
   const colocada = {
+    id: pieza.id, canto: pieza.canto, permiteRotar: pieza.permiteRotar,
+    anchoOriginal: pieza.ancho, altoOriginal: pieza.largo,
     nombre: pieza.nombre, codigo: pieza.codigo, x: libre.x, y: libre.y,
     ancho: anchoUsado, largo: largoUsado, rotada: mejor.rotada,
     material: pieza.material, color: pieza.color,
@@ -131,7 +135,10 @@ function esMejor(a, b) {
 // lamina: { ancho, largo, espesor, costo }
 // opciones: { sierra } separación de corte (grosor del disco), en mm
 export function optimizarCorte(piezas, lamina, opciones = {}) {
-  const sierra = Number(opciones.sierra) || 0
+  piezas = validarPiezas(piezas)
+  const validado = validarLamina(lamina, opciones)
+  lamina = validado.lamina
+  const { sierra, margen } = validado.opciones
 
   // Expande cantidades: 3 entrepaños iguales => 3 piezas individuales.
   const expandidas = []
@@ -139,6 +146,7 @@ export function optimizarCorte(piezas, lamina, opciones = {}) {
     const n = Math.max(1, Number(p.cantidad) || 1)
     for (let i = 0; i < n; i++) {
       expandidas.push({
+        id: `${p.codigo}-${i + 1}`, canto: p.canto,
         nombre: p.nombre, codigo: p.codigo,
         ancho: Number(p.ancho),
         largo: Number(p.alto != null ? p.alto : p.largo),
@@ -161,7 +169,7 @@ export function optimizarCorte(piezas, lamina, opciones = {}) {
     for (const nombreOrden of Object.keys(ORDENES)) {
       const ordenadas = [...expandidas].sort(ORDENES[nombreOrden])
       for (const dir of DIRECCIONES) {
-        const { laminas, sinCabida } = empaquetar(ordenadas, orient.ancho, orient.largo, sierra, dir)
+        const { laminas, sinCabida } = empaquetar(ordenadas, orient.ancho - 2 * margen, orient.largo - 2 * margen, sierra, dir)
         const cand = { laminas, sinCabida, orient, retazo: mayorRetazo(laminas) }
         if (esMejor(cand, mejor)) mejor = cand
       }
@@ -176,16 +184,43 @@ export function optimizarCorte(piezas, lamina, opciones = {}) {
   const desperdicioPct = areaTotal > 0 ? ((areaTotal - areaUtil) / areaTotal) * 100 : 0
 
   return {
+    opciones: { sierra, margen },
     lamina: {
       ancho: orient.ancho, largo: orient.largo, girada: orient.girada,
       espesor: lamina.espesor, costo: Number(lamina.costo) || 0,
     },
-    laminas: laminas.map((lam, idx) => ({ indice: idx + 1, piezas: lam.piezas })),
+    laminas: laminas.map((lam, idx) => ({ indice: idx + 1,
+      piezas: lam.piezas.map((p) => ({ ...p, x: p.x + margen, y: p.y + margen })),
+      retazos: lam.libres.map((p, i) => ({ ...p, id: `R${idx + 1}-${i + 1}`, x: p.x + margen, y: p.y + margen })),
+    })),
     cantidadLaminas: laminas.length,
     areaUtil, areaTotal,
     desperdicioPct: Math.round(desperdicioPct * 10) / 10,
     costoTotal: laminas.length * (Number(lamina.costo) || 0),
     retazoMayor: { ancho: Math.round(mejor.retazo.ancho), largo: Math.round(mejor.retazo.largo) },
-    sinCabida: sinCabida.map((p) => ({ nombre: p.nombre, ancho: p.ancho, largo: p.largo })),
+    sinCabida: sinCabida.map((p) => ({ id: p.id, codigo: p.codigo, nombre: p.nombre, ancho: p.ancho, largo: p.largo })),
   }
+}
+
+export function optimizarLote(piezas, lamina, opciones = {}, laminasPorEspesor = {}) {
+  const ps = validarPiezas(piezas)
+  if (!ps.some((p) => p.espesor != null)) return optimizarCorte(ps, lamina, opciones)
+  const grupos = new Map()
+  for (const p of ps) {
+    const e = p.espesor ?? Number(lamina.espesor)
+    if (!grupos.has(e)) grupos.set(e, [])
+    grupos.get(e).push(p)
+  }
+  const resultados = [...grupos].sort(([a], [b]) => b - a).map(([espesor, piezasGrupo]) => {
+    const datos = laminasPorEspesor?.[espesor] || { ...lamina, costo: Number(espesor) === Number(lamina.espesor) ? lamina.costo : 0 }
+    return { espesor, ...optimizarCorte(piezasGrupo, { ...datos, espesor }, opciones) }
+  })
+  const laminas = resultados.flatMap((r) => r.laminas.map((l) => ({ ...l, lamina: r.lamina, espesor: r.espesor }))).map((l, i) => ({ ...l, indice: i + 1 }))
+  const areaTotal = resultados.reduce((s, r) => s + r.areaTotal, 0), areaUtil = resultados.reduce((s, r) => s + r.areaUtil, 0)
+  const mayor = resultados.map((r) => ({ ...r.retazoMayor, espesor: r.espesor })).sort((a, b) => b.ancho * b.largo - a.ancho * a.largo)[0]
+  return { lamina: resultados[0].lamina, laminas, grupos: resultados.map((r) => ({ espesor: r.espesor, cantidadLaminas: r.cantidadLaminas, costoTotal: r.costoTotal })),
+    costoIncompleto: resultados.some((r) => r.cantidadLaminas > 0 && !r.lamina.costo),
+    opciones, cantidadLaminas: laminas.length, areaTotal, areaUtil, desperdicioPct: areaTotal ? Math.round((1 - areaUtil / areaTotal) * 1000) / 10 : 0,
+    costoTotal: resultados.reduce((s, r) => s + r.costoTotal, 0), retazoMayor: mayor,
+    sinCabida: resultados.flatMap((r) => r.sinCabida.map((p) => ({ ...p, espesor: r.espesor }))) }
 }

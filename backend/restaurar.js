@@ -26,6 +26,14 @@ export async function restaurarRespaldo(origen, destino) {
     copia = new Database(temporal)
     // Ninguna sesion incluida en la copia vuelve a habilitarse al restaurar.
     if (copia.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sesiones'").get()) copia.exec('DELETE FROM sesiones')
+    if (copia.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'portal_sesiones'").get()) copia.exec('DELETE FROM portal_sesiones')
+    if (copia.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'wa_config'").get()) {
+      copia.exec(`UPDATE wa_config SET automaticos=0, pausado=1, conectar=0, olvidar=0, comando=comando+1;
+        UPDATE wa_worker SET propietario=NULL, latido=0, estado='apagado', numero='', qr=NULL, qr_expira=0;
+        UPDATE wa_mensajes SET estado='cancelado', error='Respaldo restaurado: no se reenvían mensajes anteriores.'
+          WHERE estado IN ('pendiente','preparando','enviando','revisar','fallido');
+        UPDATE wa_campanas SET estado='cancelada' WHERE estado='borrador';`)
+    }
     copia.pragma('wal_checkpoint(TRUNCATE)')
     copia.pragma('journal_mode = DELETE')
     copia.close(); copia = null

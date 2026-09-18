@@ -303,7 +303,7 @@ export default function Pedidos() {
               <tbody>
                 {pedidosFiltrados.map((p) => (
                   <tr key={p.id} className="chip-clicable" onClick={() => setDetalleId(p.id)}>
-                    <td>#{p.id}</td>
+                    <td>#{p.id}{p.origen === 'portal' && <small style={{ display: 'block', color: '#25634a' }}>Portal mayorista</small>}</td>
                     <td>{nombreCliente(p)}</td>
                     <td className="small">{p.fechaEntrega ? formatFecha(p.fechaEntrega) : <span className="muted">—</span>}</td>
                     <td className="num">{formatCOP(p.total)}</td>
@@ -478,6 +478,7 @@ export default function Pedidos() {
           <div className="overlay" onClick={() => setDetalleId(null)} />
           <div className="modal">
             <h3>Pedido #{pedidoDetalle.id}</h3>
+            {pedidoDetalle.origen === 'portal' && <p className="banner">Portal mayorista · Entrega solicitada: {pedidoDetalle.entregaPortal.direccion}, {pedidoDetalle.entregaPortal.municipio} · Tel. {pedidoDetalle.entregaPortal.telefono}</p>}
             <p className="muted small" style={{ marginTop: 0 }}>
               {nombreCliente(pedidoDetalle)} · {pedidoDetalle.atrasado ? 'Atrasado' : ESTADO_LABEL[pedidoDetalle.estado]}
               {pedidoDetalle.fechaEntrega && <> · Entrega: {formatFecha(pedidoDetalle.fechaEntrega)}</>}

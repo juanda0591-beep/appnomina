@@ -9,6 +9,7 @@
     "server": "node backend/server.js",
     "build": "vite build",
     "start": "vite build && node backend/server.js",
+    "whatsapp": "node backend/whatsapp-worker.js",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -21,6 +22,7 @@
     "jspdf": "^2.5.2",
     "jspdf-autotable": "^3.8.4",
     "konva": "^10.3.0",
+    "lucide-react": "^1.46.0",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

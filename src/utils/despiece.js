@@ -1,3 +1,15 @@
+import { cmAMm } from './unidades.js'
+import { construirMueble } from './construccionMueble.js'
+
+export const paramsParaDespiece = (f) => ({
+  ...(f.construccionVersion === 2 ? { configuracion: f } : {}),
+  ancho: cmAMm(f.ancho), alto: cmAMm(f.alto), fondo: cmAMm(f.fondo),
+  espesor: Number(f.espesor), gap: Number(f.gap), holguraFondo: Number(f.holguraFondo),
+  armado: f.armado, tipoFondo: f.tipoFondo,
+  modulos: f.modulos.map((m) => ({ entrepanos: m.alturas.length, cajones: Number(m.cajones),
+    zonaCajones: cmAMm(m.zonaCajones), puerta: m.puerta, anchoCajon: cmAMm(m.anchoCajon), ladoCajon: m.ladoCajon })),
+})
+
 // Generador paramétrico de despiece de muebles en melamina.
 // Función pura: recibe medidas + configuración POR MÓDULO y devuelve la lista de
 // piezas (agrupadas por medida) lista para la tabla de Cortes y Planos.
@@ -22,6 +34,10 @@ export const nuevoModulo = () => ({
 })
 
 export function generarDespiece(params) {
+  if (params.configuracion) {
+    const { piezas, avisos } = construirMueble(params.configuracion)
+    return { piezas, avisos }
+  }
   const An = num(params.ancho), Al = num(params.alto), Pr = num(params.fondo)
   const E = num(params.espesor, 18)
   const gap = num(params.gap, 3)
@@ -34,6 +50,14 @@ export function generarDespiece(params) {
   const avisos = []
   if (An <= 0 || Al <= 0 || Pr <= 0) {
     return { piezas: [], avisos: ['Indica ancho, alto y fondo mayores a 0.'] }
+  }
+  if (E <= 0 || E >= Pr || Al <= 2 * E || anchoModulo(An, E, nMod) <= 0 || gap < 0 || holguraFondo < 0 || holguraFondo >= Pr) {
+    return { piezas: [], avisos: ['Revisa el espesor, las holguras y el espacio útil de los módulos.'] }
+  }
+  if (nMod > 30 || modulos.some((m) => !Number.isInteger(Number(m.cajones || 0)) || Number(m.cajones || 0) < 0 || Number(m.cajones || 0) > 100
+    || Number(m.entrepanos || 0) > 100 || Number(m.zonaCajones || 0) < 0 || Number(m.zonaCajones || 0) > Al - 2 * E
+    || (Number(m.cajones || 0) > 0 && !(Number(m.zonaCajones) > 0)) || Number(m.anchoCajon || 0) > anchoModulo(An, E, nMod))) {
+    return { piezas: [], avisos: ['Revisa las cantidades y las medidas de cajones y entrepaños.'] }
   }
 
   const acc = new Map()

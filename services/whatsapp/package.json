@@ -1,0 +1,9 @@
+{
+  "name": "nomina-whatsapp-provider",
+  "private": true,
+  "type": "module",
+  "description": "Proveedor WhatsApp aislado. Restaurar las dependencias verificadas con npm ci --prefix services/whatsapp.",
+  "dependencies": {
+    "@whiskeysockets/baileys": "7.0.0-rc14"
+  }
+}

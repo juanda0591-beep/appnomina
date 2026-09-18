@@ -28,5 +28,19 @@ module.exports = {
         ALLOWED_ORIGIN: 'https://luxarma.cloud,https://www.luxarma.cloud',
       },
     },
+    {
+      name: 'nomina-whatsapp',
+      script: 'backend/whatsapp-worker.js',
+      cwd: __dirname,
+      instances: 1,
+      exec_mode: 'fork',
+      autorestart: true,
+      stop_exit_codes: [0],
+      max_memory_restart: '250M',
+      env: {
+        NODE_ENV: 'production',
+        // WHATSAPP_ENABLED y WHATSAPP_AUTH_DIR se leen de .env.local.
+      },
+    },
   ],
 }

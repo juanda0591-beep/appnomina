@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import { fileURLToPath } from 'node:url'
 
 export default defineConfig({
   plugins: [
@@ -49,11 +50,28 @@ export default defineConfig({
         enabled: false,
       },
     }),
+    {
+      name: 'portal-sin-instalacion-interna',
+      enforce: 'post',
+      transformIndexHtml: {
+        order: 'post',
+        handler(html, ctx) {
+          // El portal no debe ofrecer instalar la PWA de nómina con inicio en /.
+          if (!ctx.path.startsWith('/catalogo/')) return html
+          return html.replace(/<link rel="manifest"[^>]*>/g, '')
+            .replace(/<script id="vite-plugin-pwa:register-sw"[^>]*><\/script>/g, '')
+        },
+      },
+    },
   ],
   build: {
     // Separa las librerías pesadas en su propio chunk: cambian poco, así el
     // navegador las cachea entre despliegues y la app propia carga aparte.
     rollupOptions: {
+      input: {
+        administracion: fileURLToPath(new URL('./index.html', import.meta.url)),
+        catalogo: fileURLToPath(new URL('./catalogo/index.html', import.meta.url)),
+      },
       output: {
         manualChunks: {
           charts: ['@mantine/charts', 'recharts'],
@@ -69,6 +87,7 @@ export default defineConfig({
     open: true,
     host: true, // accesible en la red local durante desarrollo
     proxy: {
+      '/api/portal': { target: 'http://127.0.0.1:3001', changeOrigin: false },
       '/api': {
         target: 'http://127.0.0.1:3001',
         changeOrigin: true,
