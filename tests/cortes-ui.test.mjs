@@ -58,7 +58,17 @@ test('Editor de cortes: proyecto, cotas, zoom, versiones, PDF y movil', { timeou
   await page.goto(`${base}/cortes-planos`)
   await page.waitForLoadState('networkidle')
   assert.deepEqual(errores, [], 'La pagina debe iniciar sin errores')
-  assert.match(await page.locator('body').innerText(), /Nombre del proyecto/)
+  const comprobarOrden = async () => {
+    assert.equal(await page.getByRole('button', { name: 'Componentes', exact: true }).count(), 0)
+    const piezas = await page.locator('.corte-despiece').boundingBox()
+    const plano = await page.locator('.corte-workspace').boundingBox()
+    assert.ok(piezas.y + piezas.height <= plano.y + 1, 'Agregar piezas y generar por medidas van antes del plano de corte')
+    assert.equal(await page.getByRole('button', { name: 'Agregar pieza', exact: true }).isVisible(), true)
+    assert.equal(await page.getByRole('tab', { name: 'Generar por medidas', exact: true }).isVisible(), true)
+  }
+  await comprobarOrden()
+  assert.equal(await page.getByLabel('Nombre del proyecto', { exact: true }).isVisible(), true)
+
   await page.getByLabel('Producto', { exact: true }).selectOption(String(producto.id))
   await page.getByLabel('Nombre P001', { exact: true }).waitFor()
   await page.getByLabel('Nombre del proyecto', { exact: true }).fill('Armario taller - prueba')
@@ -116,6 +126,7 @@ test('Editor de cortes: proyecto, cotas, zoom, versiones, PDF y movil', { timeou
   await page.keyboard.press('Escape')
   await page.setViewportSize({ width: 390, height: 844 })
   await page.waitForFunction(() => document.querySelector('.sidebar').getBoundingClientRect().right <= 0)
+  await comprobarOrden()
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'La pagina no debe desbordar en movil')
   assert.ok((await pixeles()).visibles > 500)
   await page.evaluate(() => window.scrollTo(0, 0))

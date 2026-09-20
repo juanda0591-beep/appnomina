@@ -1,5 +1,6 @@
 import { generarDespiece, paramsParaDespiece } from './despiece.js'
 import { validarMontaje } from './piezasManuales.js'
+import { validarReferenciasPlano } from './referenciasPlano.js'
 
 export const MAX_PIEZAS_CORTE = 1000
 
@@ -92,6 +93,7 @@ export function validarProyecto(proyecto) {
   }
   return { version: 1, productoId, productoNombre: String(proyecto.productoNombre || '').slice(0, 200),
     material: proyecto.material.trim(), unidades, lamina, ...opciones, piezas, diseno,
+    ...(proyecto.referencias ? { referencias: validarReferenciasPlano(proyecto.referencias) } : {}),
     ...(proyecto.montajeManual ? { montajeManual: validarMontaje(proyecto.montajeManual, piezas) } : {}),
     ...(Object.keys(laminasPorEspesor).length ? { laminasPorEspesor } : {}) }
 }

@@ -146,3 +146,12 @@
   .corte-fullscreen { inset: 5px; }
   .corte-metrics strong { font-size: 15px; }
 }
+.referencias-plano { margin: 16px 0; padding: 16px; border: 1px solid #cbdcde; border-radius: 12px; min-width: 0; }
+.referencias-cargas, .referencias-galeria { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.referencias-cargas input { max-width: 100%; }
+.referencias-galeria figure { margin: 0; padding: 10px; background: #f1f6f6; border-radius: 10px; min-width: 0; }
+.referencias-galeria img { width: 100%; height: 150px; object-fit: contain; background: white; border-radius: 6px; }
+.referencias-galeria figcaption { overflow-wrap: anywhere; font-size: 12px; margin: 6px 0; }
+.mover-pieza { margin: 12px 0; padding: 10px; border: 1px solid #cbdcde; border-radius: 10px; }
+.mover-pieza h4 { margin: 0 0 8px; }
+.mover-pieza-botones { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }

@@ -63,8 +63,8 @@ function Acceso({ config, onLogin }) {
           <label className="span-2">Dirección<input name="direccion" required maxLength={300} autoComplete="street-address"/></label>
           <label className="span-2">Ciudad o municipio<input name="municipio" required maxLength={100} autoComplete="address-level2"/></label>
         </div>}
-        <label>Correo electrónico<input name="correo" type="email" required maxLength={254} autoComplete="username" placeholder="tu@negocio.com"/></label>
-        <label>Contraseña<input name="password" type="password" required minLength={registro ? 10 : undefined} maxLength={128} autoComplete={registro ? 'new-password' : 'current-password'} placeholder={registro ? 'Mínimo 10 caracteres' : 'Tu contraseña'}/></label>
+        <label>{registro ? 'Correo electrónico' : 'Correo electrónico o número de documento'}<input name={registro ? 'correo' : 'identificador'} type={registro ? 'email' : 'text'} required maxLength={254} autoComplete="username" placeholder={registro ? 'tu@negocio.com' : 'Tu correo o número de documento'}/></label>
+        <label>Contraseña<input name="password" type="password" required minLength={registro ? 4 : undefined} maxLength={128} autoComplete={registro ? 'new-password' : 'current-password'} placeholder={registro ? 'Mínimo 4 caracteres' : 'Tu contraseña'}/></label>
         {registro && <><label className="check"><input type="checkbox" name="aceptaDatos" required/>Autorizo el uso de mis datos para revisar mi solicitud, administrar mi cuenta y gestionar mis pedidos.</label>
           <label className="check"><input type="checkbox" name="ofertas"/>Quiero recibir novedades y ofertas por WhatsApp. Puedo retirar esta autorización desde mi cuenta.</label></>}
         {registro && <label className="check"><input type="checkbox" name="notificaciones"/>Autorizo confirmaciones y actualizaciones de mis pedidos por WhatsApp.</label>}
@@ -103,7 +103,7 @@ function Cuenta({ cuenta, onChange, ejecutar }) {
     <label className="check"><input type="checkbox" checked={cuenta.ofertas} onChange={(e) => { const ofertas = e.target.checked; ejecutar(async () => { await portalApi('/preferencias', 'PUT', { ofertas, notificaciones: cuenta.notificaciones }); onChange({ ...cuenta, ofertas }) }) }}/>Recibir novedades y ofertas por WhatsApp</label>
     <h2>Cambiar contraseña</h2><form ref={form} onSubmit={(e) => { e.preventDefault(); const datos = Object.fromEntries(new FormData(e.currentTarget)); ejecutar(async () => { await portalApi('/password', 'POST', datos); form.current.reset(); return 'Contraseña actualizada. Las otras sesiones se cerraron.' }) }}>
       <label>Contraseña actual<input name="actual" type="password" autoComplete="current-password" required maxLength={128}/></label>
-      <label>Nueva contraseña<input name="nueva" type="password" autoComplete="new-password" required minLength={10} maxLength={128}/></label><button className="primario">Guardar contraseña</button>
+      <label>Nueva contraseña<input name="nueva" type="password" autoComplete="new-password" required minLength={4} maxLength={128} placeholder="Mínimo 4 caracteres"/></label><button className="primario">Guardar contraseña</button>
     </form>
   </section>
 }

@@ -1,11 +1,17 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { perfilSimple } from '../utils/fabricacionMDF.js'
+import MoverPieza from './MoverPieza.jsx'
+import { desplazarOrigen } from '../utils/piezasManuales.js'
 
 export default function EditorPiezaMDF({ pieza, diseno, onGuardar }) {
   const existente = diseno.fabricacion?.ajustes?.[pieza.clave] || {}
   const [ajuste, setAjuste] = useState(existente)
   const [perfil, setPerfil] = useState(diseno.fabricacion?.perfiles?.[pieza.clave] || perfilSimple(pieza.espesor))
   const [error, setError] = useState('')
+  useEffect(() => {
+    setAjuste(diseno.fabricacion?.ajustes?.[pieza.clave] || {})
+    setPerfil(diseno.fabricacion?.perfiles?.[pieza.clave] || perfilSimple(pieza.espesor))
+  }, [diseno, pieza.clave, pieza.espesor])
   const campo = (label, key, def) => <label>{label}<input aria-label={`Pieza · ${label}`} type="number" step="0.1" value={ajuste[key] ?? def}
     onChange={(e) => setAjuste((a) => ({ ...a, [key]: e.target.value === '' ? '' : Number(e.target.value) }))} /></label>
   const campoPerfil = (label, key) => <label>{label}<input aria-label={`Pieza · ${label}`} type="number" min="0" step="0.1" value={perfil[key]}
@@ -18,6 +24,12 @@ export default function EditorPiezaMDF({ pieza, diseno, onGuardar }) {
   return <div className="editor-pieza" aria-label="Editor de pieza seleccionada">
     <h4>Editar esta pieza</h4>
     <p className="muted small">Medidas en mm. Los ajustes de tamaño y posición son individuales; revisa sus encuentros con las piezas vecinas.</p>
+    <MoverPieza onMover={async (eje, distancia) => {
+      const origen = ['x', 'y', 'z'].map((k, i) => ajuste[k] ?? pieza.origen?.[i] ?? 0)
+      if (origen.some((v) => v === '')) throw new Error('Completa las posiciones antes de mover la pieza.')
+      const [x, y, z] = desplazarOrigen(origen.map(Number), eje, distancia)
+      await onGuardar(pieza.clave, { ajuste: { ...ajuste, x, y, z }, perfil })
+    }} />
     <div className="construccion-grid">{campo('Ancho', 'ancho', pieza.ancho)}{campo('Alto / largo', 'alto', pieza.alto)}</div>
     <details><summary>Posición de montaje</summary>
       {['x', 'y', 'z'].map((e, i) => <div key={e}>{campo(`Posición ${e.toUpperCase()}`, e, pieza.origen?.[i] || 0)}</div>)}

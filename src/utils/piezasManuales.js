@@ -1,3 +1,17 @@
+export function desplazarOrigen(origen, eje, distancia) {
+  if (!['x', 'y', 'z'].includes(eje) || !Number.isFinite(distancia) || !Array.isArray(origen) || origen.length !== 3 || !origen.every(Number.isFinite)) throw new Error('Movimiento no válido.')
+  const nueva = origen.map((v, i) => Math.round((v + (i === ['x', 'y', 'z'].indexOf(eje) ? distancia : 0)) * 100) / 100)
+  if (!nueva.every((v) => Number.isFinite(v) && Math.abs(v) <= 100000)) throw new Error('La posición debe estar entre -100000 y 100000 mm.')
+  return nueva
+}
+
+export function desplazarMontaje(montaje, piezas, id, eje, distancia) {
+  const ubicacion = montaje.find((p) => `${p.codigo}-${p.unidad}` === id)
+  if (!ubicacion) throw new Error('Primero define la ubicación de esta pieza.')
+  const [x, y, z] = desplazarOrigen([ubicacion.x, ubicacion.y, ubicacion.z], eje, distancia)
+  return validarMontaje(montaje.map((p) => p === ubicacion ? { ...p, x, y, z } : p), piezas)
+}
+
 // Cada ubicación corresponde a una unidad, no al tipo entero de pieza.
 export function validarMontaje(montaje, piezas) {
   if (montaje == null) return []

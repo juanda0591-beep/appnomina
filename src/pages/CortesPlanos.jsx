@@ -63,7 +63,7 @@ export default function CortesPlanos() {
   const campo = (key, value) => cambiarProyecto((p) => ({ ...p, [key]: value }))
   const campoLamina = (key, value) => cambiarProyecto((p) => ({ ...p, ...(key === 'espesor' ? { diseno: null } : {}), lamina: { ...p.lamina, [key]: value } }))
   const cambiarPieza = (codigo, key, value) => cambiarProyecto((p) => ({ ...p, diseno: null,
-    montajeManual: (p.montajeManual || []).filter((m) => m.codigo !== codigo),
+    montajeManual: (p.montajeManual || []).filter((m) => m.codigo !== codigo || key !== 'cantidad' || m.unidad <= Number(value)),
     piezas: p.piezas.map((pieza) => pieza.codigo === codigo ? { ...pieza, [key]: value } : pieza) }))
   const actualizarMontaje = (montaje) => { validarMontaje(montaje, proyecto.piezas); campo('montajeManual', montaje) }
   const puedeGuardar = puede('cortes-planos', guardado?.id ? 'editar' : 'crear')
@@ -171,9 +171,12 @@ export default function CortesPlanos() {
     if (c.avisos.length) throw new Error(c.avisos[0])
     aplicarGenerado(c.piezas, null, diseno)
   }
-  const aplicarPiezasIA = async (piezas) => {
+  const aplicarPiezasIA = async (piezas, montaje = []) => {
+    const firmaInicial = firmaActual.current
     if (!(await confirmar('Se reemplazará la tabla de piezas y se desvinculará el diseño anterior. Revisa la propuesta antes de continuar.', { titulo: 'Aplicar propuesta IA', textoOk: 'Aplicar', peligro: false }))) return false
-    cambiarProyecto((p) => ({ ...p, piezas, diseno: null, montajeManual: [] }))
+    if (firmaInicial !== firmaActual.current) throw new Error('El proyecto cambió. Revisa la propuesta de nuevo.')
+    validarMontaje(montaje, piezas)
+    cambiarProyecto((p) => ({ ...p, piezas, diseno: null, montajeManual: montaje }))
     setVistaPlano('piezas'); setCalculo(null); setSeleccionado(null)
     return true
   }
@@ -198,12 +201,13 @@ export default function CortesPlanos() {
         <Herramienta icono={Redo2} titulo="Rehacer" disabled={!historial.futuro.length || ocupado || cargandoProducto || modo !== 'despiece'} onClick={() => { solicitud.current++; dispatch({ tipo: 'redo' }) }} />
         <Herramienta icono={FilePlus2} titulo="Nuevo proyecto" onClick={nuevo} disabled={ocupado} />
         <button className="corte-button" onClick={() => setListaAbierta(true)} disabled={ocupado}><FolderOpen size={17} />Proyectos</button>
-        {puedeGuardar && <button className="corte-button primary" onClick={() => guardar()} disabled={ocupado || cargandoProducto || modo !== 'despiece' || !resultado || !!resultado.sinCabida.length}><Save size={17} />Guardar version</button>}
-        {puede('cortes-planos', 'crear') && guardado && <Herramienta icono={Copy} titulo="Guardar como copia" onClick={() => guardar(true)} disabled={ocupado || !resultado || !!resultado.sinCabida.length || modo !== 'despiece'} />}
+        {puedeGuardar && <button className="corte-button primary" onClick={() => guardar()} disabled={ocupado || cargandoProducto || modo !== 'despiece' || !proyecto.piezas.length}><Save size={17} />Guardar version</button>}
+        {puede('cortes-planos', 'crear') && guardado && <Herramienta icono={Copy} titulo="Guardar como copia" onClick={() => guardar(true)} disabled={ocupado || cargandoProducto || !proyecto.piezas.length || modo !== 'despiece'} />}
       </div>
     </header>
     {(error || errorProductos) && <div role="alert" className="banner error">{error || errorProductos}</div>}
     <fieldset className="corte-fields" disabled={ocupado || cargandoProducto}>
+
       <div className="corte-project-fields">
         <label>Nombre del proyecto<input value={nombre} maxLength={160} onChange={(e) => editar((d) => ({ ...d, nombre: e.target.value }))} /></label>
         <label>Producto<select aria-label="Producto" value={proyecto.productoId} onChange={(e) => elegirProducto(e.target.value)}><option value="">Proyecto independiente</option>
@@ -212,7 +216,42 @@ export default function CortesPlanos() {
         <label>Material / acabado<input value={proyecto.material} maxLength={120} placeholder="Melamina blanca" onChange={(e) => campo('material', e.target.value)} /></label>
         <Numero label="Unidades" value={proyecto.unidades} min={1} step={1} onChange={(v) => campo('unidades', v)} />
       </div>
+
+      <section className="corte-despiece">
+
+        <AsistentePlanos key={generadorKey} proyecto={proyecto} bloqueado={ocupado || cargandoProducto || modo !== 'despiece'} onReferencias={(referencias) => campo('referencias', referencias)} onPiezas={aplicarPiezasIA} onMontaje={aplicarMontajeIA} />
+
+        <div className="corte-section-head"><div className="corte-tabs" role="tablist" aria-label="Despiece">
+          <button role="tab" aria-selected={modo === 'despiece'} onClick={() => cambiarModo('despiece')}>Piezas ({proyecto.piezas.length})</button>
+          <button role="tab" aria-selected={modo === 'generador'} onClick={() => cambiarModo('generador')}><Ruler size={16} />Generar por medidas</button>
+        </div><div className="corte-actions">
+          <button className="corte-button" onClick={() => cambiarProyecto((p) => ({ ...p, diseno: null, piezas: [...p.piezas, piezaNueva(p.piezas)] }))} disabled={modo !== 'despiece'}><Plus size={16} />Agregar pieza</button>
+          {proyecto.productoId && puede('cortes-planos', 'editar') && <button className="corte-button" onClick={guardarDespiece} disabled={!proyecto.piezas.length || modo !== 'despiece'}><Save size={16} />Guardar en producto</button>}
+        </div></div>
+        {modo === 'generador' ? <GeneradorDespiece key={generadorKey} espesorInicial={proyecto.lamina.espesor} disenoInicial={proyecto.diseno} onModificar={() => { setCalculo(null); setGeneradorSucio(true) }} onGenerar={aplicarGenerado} /> : <>
+          <div className="table-wrap"><table className="table corte-pieces"><thead><tr><th>Codigo</th><th>Pieza / MDF</th><th>Ancho (cm)</th><th>Alto (cm)</th><th>Cantidad</th><th>Rotacion</th><th>Cantos</th><th></th></tr></thead>
+            <tbody>{proyecto.piezas.map((p) => <tr key={p.codigo} className={seleccionado?.replace(/-\d+$/, '') === p.codigo ? 'selected' : ''}>
+              <td><button className="corte-piece-code" style={{ borderLeftColor: colorPieza(p.codigo) }} onClick={() => {
+                if (vistaPlano === 'mueble' || !resultado) { setSeleccionado(`${p.codigo}-1`); return }
+                const index = resultado.laminas.findIndex((l) => l.piezas.some((pieza) => pieza.codigo === p.codigo))
+                if (index >= 0) { setHoja(index); setSeleccionado(resultado.laminas[index].piezas.find((pieza) => pieza.codigo === p.codigo).id) }
+              }}>{p.codigo}</button></td>
+              <td><input aria-label={`Nombre ${p.codigo}`} value={p.nombre} maxLength={120} onChange={(e) => cambiarPieza(p.codigo, 'nombre', e.target.value)} />{p.espesor && <span className="muted small">MDF {p.espesor} mm</span>}</td>
+              <td><input aria-label={`Ancho ${p.codigo}`} type="number" min="0.1" step="0.1" value={mmACm(p.ancho) || ''} onChange={(e) => cambiarPieza(p.codigo, 'ancho', cmAMm(e.target.value))} /></td>
+              <td><input aria-label={`Alto ${p.codigo}`} type="number" min="0.1" step="0.1" value={mmACm(p.alto) || ''} onChange={(e) => cambiarPieza(p.codigo, 'alto', cmAMm(e.target.value))} /></td>
+              <td><input aria-label={`Cantidad ${p.codigo}`} type="number" min="1" step="1" value={p.cantidad} onChange={(e) => cambiarPieza(p.codigo, 'cantidad', Number(e.target.value))} /></td>
+              <td><label className="corte-check"><input type="checkbox" checked={!!p.permiteRotar} onChange={(e) => cambiarPieza(p.codigo, 'permiteRotar', e.target.checked)} aria-label={`Permitir giro ${p.codigo}`} />Libre</label></td>
+              <td><div className="corte-edges">{['arriba', 'abajo', 'izq', 'der'].map((b) => <label key={b} title={`Canto ${b}`}><input type="checkbox" aria-label={`Canto ${b} ${p.codigo}`}
+                checked={(p.canto || '').split(',').includes(b)} onChange={(e) => { const bordes = new Set((p.canto || '').split(',').filter(Boolean)); e.target.checked ? bordes.add(b) : bordes.delete(b); cambiarPieza(p.codigo, 'canto', [...bordes].join(',')) }} />{({ arriba: 'S', abajo: 'I', izq: 'Iz', der: 'D' })[b]}</label>)}</div></td>
+              <td><Herramienta icono={Copy} titulo={`Duplicar ${p.codigo}`} onClick={() => cambiarProyecto((prev) => ({ ...prev, diseno: null, piezas: [...prev.piezas, { ...p, codigo: codigoNuevo(prev.piezas) }] }))} />
+                <Herramienta icono={Trash2} titulo={`Eliminar ${p.codigo}`} onClick={() => cambiarProyecto((prev) => ({ ...prev, diseno: null, montajeManual: (prev.montajeManual || []).filter((m) => m.codigo !== p.codigo), piezas: prev.piezas.filter((pieza) => pieza.codigo !== p.codigo) }))} /></td>
+            </tr>)}</tbody></table></div>
+          {!proyecto.piezas.length && <div className="corte-empty">Sin piezas</div>}
+        </>}
+
+      </section>
       <div className="corte-workspace">
+
         <aside className="corte-config">
           <h3>Lamina y corte</h3>
           <label>Formato de lamina<select aria-label="Formato de lamina" value={`${proyecto.lamina.ancho}x${proyecto.lamina.largo}`}
@@ -245,6 +284,7 @@ export default function CortesPlanos() {
                 <dt>Cantos</dt><dd>{piezaSeleccionada.canto || 'Sin canto'}</dd></dl></> : <span className="muted">Ninguna</span>}
           </div>
         </aside>
+
         <section className="corte-drawing">
           <div className="corte-tabs" role="tablist" aria-label="Visualización del proyecto">
             <button role="tab" aria-selected={vistaPlano === 'corte'} onClick={() => setVistaPlano('corte')}>Plano de corte</button>
@@ -252,7 +292,7 @@ export default function CortesPlanos() {
             <button role="tab" aria-selected={vistaPlano === 'piezas'} onClick={() => setVistaPlano('piezas')}>Piezas 2D / 3D</button>
             <button type="button" className="corte-button" onClick={() => { setModo('generador'); document.querySelector('.corte-despiece')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>Editar construcción</button>
           </div>
-          {vistaPlano === 'piezas' ? <PiezasManuales proyecto={proyecto} onPieza={cambiarPieza} onMontaje={actualizarMontaje} /> : vistaPlano === 'mueble' ? <Suspense fallback={<div className="corte-empty">Cargando visor 3D...</div>}>
+          {vistaPlano === 'piezas' || (vistaPlano === 'mueble' && !proyecto.diseno) ? <PiezasManuales key={generadorKey} proyecto={proyecto} onPieza={cambiarPieza} onMontaje={actualizarMontaje} /> : vistaPlano === 'mueble' ? <Suspense fallback={<div className="corte-empty">Cargando visor 3D...</div>}>
             <VistaMueble3D diseno={proyecto.diseno} piezas={proyecto.piezas} seleccionado={seleccionado} onEditarPieza={proyecto.diseno?.construccionVersion === 2 ? editarPieza3D : undefined} onSeleccionar={(id) => {
               setSeleccionado(id)
               const index = resultado?.laminas.findIndex((l) => l.piezas.some((p) => p.id === id))
@@ -275,38 +315,9 @@ export default function CortesPlanos() {
             <Metrica label="Mayor retazo" value={resultado?.retazoMayor?.ancho ? `${fmtCm(resultado.retazoMayor.ancho)} x ${fmtCm(resultado.retazoMayor.largo)} cm` : '-'} /></div>
         </section>
       </div>
-      <section className="corte-despiece">
-        <AsistentePlanos proyecto={proyecto} bloqueado={ocupado || cargandoProducto || modo !== 'despiece'} onPiezas={aplicarPiezasIA} onMontaje={aplicarMontajeIA} />
-        <div className="corte-section-head"><div className="corte-tabs" role="tablist" aria-label="Despiece">
-          <button role="tab" aria-selected={modo === 'despiece'} onClick={() => cambiarModo('despiece')}>Piezas ({proyecto.piezas.length})</button>
-          <button role="tab" aria-selected={modo === 'generador'} onClick={() => cambiarModo('generador')}><Ruler size={16} />Generar por medidas</button>
-        </div><div className="corte-actions">
-          <button className="corte-button" onClick={() => cambiarProyecto((p) => ({ ...p, diseno: null, piezas: [...p.piezas, piezaNueva(p.piezas)] }))} disabled={modo !== 'despiece'}><Plus size={16} />Agregar pieza</button>
-          {proyecto.productoId && puede('cortes-planos', 'editar') && <button className="corte-button" onClick={guardarDespiece} disabled={!proyecto.piezas.length || modo !== 'despiece'}><Save size={16} />Guardar en producto</button>}
-        </div></div>
-        {modo === 'generador' ? <GeneradorDespiece key={generadorKey} espesorInicial={proyecto.lamina.espesor} disenoInicial={proyecto.diseno} onModificar={() => { setCalculo(null); setGeneradorSucio(true) }} onGenerar={aplicarGenerado} /> : <>
-          <div className="table-wrap"><table className="table corte-pieces"><thead><tr><th>Codigo</th><th>Pieza / MDF</th><th>Ancho (cm)</th><th>Alto (cm)</th><th>Cantidad</th><th>Rotacion</th><th>Cantos</th><th></th></tr></thead>
-            <tbody>{proyecto.piezas.map((p) => <tr key={p.codigo} className={seleccionado?.replace(/-\d+$/, '') === p.codigo ? 'selected' : ''}>
-              <td><button className="corte-piece-code" style={{ borderLeftColor: colorPieza(p.codigo) }} onClick={() => {
-                if (vistaPlano === 'mueble' || !resultado) { setSeleccionado(`${p.codigo}-1`); return }
-                const index = resultado.laminas.findIndex((l) => l.piezas.some((pieza) => pieza.codigo === p.codigo))
-                if (index >= 0) { setHoja(index); setSeleccionado(resultado.laminas[index].piezas.find((pieza) => pieza.codigo === p.codigo).id) }
-              }}>{p.codigo}</button></td>
-              <td><input aria-label={`Nombre ${p.codigo}`} value={p.nombre} maxLength={120} onChange={(e) => cambiarPieza(p.codigo, 'nombre', e.target.value)} />{p.espesor && <span className="muted small">MDF {p.espesor} mm</span>}</td>
-              <td><input aria-label={`Ancho ${p.codigo}`} type="number" min="0.1" step="0.1" value={mmACm(p.ancho) || ''} onChange={(e) => cambiarPieza(p.codigo, 'ancho', cmAMm(e.target.value))} /></td>
-              <td><input aria-label={`Alto ${p.codigo}`} type="number" min="0.1" step="0.1" value={mmACm(p.alto) || ''} onChange={(e) => cambiarPieza(p.codigo, 'alto', cmAMm(e.target.value))} /></td>
-              <td><input aria-label={`Cantidad ${p.codigo}`} type="number" min="1" step="1" value={p.cantidad} onChange={(e) => cambiarPieza(p.codigo, 'cantidad', Number(e.target.value))} /></td>
-              <td><label className="corte-check"><input type="checkbox" checked={!!p.permiteRotar} onChange={(e) => cambiarPieza(p.codigo, 'permiteRotar', e.target.checked)} aria-label={`Permitir giro ${p.codigo}`} />Libre</label></td>
-              <td><div className="corte-edges">{['arriba', 'abajo', 'izq', 'der'].map((b) => <label key={b} title={`Canto ${b}`}><input type="checkbox" aria-label={`Canto ${b} ${p.codigo}`}
-                checked={(p.canto || '').split(',').includes(b)} onChange={(e) => { const bordes = new Set((p.canto || '').split(',').filter(Boolean)); e.target.checked ? bordes.add(b) : bordes.delete(b); cambiarPieza(p.codigo, 'canto', [...bordes].join(',')) }} />{({ arriba: 'S', abajo: 'I', izq: 'Iz', der: 'D' })[b]}</label>)}</div></td>
-              <td><Herramienta icono={Copy} titulo={`Duplicar ${p.codigo}`} onClick={() => cambiarProyecto((prev) => ({ ...prev, diseno: null, piezas: [...prev.piezas, { ...p, codigo: codigoNuevo(prev.piezas) }] }))} />
-                <Herramienta icono={Trash2} titulo={`Eliminar ${p.codigo}`} onClick={() => cambiarProyecto((prev) => ({ ...prev, diseno: null, montajeManual: (prev.montajeManual || []).filter((m) => m.codigo !== p.codigo), piezas: prev.piezas.filter((pieza) => pieza.codigo !== p.codigo) }))} /></td>
-            </tr>)}</tbody></table></div>
-          {!proyecto.piezas.length && <div className="corte-empty">Sin piezas</div>}
-        </>}
-      </section>
-      {proyecto.diseno && modo === 'despiece' && <VistasTecnicas diseno={proyecto.diseno} />}
     </fieldset>
+
+    {proyecto.diseno && modo === 'despiece' && <VistasTecnicas diseno={proyecto.diseno} />}
     <footer className="corte-export"><span>{proyecto.piezas.reduce((s, p) => s + Number(p.cantidad || 0), 0) * proyecto.unidades} piezas en el lote</span><div className="corte-actions">
       <button className="corte-button" disabled={!proyecto.piezas.length || ocupado} onClick={() => {
         try { entradaCorte(proyecto); exportarDespieceCSV({ productoNombre: nombre, piezas: proyecto.piezas.map((p) => ({ ...p, ancho: mmACm(p.ancho), alto: mmACm(p.alto), cantidad: p.cantidad * proyecto.unidades })) }) }
@@ -315,6 +326,7 @@ export default function CortesPlanos() {
       <select aria-label="Formato PDF" value={formato} onChange={(e) => setFormato(e.target.value)}><option value="a4">A4 horizontal</option><option value="a3">A3 horizontal</option></select>
       <button className="corte-button primary" onClick={pdf} disabled={!resultado || ocupado || modo !== 'despiece' || !!resultado.sinCabida.length}><Download size={16} />PDF de taller</button>
     </div></footer>
+
     {listaAbierta && <Proyectos onCerrar={() => setListaAbierta(false)} onAbrir={abrir} empresa={empresa} ocupado={ocupado} puedeEliminar={puede('cortes-planos', 'eliminar')} />}
   </div>
 }

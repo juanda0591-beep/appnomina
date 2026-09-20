@@ -35,7 +35,7 @@ async function errorProveedor(response) {
   return new ErrorIA('OpenAI rechazó la solicitud. Revisa la configuración del modelo y vuelve a intentar.', 502)
 }
 
-export async function solicitarBorrador({ descripcion, contexto, instructions, schema, name, maxTokens = 2500 }, {
+export async function solicitarBorrador({ descripcion, contexto, instructions, schema, name, maxTokens = 2500, imagenes = [] }, {
   apiKey = process.env.OPENAI_API_KEY, model = process.env.OPENAI_MODEL, fetchImpl = fetch,
 } = {}) {
   if (typeof descripcion !== 'string' || descripcion.trim().length < 5 || descripcion.length > 4000) {
@@ -52,7 +52,13 @@ export async function solicitarBorrador({ descripcion, contexto, instructions, s
       signal: AbortSignal.timeout(45000),
       body: JSON.stringify({
         model, store: false, max_output_tokens: maxTokens, instructions,
-        input: JSON.stringify({ descripcion: descripcion.trim(), ...contexto }),
+        input: imagenes.length ? [{ role: 'user', content: [
+          { type: 'input_text', text: JSON.stringify({ descripcion: descripcion.trim(), ...contexto }) },
+          ...imagenes.flatMap((f, i) => [
+            { type: 'input_text', text: `Fotografía ${i + 1}: ${f.vista}` },
+            { type: 'input_image', image_url: f.datos, detail: 'high' },
+          ]),
+        ] }] : JSON.stringify({ descripcion: descripcion.trim(), ...contexto }),
         text: { format: { type: 'json_schema', name, strict: true, schema } },
       }),
     })

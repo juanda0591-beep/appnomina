@@ -74,7 +74,17 @@ async function passwordHash(password, salt = randomBytes(16).toString('hex')) {
   try { return { salt, hash: (await derivar(password, salt, 64)).toString('hex') } } finally { hashesActivos-- }
 }
 function validarPassword(v) {
-  exigir(typeof v === 'string' && v.length >= 10 && v.length <= 128, 'La contraseña debe tener entre 10 y 128 caracteres.')
+  exigir(typeof v === 'string' && v.length >= 4 && v.length <= 128, 'La contraseña debe tener entre 4 y 128 caracteres.')
+}
+const normalizarDocumento = (v) => v.replace(/[.\s-]/g, '').toLowerCase()
+function buscarCuenta(db, identificador) {
+  if (identificador.includes('@')) return db.prepare('SELECT * FROM portal_cuentas WHERE correo = ?').get(identificador)
+  const documento = normalizarDocumento(identificador)
+  if (!documento) return null
+  const coincidencias = db.prepare('SELECT id, nit FROM portal_cuentas').all()
+    .filter((c) => normalizarDocumento(c.nit) === documento)
+  // Los documentos existentes no son únicos: nunca elegir una cuenta arbitraria.
+  return coincidencias.length === 1 ? db.prepare('SELECT * FROM portal_cuentas WHERE id = ?').get(coincidencias[0].id) : null
 }
 async function verificar(password, cuenta) {
   if (typeof password !== 'string' || password.length > 128) return false
@@ -192,16 +202,17 @@ export function rutasPortal(db) {
     res.status(201).json({ ok: true, mensaje: 'Solicitud recibida. Tu proveedor revisará y habilitará tu cuenta mayorista.' })
   }))
   r.post('/login', manejar(async (req, res) => {
-    const correo = texto(req.body.correo, 254, true).toLowerCase()
+    const identificador = texto(req.body.identificador ?? req.body.correo, 254, true).toLowerCase()
     limitar(db, `login-ip:${req.ip}`, 30, 900000)
-    limitar(db, `login-cuenta:${correo}`, 10, 900000)
-    const c = db.prepare('SELECT * FROM portal_cuentas WHERE correo = ?').get(correo)
-    exigir(await verificar(req.body.password, c), 'Correo o contraseña incorrectos.', 401)
+    const c = buscarCuenta(db, identificador)
+    const limiteCuenta = `login-cuenta:${c ? `id:${c.id}` : identificador.includes('@') ? identificador : normalizarDocumento(identificador)}`
+    limitar(db, limiteCuenta, 10, 900000)
+    exigir(await verificar(req.body.password, c), 'Correo, documento o contraseña incorrectos.', 401)
     exigir(c.estado === 'aprobado', c.estado === 'pendiente' ? 'Tu cuenta está pendiente de aprobación.' : 'Tu cuenta no está habilitada. Contacta al proveedor.', 403)
     // Releer: el administrador pudo revocar la cuenta durante el hash.
     const actual = db.prepare('SELECT * FROM portal_cuentas WHERE id = ?').get(c.id)
     exigir(actual.estado === 'aprobado' && actual.hash === c.hash, 'La cuenta cambió. Intenta de nuevo.', 401)
-    db.prepare('DELETE FROM portal_limites WHERE clave = ?').run(digest(`login-cuenta:${correo}`))
+    db.prepare('DELETE FROM portal_limites WHERE clave = ?').run(digest(limiteCuenta))
     sesion(db, req, res, c.id)
     res.json(cuentaSalida(actual))
   }))

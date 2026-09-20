@@ -5,15 +5,16 @@ import { VisorWebGL } from '../utils/visorWebGL.js'
 import { fmtCm } from '../utils/unidades.js'
 import './VistaMueble3D.css'
 import EditorPiezaMDF from './EditorPiezaMDF.jsx'
+import MoverPieza from './MoverPieza.jsx'
 
-export default function VistaMueble3D({ diseno, piezas, seleccionado, onSeleccionar, onEditarPieza, compacto = false, modeloManual }) {
+export default function VistaMueble3D({ diseno, piezas, seleccionado, onSeleccionar, onEditarPieza, onMoverPieza, compacto = false, modeloManual }) {
   const modelo = useMemo(() => modeloManual || crearModeloMueble(diseno, piezas), [diseno, piezas, modeloManual])
   if (!modelo.piezas.length) return <div className="mueble3d-empty"><Box size={32} /><p>{modelo.avisos[0] || 'Completa las medidas del mueble.'}</p></div>
   return <VisorModelo modelo={modelo} seleccionadoExterno={seleccionado}
-    onSeleccionar={onSeleccionar} compacto={compacto} diseno={diseno} onEditarPieza={onEditarPieza} manual={!!modeloManual} />
+    onSeleccionar={onSeleccionar} compacto={compacto} diseno={diseno} onEditarPieza={onEditarPieza} onMoverPieza={onMoverPieza} manual={!!modeloManual} />
 }
 
-function VisorModelo({ modelo, seleccionadoExterno, onSeleccionar, compacto, diseno, onEditarPieza, manual }) {
+function VisorModelo({ modelo, seleccionadoExterno, onSeleccionar, compacto, diseno, onEditarPieza, onMoverPieza, manual }) {
   const ayudaId = useId()
   const canvas = useRef(null), motor = useRef(null), cambioSeleccion = useRef(null)
   const [seleccionLocal, setSeleccionLocal] = useState(null), [interior, setInterior] = useState(false)
@@ -94,10 +95,11 @@ function VisorModelo({ modelo, seleccionadoExterno, onSeleccionar, compacto, dis
           seleccionar(p?.id || null)
         }}><option value="">Selecciona una pieza</option>{todas.map((p, i) => <option key={p.id} value={p.id}>{p.codigo} · {p.nombre} · {i + 1}</option>)}</select></label>
         {pieza && <div className="mueble3d-detail"><strong>{pieza.codigo} · {pieza.nombre}</strong><span>{fmtCm(pieza.ancho)} × {fmtCm(pieza.alto)} cm · {pieza.espesor} mm</span>
+          {onMoverPieza && <><span>Posición X / Y / Z: {pieza.origen.join(' / ')} mm</span><MoverPieza onMover={(eje, distancia) => onMoverPieza(pieza.id, eje, distancia)} /></>}
           <span>{pieza.modulo === null ? 'Carcasa' : `Módulo ${pieza.modulo + 1}`}</span>
           <label className="mueble3d-check"><input type="checkbox" checked={aislar} onChange={(e) => setAislar(e.target.checked)} />Aislar pieza</label>
           {pieza.movimiento && <button type="button" className="corte-button" onClick={() => alternar(pieza.movimiento.id)}>{abiertos[pieza.movimiento.id] ? 'Cerrar pieza' : 'Abrir pieza'}</button>}
-          {onEditarPieza && pieza.clave && !pieza.herraje && !pieza.espejo && <EditorPiezaMDF key={pieza.clave + JSON.stringify(diseno.fabricacion?.perfiles?.[pieza.clave]) + JSON.stringify(diseno.fabricacion?.ajustes?.[pieza.clave])}
+          {onEditarPieza && pieza.clave && !pieza.herraje && !pieza.espejo && <EditorPiezaMDF key={pieza.clave}
             pieza={pieza} diseno={diseno} onGuardar={onEditarPieza} />}
         </div>}
         <p className="mueble3d-note">{modelo.herrajes?.length ? 'Rieles esquemáticos. Las holguras se ajustan en la configuración del módulo.' : 'Ensamblaje de referencia.'} Sin mecanizados.</p>

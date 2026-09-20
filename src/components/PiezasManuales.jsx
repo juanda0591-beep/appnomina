@@ -1,11 +1,11 @@
 import { lazy, Suspense, useMemo, useState } from 'react'
-import { modeloPiezasManuales } from '../utils/piezasManuales.js'
+import { modeloPiezasManuales, desplazarMontaje } from '../utils/piezasManuales.js'
 import { fmtCm } from '../utils/unidades.js'
 import { descargarPlanoPieza } from '../utils/pdfCortes.js'
 const VistaMueble3D = lazy(() => import('./VistaMueble3D.jsx'))
 
 export default function PiezasManuales({ proyecto, onMontaje, onPieza }) {
-  const [modo, setModo] = useState('individual'), [codigo, setCodigo] = useState(''), [unidad, setUnidad] = useState(1)
+  const [modo, setModo] = useState(proyecto.montajeManual?.length ? 'montaje' : 'individual'), [codigo, setCodigo] = useState(''), [unidad, setUnidad] = useState(1)
   const pieza = proyecto.piezas.find((p) => p.codigo === codigo) || proyecto.piezas[0]
   const unidadActual = Math.min(unidad, Math.max(1, Number(pieza?.cantidad || 1)))
   const ubicacion = proyecto.montajeManual?.find((p) => p.codigo === pieza?.codigo && p.unidad === unidadActual)
@@ -45,7 +45,11 @@ export default function PiezasManuales({ proyecto, onMontaje, onPieza }) {
         </div>
       </div>
       <button type="button" className="corte-button" onClick={() => { try { descargarPlanoPieza(pieza, proyecto.lamina.espesor); setError('') } catch (e) { setError(e.message) } }}>PDF de esta pieza</button>
-      {modelo.piezas.length ? <Suspense fallback={<p>Cargando piezas...</p>}><VistaMueble3D modeloManual={modelo} onSeleccionar={(id) => {
+      {modelo.piezas.length ? <Suspense fallback={<p>Cargando piezas...</p>}><VistaMueble3D modeloManual={modelo}
+        seleccionado={`${pieza.codigo}-${modo === 'montaje' ? unidadActual : 1}`}
+        onMoverPieza={!proyecto.diseno && modo === 'montaje' ? (id, eje, distancia) => {
+          onMontaje(desplazarMontaje(proyecto.montajeManual || [], proyecto.piezas, id, eje, distancia)); setBorrador(null)
+        } : undefined} onSeleccionar={(id) => {
         if (id) { seleccionar(id.replace(/-\d+$/, '')); if (modo === 'montaje') setUnidad(Number(id.match(/-(\d+)$/)?.[1]) || 1) }
       }} /></Suspense> : <p className="banner">{modo === 'montaje' ? 'Aún no hay piezas ubicadas.' : 'Completa nombre, medidas, espesor y cantidad para mostrar el 3D.'}</p>}
       {modelo.faltantes.length > 0 && <p className="banner">{modo === 'montaje' ? `${modelo.faltantes.length} unidades pendientes de ubicar. El montaje está incompleto.` : modelo.faltantes.join(', ')}</p>}

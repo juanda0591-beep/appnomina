@@ -1,13 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { http } from '../hooks/useLocalData.js'
+import ReferenciasPlano from './ReferenciasPlano.jsx'
+import { referenciaVacia } from '../utils/referenciasPlano.js'
 
-export default function AsistentePlanos({ proyecto, onPiezas, onMontaje, bloqueado }) {
+export default function AsistentePlanos({ proyecto, onPiezas, onMontaje, onReferencias, bloqueado }) {
   const [abierto, setAbierto] = useState(false), [descripcion, setDescripcion] = useState(''), [modo, setModo] = useState('explicar')
   const [estado, setEstado] = useState(null), [resultado, setResultado] = useState(null), [error, setError] = useState(''), [cargando, setCargando] = useState(false)
   const [revisado, setRevisado] = useState(false), [firmaRespuesta, setFirmaRespuesta] = useState('')
   const [aplicando, setAplicando] = useState(false)
+  const [leyendoFotos, setLeyendoFotos] = useState(false)
+  const referencias = proyecto.referencias || referenciaVacia()
+  const consulta = modo === 'fotos' ? referencias.descripcion : descripcion
   const solicitud = useRef(null), numero = useRef(0)
-  const firma = JSON.stringify({ piezas: proyecto.piezas, montaje: proyecto.montajeManual, espesor: proyecto.lamina.espesor, descripcion, modo })
+  const firma = JSON.stringify({ piezas: proyecto.piezas, montaje: proyecto.montajeManual, espesor: proyecto.lamina.espesor, descripcion: consulta, modo, referencias: modo === 'fotos' ? referencias : null })
   const actual = useRef(firma); actual.current = firma
   useEffect(() => () => { numero.current++; solicitud.current?.abort() }, [])
   useEffect(() => {
@@ -21,8 +26,9 @@ export default function AsistentePlanos({ proyecto, onPiezas, onMontaje, bloquea
     setCargando(true); setError(''); setResultado(null); setRevisado(false)
     const c = new AbortController(); solicitud.current = c
     try {
-      const r = await http('/ia/planos', { method: 'POST', signal: c.signal, body: JSON.stringify({ descripcion, modo,
-        piezas: proyecto.piezas, montaje: proyecto.montajeManual || [], espesorBase: Number(proyecto.lamina.espesor) }) })
+      const r = await http('/ia/planos', { method: 'POST', signal: c.signal, body: JSON.stringify({ descripcion: consulta, modo,
+        piezas: modo === 'fotos' ? [] : proyecto.piezas, montaje: modo === 'fotos' ? [] : proyecto.montajeManual || [], espesorBase: Number(proyecto.lamina.espesor),
+        ...(modo === 'fotos' ? { referencias } : {}) }) })
       if (n !== numero.current || actual.current !== consultaFirma) return
       setResultado(r); setFirmaRespuesta(consultaFirma)
     } catch (e) { if (!c.signal.aborted) setError(e.message) }
@@ -32,22 +38,25 @@ export default function AsistentePlanos({ proyecto, onPiezas, onMontaje, bloquea
     if (!revisado || firmaRespuesta !== firma || aplicando) return
     setAplicando(true)
     try {
-      const ok = await (tipo === 'piezas' ? onPiezas(resultado.piezas.map(({ motivo, ...p }) => p)) : onMontaje(resultado.montaje.map(({ motivo, ...p }) => p)))
+      const montaje = resultado.montaje.map(({ motivo, ...p }) => p)
+      const ok = await (tipo === 'piezas' ? onPiezas(resultado.piezas.map(({ motivo, ...p }) => p), modo === 'fotos' ? montaje : []) : onMontaje(montaje))
       if (ok !== false) { setResultado(null); setRevisado(false) }
     } catch (e) { setError(e.message) }
     finally { setAplicando(false) }
   }
   return <section className="asistente-planos">
-    <button type="button" className="corte-button" aria-expanded={abierto} onClick={() => setAbierto(!abierto)}> {abierto ? 'Cerrar asistente de medidas' : 'Asistente de medidas · OpenAI'}</button>
+    <button type="button" className="corte-button" aria-expanded={abierto} disabled={leyendoFotos} onClick={() => setAbierto(!abierto)}> {abierto ? 'Cerrar asistente de medidas' : 'Asistente de medidas · OpenAI'}</button>
+    <button type="button" className="corte-button" disabled={cargando || bloqueado || aplicando || leyendoFotos} onClick={() => { setAbierto(true); setModo('fotos'); setResultado(null) }}>Crear plano desde fotos</button>
     {abierto && <div>
-      <p className="muted small">Consulta sobre espesores, conversiones, descuentos y armado. Se envían tu texto, los nombres y medidas de esta tabla y las ubicaciones que hayas definido. No se envían costos, clientes ni fotografías.</p>
+      <p className="muted small">Consulta sobre espesores, conversiones, descuentos y armado, o crea un plano desde fotos. Las medidas que no se puedan confirmar quedarán pendientes para que las completes.</p>
       {estado?.configurada === false && <p className="banner">Configura OPENAI_API_KEY y OPENAI_MODEL en el servidor para usar el asistente.</p>}
-      <label>¿Qué necesitas?<select aria-label="Objetivo del asistente" value={modo} onChange={(e) => { setModo(e.target.value); setResultado(null) }} disabled={cargando}>
-        <option value="explicar">Entender y revisar medidas</option><option value="proponer">Proponer piezas o ubicaciones</option></select></label>
-      <label>Tu consulta<textarea aria-label="Consulta de medidas" rows={4} maxLength={4000} value={descripcion} disabled={cargando}
+      <label>¿Qué necesitas?<select aria-label="Objetivo del asistente" value={modo} onChange={(e) => { setModo(e.target.value); setResultado(null) }} disabled={cargando || leyendoFotos || aplicando}>
+        <option value="explicar">Entender y revisar medidas</option><option value="proponer">Proponer piezas o ubicaciones</option><option value="fotos">Crear plano desde fotos</option></select></label>
+      {modo === 'fotos' && <ReferenciasPlano valor={referencias} onChange={onReferencias} disabled={bloqueado || cargando || aplicando} onLeyendo={setLeyendoFotos} />}
+      <label>{modo === 'fotos' ? 'Detalles y medidas internas confirmadas' : 'Tu consulta'}<textarea aria-label="Consulta de medidas" rows={4} maxLength={4000} value={consulta} disabled={cargando || leyendoFotos || aplicando}
         placeholder="Ej.: Tengo dos laterales de 180 × 50 cm, MDF de 9 mm. ¿Cuánto deben medir el techo y el piso para un ancho exterior de 100 cm si van entre los laterales?"
-        onChange={(e) => { setDescripcion(e.target.value); setResultado(null) }} /></label>
-      <div className="corte-actions"><button type="button" className="corte-button primary" disabled={bloqueado || cargando || !estado?.configurada || descripcion.trim().length < 5} onClick={consultar}>{cargando ? 'Consultando OpenAI...' : 'Consultar medidas'}</button>
+        onChange={(e) => { if (modo === 'fotos') onReferencias({ ...referencias, descripcion: e.target.value }); else setDescripcion(e.target.value); setResultado(null) }} /></label>
+      <div className="corte-actions"><button type="button" className="corte-button primary" disabled={bloqueado || cargando || leyendoFotos || aplicando || !estado?.configurada || consulta.trim().length < 5 || (modo === 'fotos' && !referencias.fotos.length)} onClick={consultar}>{cargando ? 'Consultando OpenAI...' : modo === 'fotos' ? 'Generar plano desde fotos' : 'Consultar medidas'}</button>
         {cargando && <button type="button" className="corte-button" onClick={() => { numero.current++; solicitud.current?.abort(); setCargando(false) }}>Cancelar consulta</button>}</div>
       {error && <p role="alert" className="banner error">{error}</p>}
       {resultado && <div className="ia-medidas-respuesta" aria-live="polite">
@@ -58,7 +67,7 @@ export default function AsistentePlanos({ proyecto, onPiezas, onMontaje, bloquea
         {resultado.montaje.length > 0 && <div className="table-wrap"><table className="table"><thead><tr><th>Pieza</th><th>Plano</th><th>X / Y / Z (mm)</th><th>Motivo</th></tr></thead><tbody>{resultado.montaje.map((p) => <tr key={`${p.codigo}-${p.unidad}`}><td>{p.codigo}-{p.unidad}</td><td>{p.plano}</td><td>{p.x} / {p.y} / {p.z}</td><td>{p.motivo}</td></tr>)}</tbody></table></div>}
         {firmaRespuesta !== firma ? <p className="banner">Las medidas cambiaron. Consulta de nuevo antes de aplicar esta propuesta.</p> : <>
           {(resultado.puedeAplicarPiezas || resultado.puedeAplicarMontaje) && <label className="corte-check"><input type="checkbox" checked={revisado} onChange={(e) => setRevisado(e.target.checked)} />Revisé las medidas, supuestos y unidades de esta propuesta</label>}
-          <div className="corte-actions">{resultado.puedeAplicarPiezas && <button type="button" className="corte-button primary" disabled={!revisado || bloqueado || aplicando} onClick={() => aplicar('piezas')}>Reemplazar tabla con propuesta</button>}
+          <div className="corte-actions">{resultado.puedeAplicarPiezas && <button type="button" className="corte-button primary" disabled={!revisado || bloqueado || aplicando} onClick={() => aplicar('piezas')}>{modo === 'fotos' ? 'Aplicar plano y posiciones' : 'Reemplazar tabla con propuesta'}</button>}
             {resultado.puedeAplicarMontaje && <button type="button" className="corte-button" disabled={!revisado || bloqueado || aplicando || !!proyecto.diseno} onClick={() => aplicar('montaje')}>Aplicar ubicaciones propuestas</button>}</div>
         </>}
         <p className="muted small">La propuesta puede contener errores. Aplicarla no guarda el proyecto ni confirma que sea apto para fabricar.</p>

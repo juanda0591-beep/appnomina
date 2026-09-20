@@ -7,6 +7,64 @@ import sharp from 'sharp'
 import { servidorPrueba, datosCliente, ficha } from '../tests/portal-helper.mjs'
 import { restaurarRespaldo } from './restaurar.js'
 
+test('Portal: claves de cuatro caracteres y acceso por correo o documento', { timeout: 60000 }, async (t) => {
+  const { request: r, admin } = await servidorPrueba(t)
+  const registro = { ...datosCliente(), nit: '001.234.567-8', password: 'aB12' }
+  for (const password of ['123', 'x'.repeat(129)]) {
+    assert.equal((await r('/portal/registro', 'POST', { ...registro, password })).status, 400)
+  }
+  assert.equal((await r('/portal/registro', 'POST', registro)).status, 201)
+  const cuenta = (await r('/portal-admin/cuentas', 'GET', undefined, admin)).data[0]
+  const login = (identificador, password = registro.password) => r('/portal/login', 'POST', { identificador, password })
+  assert.equal((await login('0012345678')).status, 403, 'El documento no evita la aprobación')
+  assert.equal((await r(`/portal-admin/cuentas/${cuenta.id}`, 'PUT', { estado: 'aprobado' }, admin)).status, 200)
+  for (const identificador of ['0012345678', ' 001.234.567-8 ', '001 234 567-8', registro.correo.toUpperCase()]) {
+    const acceso = await login(identificador)
+    assert.equal(acceso.status, 200)
+    assert.equal(acceso.data.id, cuenta.id)
+    assert.equal((await r('/portal/sesion', 'GET', undefined, { Cookie: acceso.cookie })).data.id, cuenta.id)
+  }
+  assert.equal((await r('/portal/login', 'POST', registro)).status, 200, 'Conserva el contrato de correo anterior')
+  for (const identificador of ['12345678', '99999999', '---']) assert.equal((await login(identificador)).status, 401)
+  assert.equal((await login(registro.nit, 'mal')).status, 401)
+  const anterior = await login(registro.nit)
+  const cambiar = (nueva) => r('/portal/password', 'POST', { actual: registro.password, nueva }, { Cookie: anterior.cookie })
+  assert.equal((await cambiar('123')).status, 400)
+  assert.equal((await cambiar('x'.repeat(129))).status, 400)
+  assert.equal((await cambiar('5678')).status, 200)
+  assert.equal((await r('/portal/sesion', 'GET', undefined, { Cookie: anterior.cookie })).status, 401)
+  assert.equal((await login(registro.nit)).status, 401)
+  const cambiado = await login(registro.nit, '5678')
+  assert.equal(cambiado.status, 200)
+  const restablecer = (nueva) => r(`/portal-admin/cuentas/${cuenta.id}/password`, 'POST', { nueva }, admin)
+  assert.equal((await restablecer('123')).status, 400)
+  assert.equal((await restablecer('x'.repeat(129))).status, 400)
+  assert.equal((await restablecer('9012')).status, 200)
+  assert.equal((await r('/portal/sesion', 'GET', undefined, { Cookie: cambiado.cookie })).status, 401)
+  assert.equal((await login(registro.nit, '5678')).status, 401)
+  assert.equal((await login(registro.nit, '9012')).status, 200)
+  assert.equal((await r(`/portal-admin/cuentas/${cuenta.id}`, 'PUT', { estado: 'suspendido' }, admin)).status, 200)
+  assert.equal((await login(registro.nit, '9012')).status, 403)
+})
+
+test('Portal: documentos duplicados usan correo y los alias comparten límite de intentos', { timeout: 60000 }, async (t) => {
+  const { request: r, admin } = await servidorPrueba(t)
+  const registro = { ...datosCliente(), nit: '900.123-4' }
+  assert.equal((await r('/portal/registro', 'POST', registro)).status, 201)
+  const cuenta = (await r('/portal-admin/cuentas', 'GET', undefined, admin)).data[0]
+  assert.equal((await r(`/portal-admin/cuentas/${cuenta.id}`, 'PUT', { estado: 'aprobado' }, admin)).status, 200)
+  const login = (identificador, password) => r('/portal/login', 'POST', { identificador, password })
+  for (let i = 0; i < 10; i++) {
+    assert.equal((await login(i % 2 ? registro.correo : '9001234', 'incorrecta')).status, 401)
+  }
+  assert.equal((await login(registro.nit, registro.password)).status, 429)
+  assert.equal((await login(registro.correo, registro.password)).status, 429)
+  const duplicado = { ...datosCliente('otro@ejemplo.com'), nit: '9001234' }
+  assert.equal((await r('/portal/registro', 'POST', duplicado)).status, 201)
+  assert.equal((await login('9001234', registro.password)).status, 401, 'No selecciona arbitrariamente un documento duplicado')
+  assert.equal((await login(duplicado.correo, duplicado.password)).status, 403, 'El correo identifica la cuenta pendiente correcta')
+})
+
 test('Portal mayorista: aprobación, aislamiento, catálogo, pedidos, reintentos y revocación', { timeout: 60000 }, async (t) => {
   const { request: r, admin, carpeta } = await servidorPrueba(t)
   const a = (p, m = 'GET', b) => r(p, m, b, admin)
