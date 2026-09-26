@@ -3,19 +3,20 @@ import { generarMaterial, ErrorIA } from './ia-materiales.js'
 import { generarProducto, generarCopyProducto } from './ia-productos.js'
 import { generarPlanos } from './ia-planos.js'
 
-export function rutasIA({ db, permisoRequired, generar = generarMaterial, generarProd = generarProducto, generarCopy = generarCopyProducto, generarPlano = generarPlanos }) {
+export function rutasIA({ db, permisoRequired, permisoAnyRequired, generar = generarMaterial, generarProd = generarProducto, generarCopy = generarCopyProducto, generarPlano = generarPlanos }) {
   const router = Router()
   const solicitudes = new Map()
   let activas = 0
   const permisosMaterial = [permisoRequired('materiales', 'ver'), permisoRequired('materiales', 'crear')]
   const permisosProducto = [permisoRequired('productos', 'ver'), permisoRequired('productos', 'crear'), permisoRequired('materiales', 'ver')]
+  const permisosCopy = [permisoRequired('productos', 'ver'), permisoAnyRequired([['productos', 'crear'], ['productos', 'editar']])]
   const permisosPlanos = [permisoRequired('cortes-planos', 'ver')]
   const estado = (req, res) => {
     res.json({ configurada: Boolean(process.env.OPENAI_API_KEY && process.env.OPENAI_MODEL) })
   }
   router.get('/estado', ...permisosMaterial, estado)
   router.get('/producto/estado', ...permisosProducto, estado)
-  router.get('/producto-copy/estado', ...permisosProducto, estado)
+  router.get('/producto-copy/estado', ...permisosCopy, estado)
   router.get('/planos/estado', ...permisosPlanos, estado)
   const preparar = (generador) => async (req, res) => {
     const ahora = Date.now()
@@ -53,7 +54,7 @@ export function rutasIA({ db, permisoRequired, generar = generarMaterial, genera
     const productos = db.prepare('SELECT id, nombre FROM productos').all()
     return generarProd({ descripcion, materiales, procesosGlobales, productos })
   }))
-  router.post('/producto-copy', ...permisosProducto, preparar((descripcion, body) => generarCopy({ descripcion: body?.descripcion || descripcion })))
+  router.post('/producto-copy', ...permisosCopy, preparar((descripcion, body) => generarCopy({ descripcion: body?.descripcion || descripcion })))
   router.post('/planos', ...permisosPlanos, preparar((descripcion, body) => generarPlano(body)))
   return router
 }

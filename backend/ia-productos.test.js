@@ -122,10 +122,15 @@ test('producto aplica permisos propios y comparte límite con materiales', async
     if (!req.headers['x-permisos']?.split(',').includes(`${pagina}:${accion}`)) return res.status(403).end()
     next()
   }
+  const permisoAnyRequired = (reglas) => (req, res, next) => {
+    if (!reglas.some(([pagina, accion]) => req.headers['x-permisos']?.split(',').includes(`${pagina}:${accion}`))) return res.status(403).end()
+    next()
+  }
   let llamadas = 0
   const db = { prepare: (sql) => { assert.match(sql, /^SELECT /); return { all: () => [] } } }
-  app.use('/api/ia', rutasIA({ db, permisoRequired,
+  app.use('/api/ia', rutasIA({ db, permisoRequired, permisoAnyRequired,
     generarProd: async () => { llamadas++; return validarProducto({ ...producto(), procesos: [] }) },
+    generarCopy: async () => { llamadas++; return { copy: 'Armario en MDF con puertas para organizar tus espacios de forma práctica.' } },
     generar: async () => { llamadas++; return {} },
   }))
   const server = app.listen(0, '127.0.0.1')
@@ -137,9 +142,17 @@ test('producto aplica permisos propios y comparte límite con materiales', async
     assert.equal((await fetch(`${url}/producto/estado`, { headers: { 'x-permisos': permisos } })).status, 403)
   }
   assert.equal(llamadas, 0)
+  for (const permisosCopy of ['productos:ver,productos:crear', 'productos:ver,productos:editar']) {
+    assert.equal((await fetch(`${url}/producto-copy/estado`, { headers: { 'x-permisos': permisosCopy } })).status, 200)
+    assert.equal((await fetch(`${url}/producto-copy`, { method: 'POST', headers: { 'x-permisos': permisosCopy, 'x-usuario': permisosCopy } })).status, 200)
+  }
+  for (const permisosCopy of ['productos:ver', 'productos:crear', 'productos:editar']) {
+    assert.equal((await fetch(`${url}/producto-copy`, { method: 'POST', headers: { 'x-permisos': permisosCopy } })).status, 403)
+  }
+  assert.equal(llamadas, 2)
   const permisos = 'productos:ver,productos:crear,materiales:ver'
   assert.equal((await fetch(`${url}/producto/estado`, { headers: { 'x-permisos': permisos } })).status, 200)
   assert.equal((await fetch(`${url}/producto`, { method: 'POST', headers: { 'x-permisos': permisos } })).status, 200)
   assert.equal((await fetch(`${url}/material`, { method: 'POST', headers: { 'x-permisos': 'materiales:ver,materiales:crear' } })).status, 429)
-  assert.equal(llamadas, 1)
+  assert.equal(llamadas, 3)
 })

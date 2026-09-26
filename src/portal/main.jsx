@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { ArrowRight, ArrowUpRight, CheckCircle2, LogOut, Package, Search, ShoppingBag, Truck, X, Plus, ShieldCheck } from 'lucide-react'
+import { ArrowRight, ArrowUpRight, CheckCircle2, LogOut, Package, Search, ShoppingBag, Truck, X, Plus, ShieldCheck, RefreshCw, Ruler } from 'lucide-react'
 import { portalApi, dinero, leerBorrador } from './api.js'
 import GaleriaProducto from './GaleriaProducto.jsx'
 import ConfirmacionProducto from './ConfirmacionProducto.jsx'
 import './portal.css'
+import './catalogo.css'
 
 function Escena() {
   return <svg viewBox="0 0 600 520" aria-hidden="true" className="escena">
@@ -81,12 +82,15 @@ function Producto({ p, agregar, bloqueado, cantidadEnPedido }) {
   const v = p.variantes.find((v) => String(v.id) === variante)
   const agotado = !v || (p.modalidad === 'stock' && v.disponible < p.minimo)
   return <article className="producto">
-    <GaleriaProducto producto={p} etiqueta={p.modalidad === 'encargo' ? 'Bajo pedido' : agotado ? 'No disponible' : 'En colección'}/>
+    <div className="producto-media"><GaleriaProducto producto={p} etiqueta={p.modalidad === 'encargo' ? 'Bajo pedido' : agotado ? 'No disponible' : 'En colección'}/></div>
     <div className="producto-info"><span className="eyebrow">{p.categoria} · {p.codigo}</span><h3>{p.nombre}</h3>
-      <div className="producto-precio"><strong>{dinero(p.precio)}</strong><span>/ unidad</span></div>
-      <p className="producto-minimo">Mínimo {p.minimo} {p.minimo === 1 ? 'unidad' : 'unidades'} por color</p>
-      {(p.descripcion || p.medidas) && <details><summary>Detalles del producto</summary><p>{p.descripcion}</p>{p.medidas && <p><b>Medidas:</b> {p.medidas}</p>}</details>}
-      <div className="producto-acciones"><label><span className="sr-only">Color de {p.nombre}</span><select value={variante} onChange={(e) => setVariante(e.target.value)} disabled={bloqueado}>{p.variantes.map((v) => <option value={v.id} key={v.id}>{v.color}</option>)}</select></label>
+      {p.descripcion && <p className="producto-copy">{p.descripcion}</p>}
+      {p.descripcion?.length > 170 && <details className="producto-descripcion-completa"><summary>Descripción completa</summary><p>{p.descripcion}</p></details>}
+      <div className="producto-datos"><span><Ruler size={15} aria-hidden="true"/>{p.medidas || 'Medidas por confirmar'}</span>
+        <span>Pedido mínimo: {p.minimo} {p.minimo === 1 ? 'unidad' : 'unidades'}</span></div>
+      <div className="producto-precio"><strong>{p.precio > 0 ? dinero(p.precio) : 'Precio por confirmar'}</strong>{p.precio > 0 && <span>/ unidad</span>}</div>
+      <div className="producto-acciones">{p.variantes.length > 1 ? <label><span className="sr-only">Color de {p.nombre}</span><select value={variante} onChange={(e) => setVariante(e.target.value)} disabled={bloqueado}>{p.variantes.map((v) => <option value={v.id} key={v.id}>{v.color}</option>)}</select></label>
+        : v && v.color !== 'Estándar' && <span className="producto-color">{v.color}</span>}
         <button className="agregar" aria-label={`Agregar ${p.nombre}`} disabled={agotado || bloqueado || !(p.precio > 0)} onClick={() => agregar(p, v)}><Plus size={18}/>Agregar</button></div>
       <small className="muted">{p.modalidad === 'encargo' ? 'Entrega a coordinar con tu proveedor' : `${v?.disponible || 0} unidades disponibles para solicitar`}</small>
       {cantidadEnPedido > 0 && <p className="producto-en-pedido"><CheckCircle2 size={16}/>{cantidadEnPedido} {cantidadEnPedido === 1 ? 'unidad en tu pedido' : 'unidades en tu pedido'}</p>}
@@ -209,25 +213,23 @@ function Tienda({ config, cuenta, setCuenta }) {
   const total = carrito.reduce((s, i) => s + i.precio * i.cantidad, 0)
   const unidades = carrito.reduce((s, i) => s + (Number(i.cantidad) || 0), 0)
   const categorias = ['Todas', ...new Set(productos.map((p) => p.categoria))]
-  const visibles = productos.filter((p) => (categoria === 'Todas' || p.categoria === categoria) && `${p.nombre} ${p.codigo} ${p.descripcion}`.toLocaleLowerCase('es').includes(busqueda.toLocaleLowerCase('es')))
+  const categoriaActiva = categorias.length > 2 && categorias.includes(categoria) ? categoria : 'Todas'
+  const busquedaActiva = productos.length >= 3 ? busqueda : ''
+  const visibles = productos.filter((p) => (categoriaActiva === 'Todas' || p.categoria === categoriaActiva) && `${p.nombre} ${p.codigo} ${p.categoria} ${p.descripcion} ${p.medidas}`.toLocaleLowerCase('es').includes(busquedaActiva.toLocaleLowerCase('es')))
   return <div className={`tienda ${carrito.length ? 'tienda-con-pedido' : ''}`}>
-    <div className="franja">UNA COLECCIÓN DE POSIBILIDADES PARA TU NEGOCIO</div>
     <header className="cabecera"><a className="marca" href="/catalogo/"><span className="marca-icono"><Package size={22}/></span>{config.marca}</a>
       <nav aria-label="Navegación principal">{[['catalogo', 'Colección'], ['pedidos', 'Mis pedidos'], ['cuenta', 'Mi cuenta']].map(([v, label]) => <button key={v} aria-current={vista === v ? 'page' : undefined} onClick={() => abrirVista(v)}>{label}</button>)}</nav>
       <div className="cabecera-acciones"><button className="bolsa" onClick={() => setAbierto(!abierto)} aria-label={`Ver pedido, ${carrito.length} productos`}><ShoppingBag size={20}/><span>Mi pedido</span><b>{carrito.length}</b></button><button className="icon-button" title="Cerrar sesión" aria-label="Cerrar sesión" disabled={ocupado} onClick={() => ejecutar(async () => { await portalApi('/logout', 'POST', {}); setCuenta(null) })}><LogOut size={19}/></button></div>
     </header>
     <main className="tienda-main">
-      <div className="saludo"><span><span className="punto"/>Acceso mayorista</span><span>Hola, {cuenta.contacto.split(' ')[0]}</span></div>
       {error && <p className="alerta error" role="alert">{error}</p>}{aviso && <p className="alerta" role="status">{aviso}</p>}
       {pendiente && <div className="alerta">Tienes un envío por confirmar. <button onClick={() => setAbierto(true)}>Abrir pedido para reintentar</button></div>}
       {recibo && <section className="recibo"><CheckCircle2 size={32}/><div><h2>Recibimos tu pedido #{recibo.id}</h2><p>{dinero(recibo.total)} · Entrega pendiente de confirmación</p></div><button onClick={() => abrirVista('pedidos')}>Ver mis pedidos <ArrowUpRight size={18}/></button></section>}
       {vista === 'catalogo' && <>
-        <section className="hero"><div><span className="eyebrow">LA COLECCIÓN MAYORISTA</span><h1>{config.titulo}</h1><p>{config.subtitulo}</p><a href="#coleccion">Encuentra tu próximo favorito <ArrowDownIcon/></a></div><div className="hero-arte"><Escena/><span>Elegidos para tu negocio.</span></div></section>
-        <div className="beneficios"><span><ShieldCheck size={19}/>Precios para tu negocio</span><span><Package size={19}/>Pedidos en un solo lugar</span><span><Truck size={19}/>Entrega coordinada contigo</span></div>
-        <section id="coleccion"><div className="coleccion-titulo"><div><span className="eyebrow">EXPLORA Y ELIGE</span><h2>Nuestra colección <span>{productos.length}</span></h2></div><button className="texto-button" onClick={actualizar} disabled={ocupado || !!pendiente}>Actualizar catálogo</button></div>
-          <ol className="guia-pedido" aria-label="Cómo hacer tu pedido"><li><b>1</b><span><strong>Elige tus productos</strong>Agrega los que necesites.</span></li><li><b>2</b><span><strong>Revisa tu pedido</strong>Ajusta cantidades y dirección.</span></li><li><b>3</b><span><strong>Confirma y envía</strong>Recibirás tu número de pedido.</span></li></ol>
-          <div className="filtros"><div className="categorias" role="group" aria-label="Categorías">{categorias.map((c) => <button aria-pressed={categoria === c} key={c} onClick={() => setCategoria(c)}>{c}</button>)}</div><label className="buscador"><Search size={18}/><span className="sr-only">Buscar productos</span><input placeholder="Busca por nombre o referencia" value={busqueda} onChange={(e) => setBusqueda(e.target.value)}/></label></div>
-          {cargando ? <p className="vacio" role="status">Preparando la colección…</p> : visibles.length === 0 ? <div className="vacio"><Package size={40}/><h3>{productos.length ? 'No encontramos coincidencias' : 'La colección está en preparación'}</h3><p>{productos.length ? 'Prueba otra búsqueda o categoría.' : 'Tu proveedor publicará aquí los productos disponibles para pedidos.'}</p></div> : <div className="productos-grid">{visibles.map((p) => <Producto key={p.id} p={p} agregar={agregar} bloqueado={ocupado || !!pendiente} cantidadEnPedido={carrito.filter((i) => i.productoId === p.id).reduce((s, i) => s + (Number(i.cantidad) || 0), 0)}/>)}</div>}
+        <section className="catalogo-intro"><span className="eyebrow">ACCESO MAYORISTA · {config.marca}</span><h1>{config.titulo}</h1><p>{config.subtitulo}</p></section>
+        <section id="coleccion"><div className="coleccion-titulo"><div><span className="eyebrow">SELECCIÓN PARA TU NEGOCIO</span><h2>Nuestra colección <span>{productos.length}</span></h2></div><button className="icon-button" title="Actualizar catálogo" aria-label="Actualizar catálogo" onClick={actualizar} disabled={ocupado || !!pendiente}><RefreshCw size={19}/></button></div>
+          {(categorias.length > 2 || productos.length >= 3) && <div className="filtros">{categorias.length > 2 && <div className="categorias" role="group" aria-label="Categorías">{categorias.map((c) => <button aria-pressed={categoriaActiva === c} key={c} onClick={() => setCategoria(c)}>{c}</button>)}</div>}{productos.length >= 3 && <label className="buscador"><Search size={18}/><span className="sr-only">Buscar productos</span><input placeholder="Busca por nombre o referencia" value={busqueda} onChange={(e) => setBusqueda(e.target.value)}/></label>}</div>}
+          {cargando ? <p className="vacio" role="status">Preparando la colección…</p> : visibles.length === 0 ? <div className="vacio"><Package size={40}/><h3>{productos.length ? 'No encontramos coincidencias' : 'La colección está en preparación'}</h3><p>{productos.length ? 'Prueba otra búsqueda o categoría.' : 'Tu proveedor publicará aquí los productos disponibles para pedidos.'}</p></div> : <div className={`productos-grid ${visibles.length === 1 ? 'unico' : visibles.length === 2 ? 'pocos' : ''}`}>{visibles.map((p) => <Producto key={p.id} p={p} agregar={agregar} bloqueado={ocupado || !!pendiente} cantidadEnPedido={carrito.filter((i) => i.productoId === p.id).reduce((s, i) => s + (Number(i.cantidad) || 0), 0)}/>)}</div>}
         </section>
       </>}
       {vista === 'pedidos' && <section className="historial"><span className="eyebrow">CADA PEDIDO, A TU ALCANCE</span><div className="coleccion-titulo"><h1>Mis pedidos</h1><button className="texto-button" disabled={ocupado} onClick={() => abrirVista('pedidos')}>Actualizar pedidos</button></div><p className="muted">Consulta los pedidos realizados desde el portal y la fecha de entrega confirmada por tu proveedor.</p>
@@ -245,6 +247,7 @@ function Tienda({ config, cuenta, setCuenta }) {
     {agregado && <ConfirmacionProducto producto={agregado} total={total} unidades={unidades} cerrar={() => setAgregado(null)} verPedido={() => { setAgregado(null); setAbierto(true) }}/>} 
     {abierto && <div className="carrito-fondo" onClick={() => setAbierto(false)}><section ref={dialogo} className="carrito" aria-label="Tu pedido" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
       <header><div><span className="eyebrow">PASO A PASO, CRECEMOS</span><h2>Tu próximo pedido</h2></div><button autoFocus aria-label="Cerrar pedido" className="icon-button" onClick={() => setAbierto(false)}><X/></button></header>
+      {carrito.length > 0 && <ol className="pedido-etapas" aria-label="Etapas del pedido"><li>Productos</li><li>Entrega</li><li>Confirmación</li></ol>}
       {carrito.length > 0 && !pendiente && <p className="carrito-instruccion"><strong>Ya casi terminas.</strong> Revisa las cantidades y tu dirección. Luego marca la casilla de revisión y pulsa «Confirmar y enviar pedido» al final.</p>}
       {error && <p className="alerta error" role="alert">{error}</p>}{aviso && <p className="alerta" role="status">{aviso}</p>}
       {!carrito.length ? <div className="vacio"><ShoppingBag size={40}/><h3>Hay espacio para buenas ideas</h3><p>Agrega productos de la colección para comenzar.</p></div> : <form onSubmit={enviar}>
@@ -264,7 +267,6 @@ function Tienda({ config, cuenta, setCuenta }) {
     </section></div>}
   </div>
 }
-function ArrowDownIcon() { return <ArrowRight size={19} style={{ transform: 'rotate(45deg)' }}/> }
 function Portal() {
   const [config, setConfig] = useState({ marca: 'Colección Mayorista', titulo: 'Diseño que impulsa tu negocio.', subtitulo: 'Explora nuestra colección y prepara tu próximo pedido mayorista.' })
   const [cuenta, setCuenta] = useState(null), [cargando, setCargando] = useState(true), [error, setError] = useState('')

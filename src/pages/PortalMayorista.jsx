@@ -3,6 +3,7 @@ import { confirmar, notify } from '../utils/notify.js'
 import { formatCOP } from '../utils/format.js'
 import './PortalMayorista.css'
 import WhatsAppPanel from './WhatsAppPanel.jsx'
+import AsistenteCopyProducto from '../components/AsistenteCopyProducto.jsx'
 
 async function api(path, method = 'GET', body) {
   const res = await fetch(`/api${path}`, { method,
@@ -19,6 +20,7 @@ export default function PortalMayorista() {
   const [wa, setWa] = useState(null), [waTexto, setWaTexto] = useState(''), [waVista, setWaVista] = useState(null)
   const [productos, setProductos] = useState([]), [config, setConfig] = useState({ titulo: '', subtitulo: '' })
   const [vinculos, setVinculos] = useState({}), [editor, setEditor] = useState(null), [recuperar, setRecuperar] = useState(null)
+  const [copyProducto, setCopyProducto] = useState(null)
   const [busqueda, setBusqueda] = useState(''), [filtro, setFiltro] = useState('pendiente'), [error, setError] = useState('')
   const [ocupado, setOcupado] = useState(false), [cargando, setCargando] = useState(true)
   const [leyendoFotos, setLeyendoFotos] = useState(false)
@@ -101,7 +103,7 @@ export default function PortalMayorista() {
       <label>Buscar producto<input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Nombre o referencia"/></label>
       <div className="pm-productos">{productos.filter((p) => `${p.nombre} ${p.codigo}`.toLowerCase().includes(busqueda.toLowerCase())).map((p) => <article key={p.id}>
         <div className="pm-foto">{p.tieneImagen ? <img src={fotoUrl(p)} alt={p.nombre} loading="lazy"/> : <span>Sin fotografía</span>}</div>
-        <div><span className={`pm-estado ${p.publicado ? 'aprobado' : 'pendiente'}`}>{p.publicado ? 'Publicado' : 'Oculto'}</span><h3>{p.nombre}</h3><p>{p.codigo} · {p.categoria}</p><p><b>{formatCOP(p.precio)}</b> · Mínimo {p.minimo}</p><small>{p.modalidad === 'encargo' ? 'Bajo pedido' : 'Limitado a disponibilidad'} · {p.imagenes?.length || 0} fotos</small><button className="btn-secondary" onClick={() => editar(p)}>Editar ficha</button></div>
+        <div><span className={`pm-estado ${p.publicado ? 'aprobado' : 'pendiente'}`}>{p.publicado ? 'Publicado' : 'Oculto'}</span><h3>{p.nombre}</h3>{p.descripcion && <p className="pm-copy-resumen">{p.descripcion}</p>}<p>{p.codigo} · {p.categoria}</p><p><b>{formatCOP(p.precio)}</b> · Mínimo {p.minimo}</p><small>{p.modalidad === 'encargo' ? 'Bajo pedido' : 'Limitado a disponibilidad'} · {p.imagenes?.length || 0} fotos</small><div className="pm-producto-acciones"><button className="btn-secondary" onClick={() => editar(p)}>Editar ficha</button><button className="btn-secondary" onClick={() => setCopyProducto(p)}>Regenerar copy IA</button></div></div>
       </article>)}</div>
       {!cargando && !productos.length && <div className="pm-vacio">Crea tu primer producto en la sección Productos para publicarlo aquí.</div>}
     </>}
@@ -118,6 +120,8 @@ export default function PortalMayorista() {
         <label className="pm-check"><input type="checkbox" checked={editor.publicado} onChange={(e) => setEditor({ ...editor, publicado: e.target.checked })}/>Publicar en el catálogo mayorista</label>
         <label>Categoría<input required maxLength={80} value={editor.categoria} onChange={(e) => setEditor({ ...editor, categoria: e.target.value })} placeholder="Ej. Armarios, tocadores, mesas"/></label>
         <label>Descripción comercial<textarea maxLength={3000} value={editor.descripcion} onChange={(e) => setEditor({ ...editor, descripcion: e.target.value })}/></label>
+        <AsistenteCopyProducto key={editor.id} nombre={editor.nombre} descripcion={editor.descripcion} contexto={`${editor.categoria || ''}. ${editor.medidas || ''}`}
+          onAplicar={(copy) => setEditor((actual) => ({ ...actual, descripcion: copy }))} />
         <label>Medidas<input maxLength={200} value={editor.medidas} onChange={(e) => setEditor({ ...editor, medidas: e.target.value })} placeholder="Ej. 120 cm ancho × 180 cm alto × 45 cm fondo"/></label>
         <div className="pm-filtros"><label>Precio mayorista (COP)<input type="number" min="0.01" max="1000000000" step="0.01" value={editor.precio} onChange={(e) => setEditor({ ...editor, precio: e.target.value })} placeholder={`Usar precio de venta: ${editor.precioBase}`}/></label><label>Mínimo por color<input required type="number" min="1" max="10000" step="1" value={editor.minimo} onChange={(e) => setEditor({ ...editor, minimo: e.target.value })}/></label></div>
         <p className="muted">Si dejas el precio vacío, se usará el precio de venta vigente del producto: {formatCOP(editor.precioBase)}.</p>
@@ -134,6 +138,20 @@ export default function PortalMayorista() {
         </li>)}</ol>
         <div className="actions"><button className="btn-secondary" type="button" onClick={() => { setEditor(null); setError('') }}>Cancelar</button><button className="btn-primary">{ocupado ? 'Guardando…' : 'Guardar ficha'}</button></div>
       </fieldset></form>
+    </div></div>}
+    {copyProducto && <div className="modal-backdrop"><div className="modal pm-editor" role="dialog" aria-modal="true" aria-label={`Copy de ${copyProducto.nombre}`}>
+      <h3>Copy de {copyProducto.nombre}</h3>
+      <AsistenteCopyProducto key={copyProducto.id} nombre={copyProducto.nombre} descripcion={copyProducto.descripcion || ''}
+        contexto={`${copyProducto.categoria || ''}. ${copyProducto.medidas || ''}`} autoGenerar onAplicar={async (copy) => {
+          setOcupado(true)
+          try {
+            await api(`/portal-admin/productos/${copyProducto.id}/descripcion`, 'PATCH', { descripcion: copy })
+            await cargar()
+            setCopyProducto(null)
+            notify.ok('Copy del catálogo actualizado')
+          } finally { setOcupado(false) }
+        }} />
+      <div className="actions"><button type="button" className="btn-secondary" disabled={ocupado} onClick={() => setCopyProducto(null)}>Cancelar</button></div>
     </div></div>}
     {recuperar && <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true" aria-label="Restablecer contraseña"><h3>Restablecer acceso de {recuperar.negocio}</h3><p>Verifica la identidad del cliente y acuerda con él la nueva contraseña. Las sesiones actuales se cerrarán.</p>{error && <p role="alert" className="banner error">{error}</p>}<form onSubmit={(e) => { e.preventDefault(); const nueva = new FormData(e.currentTarget).get('nueva'); ejecutar(async () => { await api(`/portal-admin/cuentas/${recuperar.id}/password`, 'POST', { nueva }); setRecuperar(null) }, 'Contraseña restablecida') }}><label>Nueva contraseña<input name="nueva" type="password" required minLength={4} placeholder="Mínimo 4 caracteres" maxLength={128} autoComplete="new-password"/></label><div className="actions"><button type="button" className="btn-secondary" disabled={ocupado} onClick={() => setRecuperar(null)}>Cancelar</button><button className="btn-primary" disabled={ocupado}>Restablecer contraseña</button></div></form></div></div>}
   </div>

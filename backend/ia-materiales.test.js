@@ -81,7 +81,7 @@ test('rutas exigen ambos permisos y no escriben en la base de datos', async (t) 
     if (!req.headers['x-permisos']?.split(',').includes(accion)) return res.status(403).end()
     next()
   }
-  app.use('/api/ia', rutasIA({ db, permisoRequired, generar: async () => { llamadas++; return validarMaterial(base()) } }))
+  app.use('/api/ia', rutasIA({ db, permisoRequired, permisoAnyRequired: () => permisoRequired('productos', 'editar'), generar: async () => { llamadas++; return validarMaterial(base()) } }))
   const server = app.listen(0, '127.0.0.1')
   await new Promise((resolve) => server.once('listening', resolve))
   t.after(() => new Promise((resolve) => server.close(resolve)))

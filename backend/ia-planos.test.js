@@ -47,6 +47,7 @@ test('IA planos: permisos, errores y límite compartido sin consultar la base de
   const permisoRequired = (pagina, accion) => (req, res, next) => req.headers['x-perm']?.includes(`${pagina}:${accion}`) ? next() : res.status(403).end()
   let llamadas = 0
   app.use('/api/ia', rutasIA({ db: { prepare: () => { throw new Error('No debe leer la base') } }, permisoRequired,
+    permisoAnyRequired: () => permisoRequired('productos', 'editar'),
     generarPlano: async (body) => { llamadas++; return validarRespuestaPlanos(respuesta(), contextoPlanos(body)) } }))
   const server = app.listen(0, '127.0.0.1'); await new Promise((resolve) => server.once('listening', resolve))
   t.after(() => new Promise((resolve) => server.close(resolve)))

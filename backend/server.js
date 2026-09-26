@@ -62,7 +62,7 @@ app.use(authRequired) // protege todas las rutas /api excepto /api/login
 app.use(auditarSolicitud)
 app.use('/api/portal-admin', rutasPortalAdmin(db, adminRequired))
 app.use('/api/whatsapp', rutasWhatsApp(db, adminRequired))
-app.use('/api/ia', rutasIA({ db, permisoRequired }))
+app.use('/api/ia', rutasIA({ db, permisoRequired, permisoAnyRequired }))
 
 const PORT = process.env.PORT || 3001
 const respaldos = gestorRespaldos(db)
@@ -512,6 +512,16 @@ app.put('/api/productos/:id', permisoRequired('productos', 'editar'), (req, res)
   })
   update()
   res.json(productoConProcesos(db.prepare('SELECT * FROM productos WHERE id = ?').get(id)))
+})
+
+app.patch('/api/productos/:id/descripcion', permisoRequired('productos', 'editar'), (req, res) => {
+  const descripcion = req.body?.descripcion
+  if (typeof descripcion !== 'string' || !descripcion.trim() || descripcion.trim().length > 240) {
+    return res.status(400).json({ error: 'El copy debe tener entre 1 y 240 caracteres.' })
+  }
+  const resultado = db.prepare('UPDATE productos SET descripcion = ? WHERE id = ?').run(descripcion.trim(), req.params.id)
+  if (!resultado.changes) return res.status(404).json({ error: 'Producto no encontrado' })
+  res.json(productoConProcesos(db.prepare('SELECT * FROM productos WHERE id = ?').get(req.params.id)))
 })
 
 app.delete('/api/productos/:id', permisoRequired('productos', 'eliminar'), (req, res) => {

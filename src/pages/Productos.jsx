@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useLocalData } from '../hooks/useLocalData.js'
+import { useLocalData, http } from '../hooks/useLocalData.js'
 import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { formatCOP, formatFecha, hoyISO } from '../utils/format.js'
@@ -42,6 +42,8 @@ export default function Productos() {
   const [datos, setDatos] = useState(emptyDatos())
   const [procesos, setProcesos] = useState([emptyProceso()])
   const [editId, setEditId] = useState(null)
+  const [copyProducto, setCopyProducto] = useState(null)
+  const [guardandoCopy, setGuardandoCopy] = useState(false)
   const [formAbierto, setFormAbierto] = useState(false)
   const [desdeIA, setDesdeIA] = useState(false)
 
@@ -456,13 +458,13 @@ export default function Productos() {
           </div>
         </div>
 
-        <label>Descripción</label>
-        <input
+        <label htmlFor="producto-descripcion">Descripción</label>
+        <textarea id="producto-descripcion" rows={3}
           value={datos.descripcion}
           onChange={(e) => setDato('descripcion', e.target.value)}
           placeholder="Ej: Armario de 3 cuerpos en MDF, puertas corredizas"
         />
-        {!editId && puede('productos', 'crear') && <AsistenteCopyProducto nombre={nombre} descripcion={datos.descripcion} procesos={procesos}
+        {puede('productos', editId ? 'editar' : 'crear') && <AsistenteCopyProducto key={editId || 'nuevo'} nombre={nombre} descripcion={datos.descripcion} procesos={procesos}
           disabled={!nombre.trim()} onAplicar={(copy) => setDato('descripcion', copy)} />}
 
         <div className="row">
@@ -740,9 +742,10 @@ export default function Productos() {
                           </button>
                         )}
                         {puedeEditar && (
-                          <button className="btn-secondary btn-sm" onClick={() => startEdit(prod)}>
-                            Editar
-                          </button>
+                          <>
+                            <button className="btn-secondary btn-sm" onClick={() => startEdit(prod)}>Editar</button>
+                            <button className="btn-secondary btn-sm" onClick={() => setCopyProducto(prod)}>Regenerar copy IA</button>
+                          </>
                         )}
                         {puedeEliminar && (
                           <button
@@ -764,6 +767,24 @@ export default function Productos() {
           </div>
         )}
       </div>
+
+      {copyProducto && <>
+        <div className="overlay" onClick={() => { if (!guardandoCopy) setCopyProducto(null) }} />
+        <div className="card modal" role="dialog" aria-modal="true" aria-label={`Copy de ${copyProducto.nombre}`}>
+          <h3>Copy de {copyProducto.nombre}</h3>
+          <AsistenteCopyProducto key={copyProducto.id} nombre={copyProducto.nombre} descripcion={copyProducto.descripcion || ''}
+            procesos={copyProducto.procesos || []} autoGenerar onAplicar={async (copy) => {
+              setGuardandoCopy(true)
+              try {
+                await http(`/productos/${copyProducto.id}/descripcion`, { method: 'PATCH', body: JSON.stringify({ descripcion: copy }) })
+                await recargarProductos()
+                setCopyProducto(null)
+                notify.ok('Copy del producto actualizado')
+              } finally { setGuardandoCopy(false) }
+            }} />
+          <div className="form-actions"><button type="button" className="btn-secondary" disabled={guardandoCopy} onClick={() => setCopyProducto(null)}>Cancelar</button></div>
+        </div>
+      </>}
 
       {/* Modal: detalle del producto (stock, procesos y receta) */}
       {productoDetalle && (

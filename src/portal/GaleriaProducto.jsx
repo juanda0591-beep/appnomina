@@ -31,6 +31,11 @@ export default function GaleriaProducto({ producto, etiqueta }) {
       <span className="producto-etiqueta">{etiqueta}</span>
       {fotos.length > 1 && <div className="foto-navegacion"><button type="button" aria-label={`Foto anterior de ${producto.nombre}`} onClick={() => cambiar(-1)}><ChevronLeft size={19}/></button><span aria-live="polite">{actual + 1} / {fotos.length}</span><button type="button" aria-label={`Foto siguiente de ${producto.nombre}`} onClick={() => cambiar(1)}><ChevronRight size={19}/></button></div>}
     </div>
+    {fotos.length > 1 && <div className="producto-miniaturas" role="group" aria-label={`Vistas de ${producto.nombre}`}>
+      {fotos.map((foto, i) => <button key={foto.id} type="button" aria-label={`Ver fotografía ${i + 1} de ${producto.nombre}`} aria-pressed={actual === i} onClick={() => setIndice(i)}>
+        <img src={url(foto)} alt="" loading="lazy"/>
+      </button>)}
+    </div>}
     {fotos.length > 0 && <dialog ref={dialogo} className="galeria-producto" aria-label={`Fotos de ${producto.nombre}`} onCancel={() => setAbierta(false)} onClose={() => setAbierta(false)} onClick={(e) => { if (e.target === dialogo.current) setAbierta(false) }} onKeyDown={(e) => {
       if (e.key === 'ArrowLeft') { e.preventDefault(); cambiar(-1) }
       if (e.key === 'ArrowRight') { e.preventDefault(); cambiar(1) }

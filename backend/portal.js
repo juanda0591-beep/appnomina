@@ -372,6 +372,14 @@ export function rutasPortalAdmin(db, adminRequired) {
     res.json({ ok: true })
   }))
   r.get('/productos', (req, res) => res.json(productos(db, true)))
+  r.patch('/productos/:id/descripcion', manejar((req, res) => {
+    exigir(db.prepare('SELECT id FROM productos WHERE id = ?').get(req.params.id), 'Producto no encontrado.', 404)
+    const descripcion = texto(req.body.descripcion, 240, true)
+    db.prepare(`INSERT INTO portal_productos (producto_id, descripcion, actualizado) VALUES (?, ?, ?)
+      ON CONFLICT(producto_id) DO UPDATE SET descripcion=excluded.descripcion, actualizado=excluded.actualizado`)
+      .run(req.params.id, descripcion, ahora())
+    res.json({ ok: true })
+  }))
   r.get('/productos/:id/imagen', manejar((req, res) => imagen(db, req, res, true)))
   r.get('/productos/:id/imagenes/:imagenId', manejar((req, res) => imagen(db, req, res, true)))
   r.put('/productos/:id', manejar(async (req, res) => {
