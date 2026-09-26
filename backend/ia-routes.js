@@ -1,9 +1,9 @@
 import { Router } from 'express'
 import { generarMaterial, ErrorIA } from './ia-materiales.js'
-import { generarProducto } from './ia-productos.js'
+import { generarProducto, generarCopyProducto } from './ia-productos.js'
 import { generarPlanos } from './ia-planos.js'
 
-export function rutasIA({ db, permisoRequired, generar = generarMaterial, generarProd = generarProducto, generarPlano = generarPlanos }) {
+export function rutasIA({ db, permisoRequired, generar = generarMaterial, generarProd = generarProducto, generarCopy = generarCopyProducto, generarPlano = generarPlanos }) {
   const router = Router()
   const solicitudes = new Map()
   let activas = 0
@@ -15,6 +15,7 @@ export function rutasIA({ db, permisoRequired, generar = generarMaterial, genera
   }
   router.get('/estado', ...permisosMaterial, estado)
   router.get('/producto/estado', ...permisosProducto, estado)
+  router.get('/producto-copy/estado', ...permisosProducto, estado)
   router.get('/planos/estado', ...permisosPlanos, estado)
   const preparar = (generador) => async (req, res) => {
     const ahora = Date.now()
@@ -52,6 +53,7 @@ export function rutasIA({ db, permisoRequired, generar = generarMaterial, genera
     const productos = db.prepare('SELECT id, nombre FROM productos').all()
     return generarProd({ descripcion, materiales, procesosGlobales, productos })
   }))
+  router.post('/producto-copy', ...permisosProducto, preparar((descripcion, body) => generarCopy({ descripcion: body?.descripcion || descripcion })))
   router.post('/planos', ...permisosPlanos, preparar((descripcion, body) => generarPlano(body)))
   return router
 }

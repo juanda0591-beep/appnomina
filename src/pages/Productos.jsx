@@ -7,6 +7,7 @@ import { notify, confirmar } from '../utils/notify.js'
 import Vacio from '../components/Vacio.jsx'
 import AsistenteProducto from '../components/AsistenteProducto.jsx'
 import { formularioDesdeProductoIA, errorRecetaIA } from '../utils/productoIA.js'
+import AsistenteCopyProducto from '../components/AsistenteCopyProducto.jsx'
 
 const NUEVO_PROCESO = '__nuevo__'
 const emptyProceso = () => ({ nombre: '', pago: '', materiales: [], piezas: [] })
@@ -461,6 +462,8 @@ export default function Productos() {
           onChange={(e) => setDato('descripcion', e.target.value)}
           placeholder="Ej: Armario de 3 cuerpos en MDF, puertas corredizas"
         />
+        {!editId && puede('productos', 'crear') && <AsistenteCopyProducto nombre={nombre} descripcion={datos.descripcion} procesos={procesos}
+          disabled={!nombre.trim()} onAplicar={(copy) => setDato('descripcion', copy)} />}
 
         <div className="row">
           <div style={{ flex: 1 }}>

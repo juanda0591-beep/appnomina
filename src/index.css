@@ -778,6 +778,11 @@ input[type="file"] {
 .asistente-material button { white-space: normal; }
 .asistente-producto-proceso { border-top: 1px solid var(--border); padding: 10px 0; overflow-wrap: anywhere; }
 .asistente-producto-proceso h4 { margin: 0 0 8px; font-size: 16px; }
+.asistente-copy-producto { margin: 10px 0 18px; padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: #f8fafc; }
+.asistente-copy-contenido { margin-top: 10px; }
+.asistente-copy-contenido p { margin: 0 0 10px; }
+.asistente-copy-resultado { margin-top: 12px; }
+.asistente-copy-resultado textarea { width: 100%; resize: vertical; min-height: 70px; }
 
 .swal-nomina {
   border-radius: 16px !important;

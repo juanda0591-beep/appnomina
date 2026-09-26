@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import express from 'express'
-import { generarProducto, validarProducto } from './ia-productos.js'
+import { generarCopyProducto, generarProducto, validarCopyProducto, validarProducto } from './ia-productos.js'
 import { rutasIA } from './ia-routes.js'
 import { formularioDesdeProductoIA, errorRecetaIA } from '../src/utils/productoIA.js'
 
@@ -22,6 +22,30 @@ test('producto conserva pendientes y resuelve referencias canónicas', () => {
   assert.equal(r.borrador.procesos[0].materiales[0].nombre, materiales[0].nombre)
   assert.ok(r.pendientes.includes('1. Corte: pago por unidad'))
   assert.equal(r.duplicados[0].id, 3)
+})
+
+test('copy de producto: valida longitud y conserva solo el texto comercial', () => {
+  assert.deepEqual(validarCopyProducto({ copy: 'Armario funcional en MDF para organizar tus espacios con un diseño limpio.' }), {
+    copy: 'Armario funcional en MDF para organizar tus espacios con un diseño limpio.',
+  })
+  assert.throws(() => validarCopyProducto({ copy: 'Muy corto' }), /corto/)
+  assert.throws(() => validarCopyProducto({ copy: 'x'.repeat(241) }), /descripción no válido/)
+  assert.throws(() => validarCopyProducto({ copy: 123 }), /descripción no válido/)
+})
+
+test('copy de producto: usa nombre y detalles, sin enviar precios ni inventario', async () => {
+  let body
+  const resultado = await generarCopyProducto({ descripcion: 'Nombre: Tocador Serena\nDetalles: MDF blanco con espejo y cajones\nProcesos: Corte, Armado' }, {
+    apiKey: 'test-key', model: 'test-model', fetchImpl: async (url, options) => {
+      body = JSON.parse(options.body)
+      return { ok: true, json: async () => ({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({ copy: 'Tocador en MDF blanco con espejo y cajones para organizar tu espacio con estilo.' }) }] }] }) }
+    },
+  })
+  assert.match(resultado.copy, /Tocador/)
+  assert.equal(body.text.format.name, 'copy_corto_producto')
+  assert.equal(body.store, false)
+  assert.ok(body.input.includes('Tocador Serena'))
+  assert.ok(!body.input.includes('precio') && !body.input.includes('inventario'))
 })
 
 test('material desconocido conserva nombre pendiente sin inventar una referencia', () => {
