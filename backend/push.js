@@ -39,6 +39,15 @@ export function desuscribir(endpoint) {
   return { ok: true }
 }
 
+export function avisoMovimiento({ tipo, monto, categoria, descripcion }) {
+  const montoTexto = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(monto)
+  return {
+    titulo: tipo === 'gasto' ? '💸 Gasto registrado' : '💰 Ingreso registrado',
+    cuerpo: `${montoTexto}${categoria ? ' — ' + categoria : ''}${descripcion ? ' — ' + descripcion : ''}`,
+    url: '/control-dinero',
+  }
+}
+
 // Envía una notificación a todos los administradores suscritos. Limpia en
 // silencio las suscripciones que el navegador ya invalidó (410/404).
 export async function notificarAdmins({ titulo, cuerpo, url = '/control-dinero' }) {

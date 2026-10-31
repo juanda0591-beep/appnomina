@@ -160,11 +160,11 @@ export default function CortesPlanos() {
       revision: !modificado && guardado ? guardado.revision : null, creado: !modificado ? guardado?.creado : null }) }
     catch (e) { setError(e.message) }
   }
-  const aplicarGenerado = (piezas, imagen, diseno) => {
+  const aplicarGenerado = (piezas, imagen, diseno, vista = 'corte') => {
     cambiarProyecto((p) => ({ ...p, diseno, montajeManual: [], lamina: { ...p.lamina, espesor: Number(diseno.espesor) },
       ...(diseno.fabricacion ? { laminasPorEspesor: Object.fromEntries([...new Set(piezas.map((pi) => pi.espesor))].map((e) => [e, p.laminasPorEspesor?.[e] || { ...p.lamina, espesor: e, costo: e === Number(diseno.espesor) ? p.lamina.costo : 0 }])) } : {}),
       piezas: piezas.map((pieza, i) => ({ ...pieza, codigo: `P${String(i + 1).padStart(3, '0')}` })) }))
-    setModo('despiece'); setGeneradorKey((n) => n + 1); setGeneradorSucio(false)
+    setModo('despiece'); setVistaPlano(vista); setGeneradorKey((n) => n + 1); setGeneradorSucio(false)
   }
   const editarPieza3D = (clave, datos) => {
     const diseno = editarPanelDiseno(proyecto.diseno, clave, datos), c = construirMueble(diseno)

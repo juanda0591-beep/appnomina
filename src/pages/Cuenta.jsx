@@ -68,10 +68,10 @@ export default function Cuenta() {
 
       {rol === 'admin' && (
         <div className="card">
-          <h3>🔔 Notificaciones de ingresos</h3>
+          <h3>🔔 Notificaciones de movimientos de dinero</h3>
           {pushSoportado() ? (
             <>
-              <p>Recibe una notificación en este dispositivo cada vez que se registre un ingreso de dinero.</p>
+              <p>Recibe una notificación en este dispositivo cuando se registre un ingreso o un gasto en Control de dinero.</p>
               <label className="switch-row">
                 <input type="checkbox" checked={pushActivo} onChange={togglePush} disabled={pushCargando} />
                 <span>{pushActivo ? 'Activadas en este dispositivo' : 'Recibir notificaciones en este dispositivo'}</span>

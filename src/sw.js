@@ -10,7 +10,7 @@ registerRoute(/^\/api\//, new NetworkOnly())
 self.skipWaiting()
 self.addEventListener('activate', () => self.clients.claim())
 
-// ---------- Notificaciones push (ingresos de dinero al admin) ----------
+// ---------- Notificaciones push de movimientos de dinero al admin ----------
 self.addEventListener('push', (event) => {
   let data = { titulo: 'Sistema de Nómina', cuerpo: '', url: '/' }
   try {

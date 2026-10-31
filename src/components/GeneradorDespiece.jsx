@@ -10,6 +10,7 @@ import { confirmar } from '../utils/notify.js'
 import FabricacionMDF from './FabricacionMDF.jsx'
 import { editarPanelDiseno } from '../utils/fabricacionMDF.js'
 import { construirMueble } from '../utils/construccionMueble.js'
+import AsistenteDiseno from './AsistenteDiseno.jsx'
 const VistaMueble3D = lazy(() => import('./VistaMueble3D.jsx'))
 
 const inicial = (espesor) => configurarDiseno({
@@ -64,6 +65,11 @@ export default function GeneradorDespiece({ espesorInicial, onGenerar, disenoIni
         y el despiece se actualizan en vivo. Al generar, podrás editar la tabla.
       </p>
       <GeneradorForm f={f} set={set} />
+      {f.construccionVersion === 2 && <AsistenteDiseno diseno={f} onAplicar={({ diseno, piezas }) => {
+        onModificar?.()
+        setF(diseno)
+        onGenerar(piezas, null, diseno, 'mueble')
+      }} />}
       {f.construccionVersion === 2 && <FabricacionMDF f={f} cambiar={cambiarCompleto} />}
       {f.construccionVersion === 2 ? <ConfiguracionCarcasa f={f} set={set} /> : <div className="banner">
         <p>Este diseño conserva las reglas de armado anteriores.</p>

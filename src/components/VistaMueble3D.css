@@ -28,6 +28,12 @@
 .mueble3d-error { position: absolute; inset: 0; display: flex; justify-content: center; align-items: center; flex-direction: column; padding: 24px; background: #f3f6f6; text-align: center; font-size: 13px; }
 .mueble3d-empty { display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 250px; padding: 30px; text-align: center; color: #6b828b; }
 .mueble3d.fullscreen { position: fixed; inset: 14px; z-index: 90; display: flex; flex-direction: column; margin: 0; box-shadow: 0 0 0 30px rgba(0,0,0,.4); }
+.mueble3d.fullscreen .mueble3d-header { position: sticky; top: 0; z-index: 2; background: #fff; flex-shrink: 0; }
+.mueble3d.fullscreen .mueble3d-buttons { padding-right: 154px; }
+.mueble3d.fullscreen .mueble3d-exit { position: fixed; top: max(24px, env(safe-area-inset-top)); right: max(24px, env(safe-area-inset-right)); z-index: 95; width: auto; min-width: 142px; height: 36px; padding: 0 11px; gap: 7px; border: 1px solid #087f8c; background: #087f8c; color: #fff; box-shadow: 0 3px 12px #173c4730; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.mueble3d.fullscreen .mueble3d-exit:hover { background: #096976; }
+.mueble3d.fullscreen .mueble3d-exit:focus-visible { outline: 2px solid #087f8c; outline-offset: 3px; }
+.mueble3d.fullscreen .mueble3d-header .mueble3d-exit span { display: inline; margin: 0; color: inherit; font-size: 12px; }
 .mueble3d.fullscreen .mueble3d-body { flex: 1; min-height: 0; }
 .mueble3d.fullscreen .mueble3d-stage { height: 100%; }
 .mueble3d.compacto .mueble3d-body { grid-template-columns: minmax(0, 1fr); }
@@ -49,6 +55,7 @@
   .mueble3d-controls select { font-size: 16px; }
   .mueble3d-header span { display: none; }
   .mueble3d.fullscreen { inset: 5px; }
+  .mueble3d.fullscreen .mueble3d-exit { top: max(13px, env(safe-area-inset-top)); right: max(13px, env(safe-area-inset-right)); }
   .mueble3d.fullscreen .mueble3d-body { overflow: auto; display: block; }
   .mueble3d.fullscreen .mueble3d-stage { height: 55vh; }
 }

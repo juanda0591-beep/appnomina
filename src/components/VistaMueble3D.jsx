@@ -61,7 +61,10 @@ function VisorModelo({ modelo, seleccionadoExterno, onSeleccionar, compacto, dis
   return <section className={`mueble3d ${compacto ? 'compacto' : ''} ${completa ? 'fullscreen' : ''}`} aria-label="Modelo 3D del mueble">
     <header className="mueble3d-header"><div><Box size={18} /><strong>{manual ? 'Piezas 3D' : 'Modelo 3D'}</strong><span>{manual ? `${modelo.piezas.length} piezas representadas` : `1 mueble · ${modelo.piezas.length} piezas`}</span></div>
       <div className="mueble3d-buttons"><Tool icon={Download} label="Guardar imagen 3D" onClick={imagen} disabled={!!error} />
-        <Tool icon={completa ? Shrink : Expand} label={completa ? 'Salir de pantalla completa 3D' : 'Pantalla completa 3D'} onClick={() => setCompleta(!completa)} /></div>
+        <button type="button" className={`corte-tool ${completa ? 'mueble3d-exit' : ''}`}
+          aria-label={completa ? 'Salir de pantalla completa 3D' : 'Pantalla completa 3D'}
+          title={completa ? 'Reducir pantalla' : 'Pantalla completa 3D'} onClick={() => setCompleta(!completa)}>
+          {completa ? <><Shrink size={18}/><span>Reducir pantalla</span></> : <Expand size={17}/>}</button></div>
     </header>
     <div className="mueble3d-toolbar" role="toolbar" aria-label="Cámara del mueble">
       <Tool icon={Scan} label="Ajustar vista 3D" onClick={() => motor.current?.vista('perspectiva')} />

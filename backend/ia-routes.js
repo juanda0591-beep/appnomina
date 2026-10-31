@@ -2,8 +2,9 @@ import { Router } from 'express'
 import { generarMaterial, ErrorIA } from './ia-materiales.js'
 import { generarProducto, generarCopyProducto } from './ia-productos.js'
 import { generarPlanos } from './ia-planos.js'
+import { generarCambiosDiseno } from './ia-diseno.js'
 
-export function rutasIA({ db, permisoRequired, permisoAnyRequired, generar = generarMaterial, generarProd = generarProducto, generarCopy = generarCopyProducto, generarPlano = generarPlanos }) {
+export function rutasIA({ db, permisoRequired, permisoAnyRequired, generar = generarMaterial, generarProd = generarProducto, generarCopy = generarCopyProducto, generarPlano = generarPlanos, generarDiseno = generarCambiosDiseno }) {
   const router = Router()
   const solicitudes = new Map()
   let activas = 0
@@ -18,6 +19,7 @@ export function rutasIA({ db, permisoRequired, permisoAnyRequired, generar = gen
   router.get('/producto/estado', ...permisosProducto, estado)
   router.get('/producto-copy/estado', ...permisosCopy, estado)
   router.get('/planos/estado', ...permisosPlanos, estado)
+  router.get('/diseno/estado', ...permisosPlanos, estado)
   const preparar = (generador) => async (req, res) => {
     const ahora = Date.now()
     for (const [usuario, registro] of solicitudes) {
@@ -56,5 +58,6 @@ export function rutasIA({ db, permisoRequired, permisoAnyRequired, generar = gen
   }))
   router.post('/producto-copy', ...permisosCopy, preparar((descripcion, body) => generarCopy({ descripcion: body?.descripcion || descripcion })))
   router.post('/planos', ...permisosPlanos, preparar((descripcion, body) => generarPlano(body)))
+  router.post('/diseno', ...permisosPlanos, preparar((descripcion, body) => generarDiseno(body)))
   return router
 }

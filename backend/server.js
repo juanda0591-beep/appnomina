@@ -27,7 +27,7 @@ import { rutasWhatsApp, encolarPedidoWhatsApp } from './whatsapp.js'
 import { registrarNomina, anularNomina, ErrorNomina } from './nomina.js'
 import { auditarSolicitud, consultarAuditoria } from './auditoria.js'
 import { gestorRespaldos, verificarRespaldo, ErrorRespaldo } from './respaldos.js'
-import { publicKey as pushPublicKey, suscribir as pushSuscribir, desuscribir as pushDesuscribir, notificarAdmins } from './push.js'
+import { publicKey as pushPublicKey, suscribir as pushSuscribir, desuscribir as pushDesuscribir, avisoMovimiento, notificarAdmins } from './push.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -2394,13 +2394,7 @@ app.post('/api/movimientos', permisoRequired('control-dinero', 'crear'), (req, r
     ref_id: null,
   })
   // No bloquea la respuesta: si el envío push falla, ya se logueó dentro de notificarAdmins.
-  if (tipo === 'ingreso') {
-    const montoTexto = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(montoNum)
-    notificarAdmins({
-      titulo: '💰 Ingreso registrado',
-      cuerpo: `${montoTexto}${categoria ? ' — ' + categoria : ''}${descripcion ? ' — ' + descripcion : ''}`,
-    }).catch(() => {})
-  }
+  notificarAdmins(avisoMovimiento({ tipo, monto: montoNum, categoria, descripcion })).catch(() => {})
   res.json(movimientoSalida(db.prepare(`SELECT ${MOVIMIENTO_COLUMNAS} FROM movimientos WHERE id = ?`).get(r.lastInsertRowid)))
 })
 

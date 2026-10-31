@@ -155,3 +155,10 @@
 .mover-pieza { margin: 12px 0; padding: 10px; border: 1px solid #cbdcde; border-radius: 10px; }
 .mover-pieza h4 { margin: 0 0 8px; }
 .mover-pieza-botones { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+.asistente-diseno { margin: 16px 0; padding: 16px; border: 1px solid #b9d5ce; border-radius: 6px; background: #f0f8f5; }
+.asistente-diseno h4 { display: flex; align-items: center; gap: 8px; font-size: 15px; margin: 0 0 12px; }
+.asistente-diseno textarea { width: 100%; padding: 10px; margin-top: 7px; border: 1px solid #cbdadd; border-radius: 5px; resize: vertical; }
+.asistente-diseno .corte-button { margin-right: 8px; }
+.asistente-diseno-propuesta { margin-top: 16px; padding-top: 14px; border-top: 1px solid #cbdadd; overflow-wrap: anywhere; }
+.asistente-diseno-propuesta ul { margin: 8px 0 12px; padding-left: 20px; }
+.asistente-diseno-propuesta .corte-check { display: flex; align-items: center; gap: 8px; margin: 14px 0; white-space: normal; }
