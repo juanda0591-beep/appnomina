@@ -11,6 +11,7 @@ import FabricacionMDF from './FabricacionMDF.jsx'
 import { editarPanelDiseno } from '../utils/fabricacionMDF.js'
 import { construirMueble } from '../utils/construccionMueble.js'
 import AsistenteDiseno from './AsistenteDiseno.jsx'
+import ListaHerrajes from './ListaHerrajes.jsx'
 const VistaMueble3D = lazy(() => import('./VistaMueble3D.jsx'))
 
 const inicial = (espesor) => configurarDiseno({
@@ -86,6 +87,7 @@ export default function GeneradorDespiece({ espesorInicial, onGenerar, disenoIni
         </div>
       </div>
       <PreviewGenerador {...{ preview, totalTipos, totalUnidades, listo, aplicar }} />
+      {listo && f.construccionVersion === 2 && <ListaHerrajes diseno={f}/>}
     </div>
   )
 }

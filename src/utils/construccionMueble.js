@@ -1,4 +1,5 @@
 import { clavePanel, espesorPanel, terminarFabricacion } from './fabricacionMDF.js'
+import { agregarHerrajes } from './herrajesMueble.js'
 
 // Construcción configurable v2. Una sola geometría alimenta despiece, 3D y planos.
 // Entradas de mueble/posición en cm; espesores, holguras y vuelos en mm.
@@ -196,6 +197,6 @@ export function construirMueble(f) {
     for (const p of paneles) for (let k = 0; k < 3; k++) { min[k] = Math.min(min[k], p.origen[k]); max[k] = Math.max(max[k], p.origen[k] + p.dimensiones[k]) }
     const construccion = { piezas: [...acc.values()], paneles, herrajes, avisos, modulos, notas, ancho: A, alto: H, fondo: D, espesor: E,
       limites: { min, max }, envolvente: max.map((n, i) => redondear(n - min[i])) }
-    return f.fabricacion ? terminarFabricacion(construccion, f) : construccion
+    return agregarHerrajes(f.fabricacion ? terminarFabricacion(construccion, f) : construccion, f)
   } catch (e) { return { piezas: [], paneles: [], herrajes: [], modulos: [], notas: [], avisos: [e.message] } }
 }

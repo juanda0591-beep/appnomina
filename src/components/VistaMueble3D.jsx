@@ -85,7 +85,7 @@ function VisorModelo({ modelo, seleccionadoExterno, onSeleccionar, compacto, dis
           {ACABADOS_MUEBLE.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}</select></label>
         <label className="mueble3d-check"><input type="checkbox" checked={interior} onChange={(e) => ocultar('interior', e.target.checked)} />Ver interior</label>
         <label className="mueble3d-check"><input type="checkbox" checked={sinTrasera} onChange={(e) => ocultar('trasera', e.target.checked)} />Ocultar trasera</label>
-        {!!modelo.herrajes?.length && <label className="mueble3d-check"><input type="checkbox" checked={verHerrajes} onChange={(e) => { setVerHerrajes(e.target.checked); if (pieza?.herraje) seleccionar(null) }} />Mostrar rieles</label>}
+        {!!modelo.herrajes?.length && <label className="mueble3d-check"><input type="checkbox" checked={verHerrajes} onChange={(e) => { setVerHerrajes(e.target.checked); if (pieza?.herraje) seleccionar(null) }} />{modelo.herrajes.some((h) => h.compraId) ? 'Mostrar herrajes' : 'Mostrar rieles'}</label>}
         {!!modelo.componentes?.length && <label className="mueble3d-check"><input type="checkbox" checked={verConstruccion} onChange={(e) => setVerConstruccion(e.target.checked)} />Ver caras y refuerzos</label>}
         <button type="button" className="corte-button" onClick={() => setAbiertos({})}>Cerrar todas las aperturas</button>
         <label className="mueble3d-explode">Separar piezas <output>{Math.round(explosion * 100)}%</output>
@@ -100,12 +100,13 @@ function VisorModelo({ modelo, seleccionadoExterno, onSeleccionar, compacto, dis
         {pieza && <div className="mueble3d-detail"><strong>{pieza.codigo} · {pieza.nombre}</strong><span>{fmtCm(pieza.ancho)} × {fmtCm(pieza.alto)} cm · {pieza.espesor} mm</span>
           {onMoverPieza && <><span>Posición X / Y / Z: {pieza.origen.join(' / ')} mm</span><MoverPieza onMover={(eje, distancia) => onMoverPieza(pieza.id, eje, distancia)} /></>}
           <span>{pieza.modulo === null ? 'Carcasa' : `Módulo ${pieza.modulo + 1}`}</span>
+          {pieza.herraje && <span>Referencia: {pieza.referencia || 'Por definir con proveedor'}</span>}
           <label className="mueble3d-check"><input type="checkbox" checked={aislar} onChange={(e) => setAislar(e.target.checked)} />Aislar pieza</label>
           {pieza.movimiento && <button type="button" className="corte-button" onClick={() => alternar(pieza.movimiento.id)}>{abiertos[pieza.movimiento.id] ? 'Cerrar pieza' : 'Abrir pieza'}</button>}
           {onEditarPieza && pieza.clave && !pieza.herraje && !pieza.espejo && <EditorPiezaMDF key={pieza.clave}
             pieza={pieza} diseno={diseno} onGuardar={onEditarPieza} />}
         </div>}
-        <p className="mueble3d-note">{modelo.herrajes?.length ? 'Rieles esquemáticos. Las holguras se ajustan en la configuración del módulo.' : 'Ensamblaje de referencia.'} Sin mecanizados.</p>
+        <p className="mueble3d-note">{modelo.herrajes?.length ? 'Herrajes de referencia. Ajusta medidas y holguras según tu proveedor.' : 'Ensamblaje de referencia.'} Sin mecanizados.</p>
       </aside>
     </div>
     <footer className="mueble3d-footer"><span id={ayudaId}>Un toque: seleccionar y editar · Doble toque: abrir/cerrar · Arrastrar: girar · Rueda: ampliar</span><span>{estado.visibles} visibles</span></footer>

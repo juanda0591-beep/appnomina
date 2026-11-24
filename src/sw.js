@@ -21,8 +21,8 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(data.titulo, {
       body: data.cuerpo,
-      icon: '/pwa-192x192.png',
-      badge: '/pwa-192x192.png',
+      icon: '/marca/luxarma-icono-192.png',
+      badge: '/marca/luxarma-icono-192.png',
       data: { url: data.url },
     })
   )

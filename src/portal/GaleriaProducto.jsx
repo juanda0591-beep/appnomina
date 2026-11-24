@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, Expand, Package, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Expand, Images, Package, Play, X } from 'lucide-react'
 
 export default function GaleriaProducto({ producto, etiqueta }) {
   const fotos = producto.imagenes || []
   const [indice, setIndice] = useState(0), [abierta, setAbierta] = useState(false)
+  const [videoActivo, setVideoActivo] = useState(false)
   const dialogo = useRef(null), inicioToque = useRef(null)
   const actual = Math.min(indice, Math.max(0, fotos.length - 1))
   const url = (foto) => `/api/portal/productos/${producto.id}/imagenes/${foto.id}`
   const cambiar = (delta) => setIndice((i) => (Math.min(i, fotos.length - 1) + delta + fotos.length) % fotos.length)
   const ids = fotos.map((f) => f.id).join(',')
   useEffect(() => { setIndice(0) }, [ids])
+  useEffect(() => { if (!producto.tieneVideo) setVideoActivo(false) }, [producto.tieneVideo])
   useEffect(() => {
     if (!abierta) return
     const el = dialogo.current, overflow = document.body.style.overflow
@@ -24,14 +26,16 @@ export default function GaleriaProducto({ producto, etiqueta }) {
     if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.5) cambiar(dx < 0 ? 1 : -1)
   }
   return <>
-    <div className="producto-foto" onTouchStart={toqueInicio} onTouchEnd={toqueFin}>
+    {videoActivo ? <div className="producto-video"><video controls playsInline preload="metadata" poster={fotos[0] ? url(fotos[0]) : undefined}
+      src={`/api/portal/productos/${producto.id}/video?v=${encodeURIComponent(producto.videoActualizado || '')}`} aria-label={`Video de ${producto.nombre}`}/></div> : <div className="producto-foto" onTouchStart={toqueInicio} onTouchEnd={toqueFin}>
       {fotos.length ? <button className="foto-ampliar" type="button" aria-label={`Ampliar fotos de ${producto.nombre}`} onClick={() => setAbierta(true)}>
         <img src={url(fotos[actual])} alt={producto.nombre} loading="lazy"/><span className="foto-ampliar-icono"><Expand size={17}/></span>
       </button> : <div className="sin-foto"><Package size={54} strokeWidth={1}/><span>Fotografía pendiente</span></div>}
       <span className="producto-etiqueta">{etiqueta}</span>
       {fotos.length > 1 && <div className="foto-navegacion"><button type="button" aria-label={`Foto anterior de ${producto.nombre}`} onClick={() => cambiar(-1)}><ChevronLeft size={19}/></button><span aria-live="polite">{actual + 1} / {fotos.length}</span><button type="button" aria-label={`Foto siguiente de ${producto.nombre}`} onClick={() => cambiar(1)}><ChevronRight size={19}/></button></div>}
-    </div>
-    {fotos.length > 1 && <div className="producto-miniaturas" role="group" aria-label={`Vistas de ${producto.nombre}`}>
+    </div>}
+    {producto.tieneVideo && <div className="producto-video-accion"><button type="button" onClick={() => setVideoActivo(!videoActivo)}>{videoActivo ? <Images size={16}/> : <Play size={16}/>} {videoActivo ? 'Volver a fotos' : 'Ver video del producto'}</button></div>}
+    {!videoActivo && fotos.length > 1 && <div className="producto-miniaturas" role="group" aria-label={`Vistas de ${producto.nombre}`}>
       {fotos.map((foto, i) => <button key={foto.id} type="button" aria-label={`Ver fotografía ${i + 1} de ${producto.nombre}`} aria-pressed={actual === i} onClick={() => setIndice(i)}>
         <img src={url(foto)} alt="" loading="lazy"/>
       </button>)}

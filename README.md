@@ -543,6 +543,38 @@ Después de compilar, las pruebas con Playwright se ejecutan con
 `node --test tests/cortes-ui.test.mjs`; aceptan las mismas variables de navegador
 y capturas descritas abajo y usan una base temporal aislada.
 
+### Bases, complementos y herrajes
+
+En **Cortes y planos > Generar por medidas > Fabricación y complementos**,
+**Más bases de armarios y tocadores** ofrece ocho diseños editables: armarios de
+dos y tres cuerpos, ropero abierto, zapatero y tocadores compacto, de doble
+cajonera, con repisas y tipo escritorio. Sus dimensiones son de ejemplo y usan
+MDF de 9 mm con fondos de 3 mm. Cargar una base reemplaza el diseño actual tras
+confirmarlo. **Habilitar complementos** conserva el espesor del proyecto y permite
+añadir repisas, paneles libres en tres orientaciones, espejos fijos o deslizantes
+con marco. Sus medidas y posiciones se editan en milímetros.
+
+Cada módulo tiene una **Biblioteca de herrajes** con manijas de barra, pomos,
+bisagras y tubos redondos u ovalados para colgar ropa, incluidos sus soportes.
+Se pueden ajustar dimensiones, posición del tubo, acabado de las manijas y
+referencias del proveedor. Las manijas siguen el movimiento de puertas y
+gavetas. El tubo se calcula con el ancho útil del módulo menos el descuento
+total de sus soportes; se rechazan intersecciones con repisas o cajones.
+
+El 3D permite mostrar u ocultar herrajes. La lista de compra y su página en el
+PDF de taller se mantienen separadas de los cortes de tablero y multiplican
+las cantidades por las unidades del proyecto. La configuración se guarda con
+el diseño y se conserva al reabrirlo.
+
+Los modelos de herrajes son genéricos y esquemáticos: no importan CAD de marcas,
+no generan perforaciones y no verifican capacidad de carga. Confirma las medidas,
+la cantidad de bisagras y el mecanizado con la ficha del proveedor. Para datos
+oficiales de productos Blum se puede consultar su
+[configurador y recursos CAD](https://www.blum.com/us/en/services/e-services/onlineproductconfigurator/).
+
+Pruebas: `node --test backend/herrajes-mueble.test.js` y, después de compilar,
+`node --test tests/herrajes-ui.test.mjs`.
+
 ## Pruebas
 
 ```bash

@@ -15,6 +15,37 @@ async function api(path, method = 'GET', body) {
 }
 const fotoUrl = (p, foto) => `/api/portal-admin/productos/${p.id}/${foto?.id ? `imagenes/${foto.id}` : 'imagen'}?token=${encodeURIComponent(sessionStorage.getItem('nomina_token') || '')}&v=${encodeURIComponent(p.actualizado || '')}`
 
+function VideoProducto({ producto: p, generando, onGenerar, onQuitar, onPendiente }) {
+  const [texto, setTexto] = useState(''), [sugiriendo, setSugiriendo] = useState(false), [error, setError] = useState('')
+  const sugerir = async () => {
+    setSugiriendo(true); setError('')
+    try {
+      const descripcion = `Nombre: ${p.nombre}\nCategoría: ${p.categoria}\nMedidas: ${p.medidas || 'No registradas'}\nDetalles: ${(p.descripcion || '').slice(0, 1000)}`
+      const resultado = await api('/ia/producto-copy', 'POST', { descripcion })
+      setTexto(resultado.copy.slice(0, 160))
+    } catch (e) { setError(e.message) }
+    finally { setSugiriendo(false) }
+  }
+  const revisarEstado = async (e) => {
+    if (!e.currentTarget.open) return
+    try {
+      const estado = await api(`/portal-admin/productos/${p.id}/video/estado`)
+      if (estado.estado === 'procesando') onPendiente(p.id)
+    } catch (e) { setError(e.message) }
+  }
+  return <details className="pm-video-herramienta" onToggle={revisarEstado}>
+    <summary>Video del producto{p.tieneVideo ? ' · Listo' : ''}</summary>
+    {(p.imagenes?.length || 0) < 2 && <p className="muted small">Guarda al menos dos fotografías de este producto para generar el video.</p>}
+    <label>Frase del video (opcional)<input maxLength={160} value={texto} onChange={(e) => setTexto(e.target.value)} placeholder={p.descripcion?.slice(0, 100) || 'Usar el nombre del producto'} /></label>
+    <div className="pm-producto-acciones"><button type="button" className="btn-secondary" disabled={sugiriendo || generando} onClick={sugerir}>{sugiriendo ? 'Preparando frase...' : 'Sugerir frase con IA'}</button>
+      <button type="button" className="btn-secondary" disabled={generando || sugiriendo || (p.imagenes?.length || 0) < 2} onClick={() => onGenerar(p, texto)}>{generando ? 'Generando video...' : p.tieneVideo ? 'Regenerar video' : 'Generar video'}</button>
+      {p.tieneVideo && <button type="button" className="btn-secondary" disabled={generando} onClick={() => onQuitar(p)}>Quitar video</button>}</div>
+    {error && <p className="banner error" role="alert">{error}</p>}
+    {p.tieneVideo && <><video className="pm-video" controls preload="metadata" poster={fotoUrl(p)} src={`/api/portal-admin/productos/${p.id}/video?token=${encodeURIComponent(sessionStorage.getItem('nomina_token') || '')}&v=${encodeURIComponent(p.videoActualizado || '')}`}/>
+      <a className="btn-secondary pm-video-descargar" href={`/api/portal-admin/productos/${p.id}/video?download=1&token=${encodeURIComponent(sessionStorage.getItem('nomina_token') || '')}`} download={`producto-${p.id}.mp4`}>Descargar video MP4</a></>}
+  </details>
+}
+
 export default function PortalMayorista() {
   const [tab, setTab] = useState('cuentas'), [cuentas, setCuentas] = useState([]), [clientes, setClientes] = useState([])
   const [wa, setWa] = useState(null), [waTexto, setWaTexto] = useState(''), [waVista, setWaVista] = useState(null)
@@ -24,6 +55,7 @@ export default function PortalMayorista() {
   const [busqueda, setBusqueda] = useState(''), [filtro, setFiltro] = useState('pendiente'), [error, setError] = useState('')
   const [ocupado, setOcupado] = useState(false), [cargando, setCargando] = useState(true)
   const [leyendoFotos, setLeyendoFotos] = useState(false)
+  const [videoPendiente, setVideoPendiente] = useState(null)
   const cargar = async () => {
     const [c, cl, p, conf, whats] = await Promise.all([api('/portal-admin/cuentas'), api('/clientes'), api('/portal-admin/productos'), api('/portal-admin/config'), api('/whatsapp/estado')])
     setCuentas(c); setClientes(cl.filter((c) => c.tipo === 'cliente')); setProductos(p); setConfig(conf); setWa(whats)
@@ -34,6 +66,20 @@ export default function PortalMayorista() {
     return () => clearInterval(timer)
   }, [tab])
   useEffect(() => { cargar().catch((e) => setError(e.message)).finally(() => setCargando(false)) }, [])
+  useEffect(() => {
+    if (!videoPendiente) return
+    const revisar = async () => {
+      try {
+        const resultado = await api(`/portal-admin/productos/${videoPendiente}/video/estado`)
+        if (resultado.estado === 'procesando') return
+        setVideoPendiente(null)
+        if (resultado.estado === 'completado') { await cargar(); notify.ok('Video del producto listo') }
+        else setError(resultado.mensaje || 'No se pudo generar el video.')
+      } catch (e) { setVideoPendiente(null); setError(e.message) }
+    }
+    const timer = setInterval(revisar, 3000)
+    return () => clearInterval(timer)
+  }, [videoPendiente])
   const ejecutar = async (fn, mensaje) => {
     if (ocupado) return
     setOcupado(true); setError('')
@@ -49,6 +95,18 @@ export default function PortalMayorista() {
     ejecutar(() => api(`/portal-admin/cuentas/${c.id}`, 'PUT', { estado: nuevo, clienteId: c.clienteId || vinculo }), 'Cuenta actualizada')
   }
   const editar = (p) => { setError(''); setEditor({ ...p, precio: p.precioCatalogo ?? '', fotos: p.imagenes || [] }) }
+  const generarVideo = async (p, texto) => {
+    setError('')
+    try {
+      await api(`/portal-admin/productos/${p.id}/video`, 'POST', { texto })
+      setVideoPendiente(p.id)
+      notify.ok('Preparando video del producto')
+    } catch (e) { setError(e.message) }
+  }
+  const eliminarVideo = async (p) => {
+    if (!await confirmar(`¿Quitar el video de ${p.nombre} del catálogo?`, { titulo: 'Quitar video' })) return
+    ejecutar(() => api(`/portal-admin/productos/${p.id}/video`, 'DELETE'), 'Video quitado')
+  }
   const subir = async (e) => {
     const archivos = [...e.target.files]
     e.target.value = ''
@@ -103,7 +161,7 @@ export default function PortalMayorista() {
       <label>Buscar producto<input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Nombre o referencia"/></label>
       <div className="pm-productos">{productos.filter((p) => `${p.nombre} ${p.codigo}`.toLowerCase().includes(busqueda.toLowerCase())).map((p) => <article key={p.id}>
         <div className="pm-foto">{p.tieneImagen ? <img src={fotoUrl(p)} alt={p.nombre} loading="lazy"/> : <span>Sin fotografía</span>}</div>
-        <div><span className={`pm-estado ${p.publicado ? 'aprobado' : 'pendiente'}`}>{p.publicado ? 'Publicado' : 'Oculto'}</span><h3>{p.nombre}</h3>{p.descripcion && <p className="pm-copy-resumen">{p.descripcion}</p>}<p>{p.codigo} · {p.categoria}</p><p><b>{formatCOP(p.precio)}</b> · Mínimo {p.minimo}</p><small>{p.modalidad === 'encargo' ? 'Bajo pedido' : 'Limitado a disponibilidad'} · {p.imagenes?.length || 0} fotos</small><div className="pm-producto-acciones"><button className="btn-secondary" onClick={() => editar(p)}>Editar ficha</button><button className="btn-secondary" onClick={() => setCopyProducto(p)}>Regenerar copy IA</button></div></div>
+        <div><span className={`pm-estado ${p.publicado ? 'aprobado' : 'pendiente'}`}>{p.publicado ? 'Publicado' : 'Oculto'}</span><h3>{p.nombre}</h3>{p.descripcion && <p className="pm-copy-resumen">{p.descripcion}</p>}<p>{p.codigo} · {p.categoria}</p><p><b>{formatCOP(p.precio)}</b> · Mínimo {p.minimo}</p><small>{p.modalidad === 'encargo' ? 'Bajo pedido' : 'Limitado a disponibilidad'} · {p.imagenes?.length || 0} fotos</small><div className="pm-producto-acciones"><button className="btn-secondary" onClick={() => editar(p)}>Editar ficha</button><button className="btn-secondary" onClick={() => setCopyProducto(p)}>Regenerar copy IA</button></div><VideoProducto producto={p} generando={videoPendiente === p.id} onGenerar={generarVideo} onQuitar={eliminarVideo} onPendiente={setVideoPendiente}/></div>
       </article>)}</div>
       {!cargando && !productos.length && <div className="pm-vacio">Crea tu primer producto en la sección Productos para publicarlo aquí.</div>}
     </>}

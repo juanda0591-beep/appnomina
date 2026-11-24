@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="LUXARMA">
+  <defs><linearGradient id="oro" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#efc879"/><stop offset=".55" stop-color="#c69135"/><stop offset="1" stop-color="#996422"/></linearGradient></defs>
+  <rect width="512" height="512" rx="90" fill="#231e18"/>
+  <rect x="32" y="32" width="448" height="448" rx="65" fill="none" stroke="#b48945" stroke-width="3"/>
+  <path d="M132 110H282V130H254V356H322Q359 356 377 305H397L387 402H132V382H159V130H132Z" fill="url(#oro)"/>
+</svg>

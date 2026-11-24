@@ -199,6 +199,14 @@ body {
   background: linear-gradient(135deg, #fff, #c7d2fe);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
+.logo.logo-luxarma { margin: 0; background: none; }
+.login-brand-luxarma { justify-content: center; margin: 0 0 14px; }
+.login-brand-luxarma + .login-sub { text-align: center; }
+.topbar .topbar-title { display: flex; align-items: center; line-height: 0; }
+.empresa-logo-oficial { display: flex; align-items: center; flex-wrap: wrap; gap: 20px; padding: 16px; border: 1px solid var(--border); border-radius: 8px; margin: 8px 0 14px; }
+.empresa-logo-oficial > div { flex: 1 1 240px; min-width: 0; }
+.empresa-logo-oficial p { margin: 6px 0; }
+.empresa-logo-oficial a { font-size: 13px; }
 .sidebar-toggle {
   background: rgba(255, 255, 255, .06); color: #cbd5e1;
   border: 1px solid rgba(255, 255, 255, .08);

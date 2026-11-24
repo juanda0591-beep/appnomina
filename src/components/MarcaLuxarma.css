@@ -1,0 +1,22 @@
+.marca-luxarma {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 168px;
+  padding: 5px;
+  border-radius: 6px;
+  background: #fff;
+  line-height: 0;
+}
+.marca-luxarma img { display: block; width: 100%; height: auto; object-fit: contain; }
+.marca-luxarma-login { width: 280px; max-width: 100%; padding: 0; }
+.marca-luxarma-menu { width: 152px; }
+.marca-luxarma-movil { width: 112px; padding: 2px; }
+.marca-luxarma-portal { width: 172px; padding: 0; }
+.marca-luxarma-acceso { width: 230px; max-width: 100%; padding: 9px; }
+.marca-luxarma-pie { width: 140px; padding: 5px; }
+@media (max-width: 620px) {
+  .marca-luxarma-portal { width: 132px; }
+  .marca-luxarma-acceso { width: 170px; }
+}

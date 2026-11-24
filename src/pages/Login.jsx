@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
+import MarcaLuxarma from '../components/MarcaLuxarma.jsx'
 
 export default function Login() {
   const { login } = useAuth()
@@ -25,10 +26,7 @@ export default function Login() {
   return (
     <div className="login-screen">
       <form className="login-card" onSubmit={handleSubmit}>
-        <div className="login-brand">
-          <span className="login-brand-icon">💰</span>
-          <h1 className="login-logo">Nómina</h1>
-        </div>
+        <h1 className="login-brand login-brand-luxarma"><MarcaLuxarma className="marca-luxarma-login"/></h1>
         <p className="muted login-sub">Inicia sesión para continuar</p>
 
         <label>Usuario</label>

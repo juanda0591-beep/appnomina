@@ -4,6 +4,7 @@ import { ArrowRight, ArrowUpRight, CheckCircle2, LogOut, Package, Search, Shoppi
 import { portalApi, dinero, leerBorrador } from './api.js'
 import GaleriaProducto from './GaleriaProducto.jsx'
 import ConfirmacionProducto from './ConfirmacionProducto.jsx'
+import MarcaLuxarma from '../components/MarcaLuxarma.jsx'
 import './portal.css'
 import './catalogo.css'
 
@@ -45,7 +46,7 @@ function Acceso({ config, onLogin }) {
   }
   return <div className="acceso">
     <section className="acceso-editorial">
-      <a className="marca" href="/catalogo/"><span className="marca-icono"><Package size={22}/></span>{config.marca}</a>
+      <a className="marca" href="/catalogo/" aria-label="LUXARMA · Catálogo mayorista"><MarcaLuxarma className="marca-luxarma-acceso"/></a>
       <div className="editorial-texto"><span className="eyebrow">EXCLUSIVO PARA MAYORISTAS</span><h1>Buenos productos.<br/><em>Grandes negocios.</em></h1>
         <p>Tu próxima colección empieza aquí. Un espacio para encontrar, elegir y pedir con tranquilidad.</p></div>
       <Escena/><div className="editorial-pie"><span>Diseño para compartir.</span><span>Relaciones para crecer.</span></div>
@@ -217,7 +218,7 @@ function Tienda({ config, cuenta, setCuenta }) {
   const busquedaActiva = productos.length >= 3 ? busqueda : ''
   const visibles = productos.filter((p) => (categoriaActiva === 'Todas' || p.categoria === categoriaActiva) && `${p.nombre} ${p.codigo} ${p.categoria} ${p.descripcion} ${p.medidas}`.toLocaleLowerCase('es').includes(busquedaActiva.toLocaleLowerCase('es')))
   return <div className={`tienda ${carrito.length ? 'tienda-con-pedido' : ''}`}>
-    <header className="cabecera"><a className="marca" href="/catalogo/"><span className="marca-icono"><Package size={22}/></span>{config.marca}</a>
+    <header className="cabecera"><a className="marca" href="/catalogo/" aria-label="LUXARMA · Catálogo mayorista"><MarcaLuxarma className="marca-luxarma-portal"/></a>
       <nav aria-label="Navegación principal">{[['catalogo', 'Colección'], ['pedidos', 'Mis pedidos'], ['cuenta', 'Mi cuenta']].map(([v, label]) => <button key={v} aria-current={vista === v ? 'page' : undefined} onClick={() => abrirVista(v)}>{label}</button>)}</nav>
       <div className="cabecera-acciones"><button className="bolsa" onClick={() => setAbierto(!abierto)} aria-label={`Ver pedido, ${carrito.length} productos`}><ShoppingBag size={20}/><span>Mi pedido</span><b>{carrito.length}</b></button><button className="icon-button" title="Cerrar sesión" aria-label="Cerrar sesión" disabled={ocupado} onClick={() => ejecutar(async () => { await portalApi('/logout', 'POST', {}); setCuenta(null) })}><LogOut size={19}/></button></div>
     </header>
@@ -242,7 +243,7 @@ function Tienda({ config, cuenta, setCuenta }) {
       </section>}
       {vista === 'cuenta' && <fieldset className="cuenta-fieldset" disabled={ocupado}><Cuenta cuenta={cuenta} onChange={setCuenta} ejecutar={ejecutar}/></fieldset>}
     </main>
-    <footer className="pie"><span className="marca"><Package size={20}/>{config.marca}</span><span>Hecho para crecer contigo.</span><small>Catálogo privado · Precios en pesos colombianos</small></footer>
+    <footer className="pie"><a className="marca" href="/catalogo/" aria-label="LUXARMA · Catálogo mayorista"><MarcaLuxarma className="marca-luxarma-pie"/></a><span>Hecho para crecer contigo.</span><small>Catálogo privado · Precios en pesos colombianos</small></footer>
     {carrito.length > 0 && !abierto && <aside className="pedido-fijo" aria-label="Resumen de tu pedido"><div className="pedido-fijo-resumen"><span className="pedido-fijo-icono"><ShoppingBag size={24}/></span><div><strong>{unidades} {unidades === 1 ? 'unidad en tu pedido' : 'unidades en tu pedido'}</strong><span>{dinero(total)} · {pendiente ? 'Envío por confirmar' : 'Aún falta enviarlo'}</span></div></div><button className="primario" onClick={() => setAbierto(true)}>{pendiente ? 'Revisar envío pendiente' : 'Ver y enviar mi pedido'}<ArrowRight size={20}/></button></aside>}
     {agregado && <ConfirmacionProducto producto={agregado} total={total} unidades={unidades} cerrar={() => setAgregado(null)} verPedido={() => { setAgregado(null); setAbierto(true) }}/>} 
     {abierto && <div className="carrito-fondo" onClick={() => setAbierto(false)}><section ref={dialogo} className="carrito" aria-label="Tu pedido" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>

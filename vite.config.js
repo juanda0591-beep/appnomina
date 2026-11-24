@@ -11,10 +11,10 @@ export default defineConfig({
       strategies: 'injectManifest',
       srcDir: 'src',
       filename: 'sw.js',
-      includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
+      includeAssets: ['marca/luxarma-icono.svg', 'marca/luxarma-icono-180.png'],
       manifest: {
-        name: 'Sistema de Nómina',
-        short_name: 'Nómina',
+        name: 'LUXARMA · Gestión',
+        short_name: 'LUXARMA',
         description: 'Gestión de nómina, préstamos, control de dinero y reportes',
         theme_color: '#2563eb',
         background_color: '#0f172a',
@@ -25,17 +25,17 @@ export default defineConfig({
         scope: '/',
         icons: [
           {
-            src: 'pwa-192x192.png',
+            src: 'marca/luxarma-icono-192.png',
             sizes: '192x192',
             type: 'image/png',
           },
           {
-            src: 'pwa-512x512.png',
+            src: 'marca/luxarma-icono-512.png',
             sizes: '512x512',
             type: 'image/png',
           },
           {
-            src: 'pwa-512x512.png',
+            src: 'marca/luxarma-icono-512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'maskable',

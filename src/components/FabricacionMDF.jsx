@@ -3,6 +3,7 @@ import { configurarDiseno } from '../utils/construccionMueble.js'
 import { nuevoModulo } from '../utils/despiece.js'
 import { confirmar } from '../utils/notify.js'
 import { NumeroConstruccion } from './ConfiguracionMueble.jsx'
+import BibliotecaBases from './BibliotecaBases.jsx'
 
 export function plantillaFabrica(tipo) {
   const f = activarMDF(configurarDiseno({ ancho: 120, alto: tipo === 'tocador' ? 80 : 180, fondo: tipo === 'tocador' ? 40 : 50,
@@ -34,16 +35,20 @@ export function plantillaFabrica(tipo) {
 export default function FabricacionMDF({ f, cambiar }) {
   const fab = f.fabricacion
   const setFab = (key, value) => cambiar({ ...f, fabricacion: { ...fab, [key]: value } })
-  const agregar = (tipo) => {
+  const agregar = (tipo, apertura = 'der') => {
     const id = `extra-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
-    const extra = { id, tipo, nombre: tipo === 'espejo' ? 'Marco con espejo' : 'Repisa', ancho: 600, alto: tipo === 'espejo' ? 800 : 250,
-      espesor: 9, x: 0, y: Number(f.alto) * 10, z: 0,
-      ...(tipo === 'espejo' ? { marco: 60, espesorEspejo: 3, apertura: 'der', recorrido: 500 } : {}) }
+    const extra = { id, tipo, nombre: tipo === 'espejo' ? (apertura === 'fijo' ? 'Espejo fijo' : 'Marco con espejo') : tipo === 'panel' ? 'Panel adicional' : 'Repisa', ancho: 600, alto: tipo === 'repisa' ? 250 : 800,
+      espesor: Number(f.espesor), x: 0, y: Number(f.alto) * 10, z: 0,
+      ...(tipo === 'panel' ? { plano: 'frente' } : {}),
+      ...(tipo === 'espejo' ? { marco: 60, espesorEspejo: 3, apertura, recorrido: apertura === 'fijo' ? 0 : 500 } : {}) }
     setFab('complementos', [...fab.complementos, extra])
   }
   const editarExtra = (id, key, value) => setFab('complementos', fab.complementos.map((e) => e.id === id ? { ...e, [key]: value } : e))
   return <section className="fabricacion-mdf">
     <div className="corte-section-head"><h3>Fabricación y complementos</h3><div className="corte-actions">
+      {!fab && <button type="button" className="corte-button" onClick={() => cambiar({ ...f, fabricacion: {
+        version: 1, fondo: Number(f.espesor), fondoCajon: Number(f.espesor), perfiles: {}, ajustes: {}, complementos: [],
+      } })}>Habilitar complementos</button>}
       {!fab && <button type="button" className="corte-button primary" onClick={async () => {
         if (await confirmar('Cambiará la carcasa a MDF de 9 mm y los fondos a 3 mm. Revisa el despiece antes de fabricar.', { titulo: 'Perfil de fábrica', textoOk: 'Aplicar', peligro: false })) cambiar(activarMDF(f))
       }}>Usar MDF 9 mm / fondos 3 mm</button>}
@@ -51,13 +56,15 @@ export default function FabricacionMDF({ f, cambiar }) {
         if (await confirmar('Se reemplazará el diseño actual por una base editable. Las dimensiones son de ejemplo, no medidas obtenidas de las fotos.', { titulo: `Base de ${tipo}`, textoOk: 'Cargar base', peligro: false })) cambiar(plantillaFabrica(tipo))
       }}>Base de {tipo}</button>)}
     </div></div>
+    <BibliotecaBases onCambiar={cambiar}/>
     {fab && <>
-      <p className="muted small">Selecciona un tablero en 3D para editar su medida, posición y fabricación. El MDF de 9 mm, los fondos de 3 mm y el vidrio se desglosan por separado.</p>
+      <p className="muted small">Selecciona un tablero en 3D para editar su medida, posición y fabricación. Los tableros se desglosan por espesor y el vidrio se lista aparte.</p>
       <div className="construccion-grid"><NumeroConstruccion label="Espesor trasera (mm)" value={fab.fondo} onChange={(v) => setFab('fondo', v)} min={1} />
         <NumeroConstruccion label="Espesor fondo cajón (mm)" value={fab.fondoCajon} onChange={(v) => setFab('fondoCajon', v)} min={1} /></div>
-      <div className="corte-actions"><button type="button" className="corte-button" onClick={() => agregar('repisa')}>Agregar repisa</button><button type="button" className="corte-button" onClick={() => agregar('espejo')}>Agregar marco con espejo</button></div>
+      <div className="corte-actions"><button type="button" className="corte-button" onClick={() => agregar('repisa')}>Agregar repisa</button><button type="button" className="corte-button" onClick={() => agregar('panel')}>Agregar panel libre</button><button type="button" className="corte-button" onClick={() => agregar('espejo', 'fijo')}>Agregar espejo fijo</button><button type="button" className="corte-button" onClick={() => agregar('espejo')}>Agregar marco con espejo</button></div>
       <div className="complementos-grid">{fab.complementos.map((e) => <details key={e.id}><summary>{e.nombre}</summary>
         <label>Nombre<input value={e.nombre} aria-label={`${e.id} · Nombre`} onChange={(ev) => editarExtra(e.id, 'nombre', ev.target.value)} maxLength={80} /></label>
+        {e.tipo === 'panel' && <label>Orientación<select aria-label={`${e.nombre} · Orientación`} value={e.plano || 'frente'} onChange={(ev) => editarExtra(e.id, 'plano', ev.target.value)}><option value="frente">Frontal</option><option value="lateral">Lateral</option><option value="horizontal">Horizontal</option></select></label>}
         <div className="construccion-grid">{[['ancho', 'Ancho'], ['alto', e.tipo === 'repisa' ? 'Profundidad' : 'Alto'], ['espesor', 'Espesor MDF'], ['x', 'X'], ['y', 'Y'], ['z', 'Z'], ...(e.tipo === 'espejo' ? [['marco', 'Ancho marco'], ['espesorEspejo', 'Espesor vidrio'], ['recorrido', 'Recorrido']] : [])].map(([key, label]) =>
           <NumeroConstruccion key={key} label={`${e.nombre} · ${label} (mm)`} value={e[key]} min={['x', 'y', 'z'].includes(key) ? -5000 : 0} onChange={(v) => editarExtra(e.id, key, v)} />)}</div>
         {e.tipo === 'espejo' && <label>Desplazamiento<select aria-label={`${e.nombre} · Desplazamiento`} value={e.apertura} onChange={(ev) => editarExtra(e.id, 'apertura', ev.target.value)}><option value="der">Hacia la derecha</option><option value="izq">Hacia la izquierda</option><option value="fijo">Fijo</option></select></label>}

@@ -3,6 +3,7 @@ import { randomBytes, createHash, scrypt, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
 import { migrarImagenes, fotosProducto, prepararImagenes, guardarImagenes, ErrorImagen } from './portal-imagenes.js'
 import { encolarPedidoWhatsApp, telefonoWhatsApp } from './whatsapp.js'
+import { migrarVideos, videoDisponible, videoEnRespuesta, estadoVideo, iniciarVideo, quitarVideo, enviarVideo } from './portal-video.js'
 
 const derivar = promisify(scrypt)
 const digest = (v) => createHash('sha256').update(v).digest('hex')
@@ -65,6 +66,7 @@ export function migrarPortal(db) {
       'Explora nuestra colección y prepara tu próximo pedido mayorista en un solo lugar.');
   `)
   migrarImagenes(db)
+  migrarVideos(db)
 }
 
 let hashesActivos = 0
@@ -135,6 +137,7 @@ function productos(db, admin = false) {
     ...(admin ? { precioCatalogo: p.precio, precioBase: p.valor_venta } : {}),
     modalidad: p.modalidad || 'encargo', tieneImagen: !!p.tiene_imagen, actualizado: p.actualizado,
     imagenes: fotosProducto(db, p.id),
+    ...videoEnRespuesta(db, p.id),
     ...(admin ? { revisionFotos: p.galeria_revision || 0 } : {}),
     variantes: db.prepare(`SELECT v.id, v.producto_id, v.codigo, v.stock, c.nombre color
       FROM producto_variantes v LEFT JOIN colores c ON c.id = v.color_id
@@ -259,6 +262,11 @@ export function rutasPortal(db) {
   r.get('/productos', (req, res) => res.json(productos(db)))
   r.get('/productos/:id/imagen', manejar((req, res) => imagen(db, req, res)))
   r.get('/productos/:id/imagenes/:imagenId', manejar((req, res) => imagen(db, req, res)))
+  r.get('/productos/:id/video', manejar((req, res) => {
+    const video = videoDisponible(db, req.params.id, true)
+    exigir(video, 'Video no disponible.', 404)
+    enviarVideo(res, video.video, req.get('range'))
+  }))
   r.get('/pedidos', (req, res) => {
     res.json(db.prepare('SELECT * FROM portal_pedidos WHERE cuenta_id = ? ORDER BY id DESC').all(req.portalCuenta.id).map((p) => pedidoSalida(db, p)))
   })
@@ -382,6 +390,22 @@ export function rutasPortalAdmin(db, adminRequired) {
   }))
   r.get('/productos/:id/imagen', manejar((req, res) => imagen(db, req, res, true)))
   r.get('/productos/:id/imagenes/:imagenId', manejar((req, res) => imagen(db, req, res, true)))
+  r.get('/productos/:id/video/estado', (req, res) => res.json(estadoVideo(req.params.id)))
+  r.post('/productos/:id/video', manejar((req, res) => {
+    const resultado = iniciarVideo(db, req.params.id, req.body?.texto)
+    exigir(!resultado.error, resultado.error, resultado.status)
+    res.status(202).json(resultado)
+  }))
+  r.delete('/productos/:id/video', manejar((req, res) => {
+    exigir(quitarVideo(db, req.params.id), 'Espera a que termine la generación.', 409)
+    res.json({ ok: true })
+  }))
+  r.get('/productos/:id/video', manejar((req, res) => {
+    const video = videoDisponible(db, req.params.id)
+    exigir(video, 'Video no disponible.', 404)
+    if (req.query.download === '1') res.set('Content-Disposition', `attachment; filename="producto-${Number(req.params.id)}.mp4"`)
+    enviarVideo(res, video.video, req.get('range'))
+  }))
   r.put('/productos/:id', manejar(async (req, res) => {
     const b = req.body
     exigir(db.prepare('SELECT id FROM productos WHERE id = ?').get(req.params.id), 'Producto no encontrado.', 404)

@@ -18,6 +18,7 @@ import { editarPanelDiseno } from '../utils/fabricacionMDF.js'
 import { construirMueble } from '../utils/construccionMueble.js'
 import PiezasManuales from '../components/PiezasManuales.jsx'
 import AsistentePlanos from '../components/AsistentePlanos.jsx'
+import ListaHerrajes from '../components/ListaHerrajes.jsx'
 import { validarMontaje } from '../utils/piezasManuales.js'
 
 const VistaMueble3D = lazy(() => import('../components/VistaMueble3D.jsx'))
@@ -318,6 +319,7 @@ export default function CortesPlanos() {
     </fieldset>
 
     {proyecto.diseno && modo === 'despiece' && <VistasTecnicas diseno={proyecto.diseno} />}
+    {proyecto.diseno?.construccionVersion === 2 && modo === 'despiece' && <ListaHerrajes diseno={proyecto.diseno} unidades={proyecto.unidades}/>}
     <footer className="corte-export"><span>{proyecto.piezas.reduce((s, p) => s + Number(p.cantidad || 0), 0) * proyecto.unidades} piezas en el lote</span><div className="corte-actions">
       <button className="corte-button" disabled={!proyecto.piezas.length || ocupado} onClick={() => {
         try { entradaCorte(proyecto); exportarDespieceCSV({ productoNombre: nombre, piezas: proyecto.piezas.map((p) => ({ ...p, ancho: mmACm(p.ancho), alto: mmACm(p.alto), cantidad: p.cantidad * proyecto.unidades })) }) }

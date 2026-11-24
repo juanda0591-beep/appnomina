@@ -27,6 +27,7 @@ const PortalMayorista = lazy(() => import('./pages/PortalMayorista.jsx'))
 const CortesPlanos = lazy(() => import('./pages/CortesPlanos.jsx'))
 import { useData } from './context/DataContext.jsx'
 import { useAuth } from './context/AuthContext.jsx'
+import MarcaLuxarma from './components/MarcaLuxarma.jsx'
 
 // Enlaces del menú. `pagina` se cruza con los permisos del usuario (puede(pagina,'ver')).
 // `solo` marca enlaces de regla fija: 'admin' (gestión de usuarios) o 'todos' (Mi cuenta).
@@ -147,7 +148,7 @@ export default function App() {
         <button className="hamburger" onClick={() => setMenuOpen((o) => !o)} aria-label="Menú">
           ☰
         </button>
-        <span className="topbar-title">💰 Nómina</span>
+        <span className="topbar-title"><MarcaLuxarma className="marca-luxarma-movil"/></span>
       </header>
 
       {menuOpen && <div className="overlay" onClick={closeMenu} />}
@@ -161,7 +162,7 @@ export default function App() {
 
       <aside className={`sidebar ${menuOpen ? 'open' : ''}`}>
         <div className="sidebar-top">
-          <h1 className="logo">💰 Nómina</h1>
+          <h1 className="logo logo-luxarma"><MarcaLuxarma className="marca-luxarma-menu"/></h1>
           <button
             className="sidebar-toggle"
             onClick={toggleColapsado}

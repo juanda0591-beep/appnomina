@@ -65,7 +65,14 @@ export function crearPdfTaller({ empresa = {}, resultado, proyecto, nombre = 'Pl
         styles: { fontSize: 9, cellPadding: 3, textColor: '#344b55' }, headStyles: { fillColor: '#087f8c', textColor: '#ffffff' },
         columnStyles: { 0: { cellWidth: 42 } }, rowPageBreak: 'avoid', alternateRowStyles: { fillColor: '#f1f5f5' } })
       doc.setFontSize(8); doc.setTextColor('#536b75')
-      doc.text('Rieles esquematicos: verificar holguras y mecanizados con la ficha del fabricante. No incluidos en el despiece de tableros.', margen, H - 29)
+      doc.text('Herrajes de referencia: confirmar montaje y perforaciones con el fabricante. Se compran aparte de los tableros.', margen, H - 29)
+      if (construccion.listaHerrajes?.length) {
+        doc.addPage(); encabezado('LISTA DE HERRAJES', `${nombre} | Cantidades para ${config.unidades} mueble(s)`)
+        autoTable(doc, { startY: 37, margin: { left: margen, right: margen, top: 15, bottom: 28 },
+          head: [['Herraje', 'Referencia', 'Medida', 'Cantidad']],
+          body: construccion.listaHerrajes.map((h) => [h.nombre, h.referencia || 'Por definir', h.medida, h.cantidad * config.unidades]),
+          styles: { fontSize: 9, cellPadding: 3, textColor: '#344b55' }, headStyles: { fillColor: '#087f8c', textColor: '#ffffff' }, rowPageBreak: 'avoid' })
+      }
       if (construccion.espejos?.length) {
         doc.addPage(); encabezado('VIDRIO Y ESPEJOS', nombre)
         autoTable(doc, { startY: 37, margin: { left: margen, right: margen, bottom: 28 }, head: [['Elemento', 'Ancho (mm)', 'Alto (mm)', 'Espesor (mm)', 'Cantidad']],

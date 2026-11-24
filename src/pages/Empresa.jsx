@@ -4,6 +4,7 @@ import { useData } from '../context/DataContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { notify, confirmar } from '../utils/notify.js'
 import FirmaCanvas from '../components/FirmaCanvas.jsx'
+import MarcaLuxarma from '../components/MarcaLuxarma.jsx'
 
 const vacio = { nombre: '', direccion: '', telefono: '', correo: '', nit: '', logo: '', firma: '' }
 
@@ -47,6 +48,21 @@ export default function Empresa() {
   const onQuitarLogo = async () => {
     if (!(await confirmar('¿Quitar el logo de la empresa?'))) return
     setField('logo', '')
+  }
+
+  const usarLogoLuxarma = async () => {
+    try {
+      const respuesta = await fetch('/marca/luxarma-logo.png')
+      if (!respuesta.ok) throw new Error('No se pudo cargar el logo aprobado.')
+      const archivo = await respuesta.blob()
+      const logo = await new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result)
+        reader.onerror = () => reject(new Error('No se pudo leer el logo.'))
+        reader.readAsDataURL(archivo)
+      })
+      setField('logo', logo)
+    } catch (e) { notify.error(e.message) }
   }
 
   const handleSubmit = async (e) => {
@@ -125,6 +141,13 @@ export default function Empresa() {
         </div>
 
         <label>Logo (JPG o PNG)</label>
+        <div className="empresa-logo-oficial">
+          <MarcaLuxarma/>
+          <div><strong>Logo oficial LUXARMA</strong><p className="muted small">La marca aprobada ya aparece en el sistema y el catálogo. Puedes usarla también en tus documentos y comprobantes.</p>
+            <div className="form-actions"><button type="button" className="btn-secondary" disabled={!puedeEditar || guardando} onClick={usarLogoLuxarma}>Usar este logo en documentos</button>
+              <a href="/marca/luxarma-logo.png" download="LUXARMA-logo.png">Descargar logo PNG</a></div>
+          </div>
+        </div>
         <input type="file" accept="image/jpeg,image/png" onChange={onLogo} />
         {form.logo && (
           <div className="logo-preview">

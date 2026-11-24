@@ -80,6 +80,25 @@ function geometriaCaja() {
   return { solido: new Float32Array(solido), bordes: new Float32Array(bordes) }
 }
 
+function geometriaCilindro(eje) {
+  const solido = [], bordes = [], caras = 20
+  const transformar = (p) => eje === 'x' ? [p[1], p[0], p[2]] : eje === 'z' ? [p[0], p[2], p[1]] : p
+  const v = (lista, p, n) => lista.push(...transformar(p), ...transformar(n))
+  for (let i = 0; i < caras; i++) {
+    const a = i * 2 * Math.PI / caras, b = (i + 1) * 2 * Math.PI / caras
+    const na = [Math.cos(a), 0, Math.sin(a)], nb = [Math.cos(b), 0, Math.sin(b)]
+    const a0 = [na[0] / 2, -.5, na[2] / 2], a1 = [na[0] / 2, .5, na[2] / 2]
+    const b0 = [nb[0] / 2, -.5, nb[2] / 2], b1 = [nb[0] / 2, .5, nb[2] / 2]
+    for (const [p, n] of [[a0, na], [a1, na], [b1, nb], [a0, na], [b1, nb], [b0, nb]]) v(solido, p, n)
+    for (const [altura, pa, pb] of [[-.5, a0, b0], [.5, a1, b1]]) {
+      const n = [0, altura < 0 ? -1 : 1, 0]
+      for (const p of [[0, altura, 0], pa, pb]) v(solido, p, n)
+      v(bordes, pa, n); v(bordes, pb, n)
+    }
+  }
+  return { solido: new Float32Array(solido), bordes: new Float32Array(bordes) }
+}
+
 // Visor de cajas de tablero: WebGL con profundidad real y selección por rayos.
 // Dibuja solamente cuando cambia la escena o el usuario interactúa.
 export class VisorWebGL {
@@ -104,10 +123,14 @@ export class VisorWebGL {
       gl.useProgram(this.programa)
       this.pos = gl.getAttribLocation(this.programa, 'aPos'); this.normal = gl.getAttribLocation(this.programa, 'aNormal')
       this.uniforms = Object.fromEntries(['VP', 'Centro', 'Dim', 'Color', 'Veta', 'Plano', 'Linea', 'Angulo'].map((n) => [n, gl.getUniformLocation(this.programa, 'u' + n)]))
-      const geometria = geometriaCaja()
-      for (const key of ['solido', 'bordes']) {
-        this[key] = gl.createBuffer(); this.buffers.push(this[key]); gl.bindBuffer(gl.ARRAY_BUFFER, this[key]); gl.bufferData(gl.ARRAY_BUFFER, geometria[key], gl.STATIC_DRAW)
-      }
+      this.geometrias = Object.fromEntries([['caja', geometriaCaja()], ...['x', 'y', 'z'].map((eje) => [`cilindro-${eje}`, geometriaCilindro(eje)])].map(([nombre, geometria]) => {
+        const buffers = {}
+        for (const key of ['solido', 'bordes']) {
+          buffers[key] = gl.createBuffer(); this.buffers.push(buffers[key]); gl.bindBuffer(gl.ARRAY_BUFFER, buffers[key]); gl.bufferData(gl.ARRAY_BUFFER, geometria[key], gl.STATIC_DRAW)
+          buffers[`${key}Vertices`] = geometria[key].length / 6
+        }
+        return [nombre, buffers]
+      }))
       gl.enable(gl.DEPTH_TEST); gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(1, 1)
       this.escuchar('contextmenu', (e) => e.preventDefault())
       this.escuchar('webglcontextlost', (e) => { e.preventDefault(); onError?.('Se perdió la conexión gráfica. Pulsa Reintentar 3D para recuperar el visor.') })
@@ -209,15 +232,16 @@ export class VisorWebGL {
     const acabado = o.acabado || { color: '#ecece5' }, color = acabado.color.match(/[a-f0-9]{2}/gi).map((n) => parseInt(n, 16) / 255)
     for (const p of this.visibles) {
       const elegido = p.id === o.seleccionado
-      const colorActual = p.espejo ? [.64, .83, .88] : p.herraje ? [.57, .64, .67] : color
+      const colorActual = p.espejo ? [.64, .83, .88] : p.herraje ? (p.color ? p.color.match(/[a-f0-9]{2}/gi).map((n) => parseInt(n, 16) / 255) : [.57, .64, .67]) : color
+      const geometria = this.geometrias[p.forma] || this.geometrias.caja
       const transformacion = transformarPieza(p, m, o.explosion || 0, this.progreso(p.movimiento?.id))
       gl.uniform3fv(this.uniforms.Centro, transformacion.posicion); gl.uniform1f(this.uniforms.Angulo, transformacion.angulo)
       gl.uniform3fv(this.uniforms.Dim, p.dimensiones.map((n) => n / 1000))
       gl.uniform3fv(this.uniforms.Color, elegido ? [.2, .69, .71] : colorActual)
       gl.uniform1f(this.uniforms.Veta, acabado.veta && !elegido && !p.herraje && !p.espejo ? 1 : 0); gl.uniform1f(this.uniforms.Plano, p.plano === 'horizontal' ? 2 : p.plano === 'lateral' ? 1 : 0)
-      gl.uniform1f(this.uniforms.Linea, 0); this.buffer(this.solido); gl.drawArrays(gl.TRIANGLES, 0, 36)
+      gl.uniform1f(this.uniforms.Linea, 0); this.buffer(geometria.solido); gl.drawArrays(gl.TRIANGLES, 0, geometria.solidoVertices)
       gl.uniform3fv(this.uniforms.Color, elegido ? [.03, .39, .43] : colorActual.map((n) => n * .54))
-      gl.uniform1f(this.uniforms.Linea, 1); this.buffer(this.bordes); gl.drawArrays(gl.LINES, 0, 48)
+      gl.uniform1f(this.uniforms.Linea, 1); this.buffer(geometria.bordes); gl.drawArrays(gl.LINES, 0, geometria.bordesVertices)
     }
     this.canvas.dataset.piezasVisibles = String(this.visibles.length)
     this.canvas.dataset.estado = 'listo'

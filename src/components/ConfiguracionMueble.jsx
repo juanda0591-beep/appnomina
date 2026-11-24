@@ -1,5 +1,6 @@
 import { tableroConfig, cajonConfig, construirMueble } from '../utils/construccionMueble.js'
 import { fmtCm } from '../utils/unidades.js'
+import HerrajesModulo from './HerrajesModulo.jsx'
 
 export function NumeroConstruccion({ label, value, onChange, min = 0, max, step = .1, placeholder }) {
   return <label>{label}<input aria-label={label} type="number" min={min} max={max} step={step} value={value ?? ''} placeholder={placeholder}
@@ -78,5 +79,6 @@ export function ModuloConfigurable({ f, m, idx, api, puedeQuitar }) {
         <button type="button" className="btn-danger btn-sm" aria-label={`Quitar entrepaño ${k + 1} del ${titulo}`} onClick={() => quitarEntrepano(idx, k)}>✕</button>
       </div>)}<p className="muted small">Alturas desde la cara superior del piso interior.</p>
     </details>
+    <HerrajesModulo f={f} m={m} idx={idx} onChange={(h) => set('herrajes', h)}/>
   </fieldset>
 }
