@@ -92,6 +92,7 @@
 .corte-vistas figcaption { padding: 12px; border-bottom: 1px solid #d5dfe1; color: #435c67; font-size: 12px; }
 .corte-vistas svg { width: 100%; display: block; }
 .corte-tabs { display: flex; align-items: center; gap: 4px; }
+.corte-section-head > .corte-tabs { flex-wrap: wrap; }
 .corte-tabs button { display: flex; align-items: center; gap: 6px; padding: 10px; background: transparent; border-radius: 0; border-bottom: 2px solid transparent; font-size: 13px; color: #61757c; }
 .corte-tabs button[aria-selected="true"] { border-color: #087f8c; color: #076974; }
 .corte-section-head { margin-bottom: 10px; }

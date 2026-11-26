@@ -1,5 +1,6 @@
 import { posicionModelo } from './modeloMueble.js'
 import { transformarPieza, rotarY } from './movimientoMueble.js'
+import { crearCotasTablero, proyectarPunto3D } from './cotas3D.js'
 
 const restar = (a, b) => a.map((n, i) => n - b[i])
 const sumar = (a, b) => a.map((n, i) => n + b[i])
@@ -25,6 +26,13 @@ export function intersectarCaja(origen, direccion, centro, dimensiones) {
     if (cerca > lejos) return null
   }
   return lejos < 0 ? null : Math.max(0, cerca)
+}
+
+export function intersectarPlano(origen, direccion, punto, normal) {
+  const divisor = producto(direccion, normal)
+  if (Math.abs(divisor) < 1e-7) return null
+  const t = producto(restar(punto, origen), normal) / divisor
+  return t < 0 ? null : sumar(origen, direccion.map((n) => n * t))
 }
 
 const vertex = `
@@ -102,8 +110,10 @@ function geometriaCilindro(eje) {
 // Visor de cajas de tablero: WebGL con profundidad real y selección por rayos.
 // Dibuja solamente cuando cambia la escena o el usuario interactúa.
 export class VisorWebGL {
-  constructor(canvas, { onSeleccionar, onAlternar, onError, onCambio } = {}) {
+  constructor(canvas, { onSeleccionar, onAlternar, onError, onCambio, onArrastrar, onCotas } = {}) {
     this.canvas = canvas; this.onSeleccionar = onSeleccionar; this.onCambio = onCambio
+    this.onArrastrar = onArrastrar
+    this.onCotas = onCotas; this.cotas = []
     this.onAlternar = onAlternar; this.aperturas = new Map(); this.ultimoToque = null; this.frame = null
     this.gl = canvas.getContext('webgl', { antialias: true, alpha: false, preserveDrawingBuffer: true })
     if (!this.gl) throw new Error('El navegador no pudo activar el visor 3D. Las vistas 2D siguen disponibles.')
@@ -131,31 +141,58 @@ export class VisorWebGL {
         }
         return [nombre, buffers]
       }))
+      const guias = []
+      for (let n = -30; n <= 30; n++) {
+        for (const p of [[n / 10, 0, -3], [n / 10, 0, 3], [-3, 0, n / 10], [3, 0, n / 10]]) guias.push(...p, 0, 1, 0)
+      }
+      for (const p of [[0, 0, 0], [2, 0, 0], [0, 0, 0], [0, 2, 0], [0, 0, 0], [0, 0, 2]]) guias.push(...p, 0, 1, 0)
+      this.guias = gl.createBuffer(); this.buffers.push(this.guias); gl.bindBuffer(gl.ARRAY_BUFFER, this.guias); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(guias), gl.STATIC_DRAW)
+      this.verticesRejilla = guias.length / 6 - 6
       gl.enable(gl.DEPTH_TEST); gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(1, 1)
       this.escuchar('contextmenu', (e) => e.preventDefault())
       this.escuchar('webglcontextlost', (e) => { e.preventDefault(); onError?.('Se perdió la conexión gráfica. Pulsa Reintentar 3D para recuperar el visor.') })
       this.escuchar('pointerdown', (e) => {
+        this.movimientoBloqueado = false
         canvas.focus(); canvas.setPointerCapture(e.pointerId)
         this.punteros.set(e.pointerId, { x: e.clientX, y: e.clientY })
         this.inicio = { x: e.clientX, y: e.clientY }; this.movido = this.punteros.size > 1
+        if (this.punteros.size > 1) this.terminarArrastre('cancelar')
+        else if (this.opciones.editor && this.opciones.herramienta === 'mover' && e.button === 0 && !e.shiftKey) {
+          const p = this.seleccionar(e.clientX, e.clientY)
+          if (p) {
+            const eje = this.opciones.ejeArrastre || 'libre', i = ['x', 'y', 'z'].indexOf(eje)
+            const normal = [...this.camara.atras]
+            if (i >= 0) normal[i] = 0
+            if (Math.hypot(...normal) > .025) {
+              const punto = transformarPieza(p, this.escena).posicion, rayo = this.rayo(e.clientX, e.clientY)
+              const inicio = intersectarPlano(rayo.origen, rayo.direccion, punto, unidad(normal))
+              if (inicio) { this.arrastre = { id: p.id, origen: [...p.origen], punto, normal: unidad(normal), inicio, eje }; this.onArrastrar?.({ fase: 'iniciar', ...this.arrastre }) }
+            } else {
+              this.movimientoBloqueado = true
+              this.onArrastrar?.({ fase: 'incompatible', mensaje: 'Ese eje apunta hacia la cámara. Cambia a Lado, Arriba o Ajustar para moverlo, o indica su coordenada.' })
+            }
+          }
+        }
       })
       this.escuchar('pointermove', (e) => this.mover(e))
       this.escuchar('pointerup', (e) => {
-        if (this.punteros.size === 1 && !this.movido && e.button === 0) {
+        const arrastrando = !!this.arrastre
+        if (arrastrando) this.terminarArrastre(this.movido ? 'terminar' : 'cancelar')
+        if (!arrastrando && this.punteros.size === 1 && !this.movido && e.button === 0) {
           const p = this.seleccionar(e.clientX, e.clientY), ahora = performance.now(), ultimo = this.ultimoToque
           if (p?.movimiento && ultimo?.id === p.movimiento.id && ahora - ultimo.t < 420 && Math.hypot(e.clientX - ultimo.x, e.clientY - ultimo.y) < 18) {
             this.onAlternar?.(p.movimiento.id); this.ultimoToque = null
           } else this.ultimoToque = { id: p?.movimiento?.id, t: ahora, x: e.clientX, y: e.clientY }
         }
-        this.punteros.delete(e.pointerId); this.movido = true
+        this.punteros.delete(e.pointerId); this.movido = true; this.movimientoBloqueado = false
       })
-      this.escuchar('pointercancel', (e) => { this.punteros.delete(e.pointerId); this.movido = true })
-      this.escuchar('lostpointercapture', (e) => this.punteros.delete(e.pointerId))
+      this.escuchar('pointercancel', (e) => { this.terminarArrastre('cancelar'); this.punteros.delete(e.pointerId); this.movido = true })
+      this.escuchar('lostpointercapture', (e) => { this.terminarArrastre('cancelar'); this.punteros.delete(e.pointerId) })
       this.escuchar('wheel', (e) => { e.preventDefault(); this.acercar(Math.exp(-e.deltaY * .001)) }, { passive: false })
       this.escuchar('keydown', (e) => {
         if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', '+', '=', '-', '0', 'Escape', 'Enter'].includes(e.key)) return
         e.preventDefault()
-        if (e.key === 'Escape') this.onSeleccionar?.(null)
+        if (e.key === 'Escape') { if (this.arrastre) { this.terminarArrastre('cancelar'); this.punteros.clear() } else this.onSeleccionar?.(null) }
         else if (e.key === 'Enter') { const p = this.visibles?.find((p) => p.id === this.opciones.seleccionado); if (p?.movimiento) this.onAlternar?.(p.movimiento.id) }
         else if (e.key === '0') this.vista('perspectiva')
         else if (e.key === '+' || e.key === '=') this.acercar(1.2)
@@ -176,7 +213,11 @@ export class VisorWebGL {
       if (!anterior || anterior.destino !== destino) this.aperturas.set(id, { inicio: this.progreso(id, ahora), destino, tiempo: ahora })
     }
     for (const id of this.aperturas.keys()) if (!ids.has(id)) this.aperturas.delete(id)
-    if (diferente) { this.target = [0, 0, 0]; this.zoom = 1 }
+    if (diferente && !opciones.editor) { this.target = [0, 0, 0]; this.zoom = 1 }
+    if (opciones.editor && (!this.marcoEditor || (!this.arrastre && modelo.piezas.length > (this.editorNumeroPiezas || 0)))) {
+      this.ajustarMarcoEditor(); this.target = [0, 0, 0]; this.zoom = 1
+    }
+    this.editorNumeroPiezas = modelo.piezas.length
     this.dibujar()
   }
   progreso(id, tiempo = performance.now()) {
@@ -188,8 +229,18 @@ export class VisorWebGL {
   mover(e) {
     const previo = this.punteros.get(e.pointerId)
     if (!previo) return
+    if (this.movimientoBloqueado) return
     const dx = e.clientX - previo.x, dy = e.clientY - previo.y
     if (Math.hypot(e.clientX - this.inicio.x, e.clientY - this.inicio.y) > 4) this.movido = true
+    if (this.arrastre) {
+      const rayo = this.rayo(e.clientX, e.clientY), a = this.arrastre
+      const punto = intersectarPlano(rayo.origen, rayo.direccion, a.punto, a.normal)
+      if (punto && this.movido) {
+        const origen = a.origen.map((n, i) => n + (a.eje === 'libre' || a.eje === ['x', 'y', 'z'][i] ? (punto[i] - a.inicio[i]) * 1000 : 0))
+        a.ultimo = origen; this.onArrastrar?.({ fase: 'mover', id: a.id, origen })
+      }
+      this.punteros.set(e.pointerId, { x: e.clientX, y: e.clientY }); return
+    }
     if (this.punteros.size > 1) {
       const otro = [...this.punteros.entries()].find(([id]) => id !== e.pointerId)[1]
       const antes = Math.hypot(previo.x - otro.x, previo.y - otro.y), despues = Math.hypot(e.clientX - otro.x, e.clientY - otro.y)
@@ -205,14 +256,25 @@ export class VisorWebGL {
     this.target = this.target.map((n, i) => n - this.camara.derecha[i] * dx * factor + this.camara.arriba[i] * dy * factor)
   }
   acercar(factor) { this.zoom = limitar(this.zoom * factor, .35, 5); this.dibujar() }
+  terminarArrastre(fase) {
+    const a = this.arrastre
+    if (!a) return
+    this.arrastre = null; this.onArrastrar?.({ fase, id: a.id, origen: a.ultimo || a.origen })
+  }
+  ajustarMarcoEditor() {
+    const m = this.modelo
+    this.marcoEditor = m?.piezas.length ? { limites: m.limites, envolvente: m.envolvente } : { limites: { min: [-500, 0, -500], max: [1500, 2000, 500] }, envolvente: [2000, 2000, 1000] }
+  }
   vista(tipo) {
+    if (this.opciones.editor) this.ajustarMarcoEditor()
     const posiciones = { perspectiva: [32, 72], frontal: [0, 90], lateral: [90, 90], superior: [0, 1.5], trasera: [180, 90] }
     const [theta, phi] = posiciones[tipo] || posiciones.perspectiva
     this.theta = theta * rad; this.phi = phi * rad; this.zoom = 1; this.target = [0, 0, 0]; this.dibujar()
   }
   dibujar() {
-    if (this.descartado || !this.modelo?.piezas.length || this.gl.isContextLost()) return
-    const gl = this.gl, m = this.modelo, o = this.opciones
+    if (this.descartado || !this.modelo || (!this.modelo.piezas.length && !this.opciones.editor) || this.gl.isContextLost()) return
+    const gl = this.gl, o = this.opciones, m = o.editor ? { ...this.modelo, ...this.marcoEditor } : this.modelo
+    this.escena = m
     const rect = this.canvas.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, 2)
     const w = Math.max(1, Math.round(rect.width * dpr)), h = Math.max(1, Math.round(rect.height * dpr))
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h }
@@ -228,6 +290,14 @@ export class VisorWebGL {
     const proj = new Float32Array([f / aspecto, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) / (near - far), -1, 0, 0, 2 * far * near / (near - far), 0])
     gl.uniformMatrix4fv(this.uniforms.VP, false, multiplicar(proj, view))
     this.camara = { ojo, derecha, arriba, atras, distancia, tan, aspecto }
+    if (o.editor && o.rejilla !== false) {
+      gl.uniform3fv(this.uniforms.Centro, m.limites.min.map((n, i) => -(n + m.limites.max[i]) / 2000))
+      gl.uniform3fv(this.uniforms.Dim, [1, 1, 1]); gl.uniform1f(this.uniforms.Angulo, 0); gl.uniform1f(this.uniforms.Veta, 0); gl.uniform1f(this.uniforms.Linea, 1)
+      this.buffer(this.guias); gl.uniform3fv(this.uniforms.Color, [.78, .83, .83]); gl.drawArrays(gl.LINES, 0, this.verticesRejilla)
+      for (const [i, color] of [[0, [.75, .25, .25]], [1, [.24, .55, .32]], [2, [.22, .42, .76]]]) {
+        gl.uniform3fv(this.uniforms.Color, color); gl.drawArrays(gl.LINES, this.verticesRejilla + i * 2, 2)
+      }
+    }
     this.visibles = [...(o.verConstruccion && m.componentes ? m.componentes : m.piezas), ...(m.espejos || []), ...(o.verHerrajes ? m.herrajes || [] : [])].filter((p) => (!o.interior || p.grupo !== 'frentes') && (!o.sinTrasera || p.grupo !== 'trasera') && (!o.aislar || !o.seleccionado || p.id === o.seleccionado))
     const acabado = o.acabado || { color: '#ecece5' }, color = acabado.color.match(/[a-f0-9]{2}/gi).map((n) => parseInt(n, 16) / 255)
     for (const p of this.visibles) {
@@ -248,6 +318,11 @@ export class VisorWebGL {
     this.canvas.dataset.abiertos = Object.keys(o.abiertos || {}).filter((id) => o.abiertos[id]).join(',')
     const animando = [...this.aperturas.values()].some((a) => a.inicio !== a.destino && performance.now() - a.tiempo < 380)
     this.canvas.dataset.animando = String(animando)
+    if (this.onCotas) {
+      this.cotas = o.mostrarCotas ? crearCotasTablero(this.visibles.find((p) => p.id === o.seleccionado),
+        (p) => proyectarPunto3D(p, m.limites, this.camara, rect.width, rect.height), rect.width, rect.height) : []
+      this.onCotas({ ancho: rect.width, alto: rect.height, cotas: this.cotas })
+    }
     if (animando && this.frame === null) this.frame = requestAnimationFrame(() => { this.frame = null; this.dibujar() })
     this.onCambio?.({ zoom: Math.round(this.zoom * 100), visibles: this.visibles.length })
   }
@@ -258,12 +333,10 @@ export class VisorWebGL {
   }
   seleccionar(x, y) {
     if (!this.camara) return
-    const r = this.canvas.getBoundingClientRect(), c = this.camara
-    const nx = ((x - r.left) / r.width * 2 - 1) * c.tan * c.aspecto, ny = (1 - (y - r.top) / r.height * 2) * c.tan
-    const direccion = unidad(c.atras.map((n, i) => -n + c.derecha[i] * nx + c.arriba[i] * ny))
+    const c = this.camara, { direccion } = this.rayo(x, y)
     let encontrado = null, menor = Infinity
     for (const p of this.visibles || []) {
-      const transformacion = transformarPieza(p, this.modelo, this.opciones.explosion || 0, this.progreso(p.movimiento?.id))
+      const transformacion = transformarPieza(p, this.escena || this.modelo, this.opciones.explosion || 0, this.progreso(p.movimiento?.id))
       const origenLocal = rotarY(c.ojo.map((n, i) => n - transformacion.posicion[i]), -transformacion.angulo)
       const dirLocal = rotarY(direccion, -transformacion.angulo)
       const d = intersectarCaja(origenLocal, dirLocal, [0, 0, 0], p.dimensiones.map((n) => n / 1000))
@@ -271,6 +344,11 @@ export class VisorWebGL {
     }
     this.onSeleccionar?.(encontrado?.id || null)
     return encontrado
+  }
+  rayo(x, y) {
+    const r = this.canvas.getBoundingClientRect(), c = this.camara
+    const nx = ((x - r.left) / r.width * 2 - 1) * c.tan * c.aspecto, ny = (1 - (y - r.top) / r.height * 2) * c.tan
+    return { origen: c.ojo, direccion: unidad(c.atras.map((n, i) => -n + c.derecha[i] * nx + c.arriba[i] * ny)) }
   }
   dispose() {
     this.descartado = true; this.observer?.disconnect()

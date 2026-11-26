@@ -543,6 +543,49 @@ Después de compilar, las pruebas con Playwright se ejecutan con
 `node --test tests/cortes-ui.test.mjs`; aceptan las mismas variables de navegador
 y capturas descritas abajo y usan una base temporal aislada.
 
+### Diseño libre
+
+En **Cortes y planos > Diseño libre** puedes crear un mueble pieza por pieza.
+**Nuevo tablero** permite indicar nombre, ancho y largo en cm, espesor en mm,
+orientación y posición X/Y/Z de su esquina en mm. Usa paneles rectangulares y
+giros ortogonales de 90° alrededor de X, Y o Z; los giros conservan el centro
+del tablero y sus medidas de corte. No incluye todavía curvas, recortes o
+perforaciones.
+
+Con **Seleccionar / girar vista**, un clic selecciona y arrastrar orbita la cámara.
+**Mover tablero** arrastra una pieza en el plano de la vista o sobre un solo eje.
+El paso se puede desactivar o configurar de 1 a 100 mm. **Ajustar a caras** acerca
+bordes a las caras de tableros próximos (tolerancia de 12 mm), con prioridad
+sobre el paso, para respetar espesores como 18 mm. Las coordenadas del formulario
+se aplican exactamente, sin redondearlas a ese paso. Escape o cancelar el gesto
+revierte el movimiento provisional. Un arrastre completo ocupa un solo paso
+del historial de Deshacer/Rehacer.
+También se pueden usar Ctrl/Cmd+Z y Ctrl+Y o Ctrl/Cmd+Mayús+Z cuando no se está
+escribiendo en un campo. La pantalla completa conserva los botones de historial,
+guardado y salida; en móvil se puede desplazar el área para acceder a propiedades.
+
+El tablero seleccionado muestra cotas de ancho y largo en cm y espesor en mm
+directamente sobre el 3D. Siguen la cámara, el arrastre y los giros sin cambiar
+las medidas de corte. **Mostrar medidas** permite ocultarlas. La descarga de
+imagen incluye las cotas cuando están visibles.
+
+El panel lateral permite editar, duplicar con desplazamiento, girar, alinear
+bordes/centros, unir caras y eliminar una unidad. Las copias son tipos de pieza
+independientes. Si una pieza importada tiene varias unidades, sus medidas se
+comparten; su posición y orientación se editan por unidad. **Ubicar piezas
+pendientes** coloca las unidades que aún no tienen ubicación en una fila.
+Los proyectos paramétricos se siguen editando desde el generador; empieza un
+proyecto nuevo para crear un diseño libre.
+
+**Guardar versión** conserva las piezas y sus ubicaciones. Al reabrir el proyecto
+se recupera el editor libre. **Ver despiece y corte** muestra la tabla y permite
+calcular el aprovechamiento por espesor; el PDF de taller incluye las vistas
+del ensamblaje manual. El acabado del visor es solo una referencia visual.
+Las piezas no verifican resistencia o mecanizados.
+
+Pruebas: `node --test backend/diseno-libre.test.js` y, después de compilar,
+`node --test tests/diseno-libre-ui.test.mjs`.
+
 ### Bases, complementos y herrajes
 
 En **Cortes y planos > Generar por medidas > Fabricación y complementos**,

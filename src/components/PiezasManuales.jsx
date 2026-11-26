@@ -17,7 +17,7 @@ export default function PiezasManuales({ proyecto, onMontaje, onPieza }) {
   const guardarPosicion = () => {
     if (!pieza) return
     if ([valores.x, valores.y, valores.z].some((v) => v === '' || !Number.isFinite(Number(v)) || Math.abs(Number(v)) > 100000)) { setError('Completa X, Y y Z en mm.'); return }
-    const nueva = { codigo: pieza.codigo, unidad: unidadActual, plano: valores.plano, x: Number(valores.x), y: Number(valores.y), z: Number(valores.z) }
+    const nueva = { codigo: pieza.codigo, unidad: unidadActual, plano: valores.plano, x: Number(valores.x), y: Number(valores.y), z: Number(valores.z), ...(valores.giro ? { giro: valores.giro } : {}) }
     onMontaje([...(proyecto.montajeManual || []).filter((p) => p.codigo !== pieza.codigo || p.unidad !== unidadActual), nueva])
     setBorrador(null); setError(''); setModo('montaje')
   }

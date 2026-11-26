@@ -22,6 +22,7 @@ import ListaHerrajes from '../components/ListaHerrajes.jsx'
 import { validarMontaje } from '../utils/piezasManuales.js'
 
 const VistaMueble3D = lazy(() => import('../components/VistaMueble3D.jsx'))
+const DisenoLibre = lazy(() => import('../components/DisenoLibre.jsx'))
 
 const documentoNuevo = () => ({ nombre: 'Nuevo proyecto', proyecto: proyectoVacio() })
 function historialReducer(state, action) {
@@ -141,7 +142,7 @@ export default function CortesPlanos() {
       solicitud.current++; cargando.current?.abort(); setCargandoProducto(false)
       dispatch({ tipo: 'abrir', valor: actual }); setGuardado({ ...datos, firma: JSON.stringify(actual) })
       setCalculo({ firma: JSON.stringify(datos.proyecto), resultado: datos.resultado })
-      setListaAbierta(false); setHoja(0); setSeleccionado(null); setModo('despiece'); setGeneradorKey((n) => n + 1); setGeneradorSucio(false)
+      setListaAbierta(false); setHoja(0); setSeleccionado(null); setModo(datos.proyecto.disenoLibre ? 'libre' : 'despiece'); setGeneradorKey((n) => n + 1); setGeneradorSucio(false)
     } catch (e) { setError(e.message) }
     finally { setOcupado(false) }
   }
@@ -198,12 +199,12 @@ export default function CortesPlanos() {
       <span className="corte-subtitle">{guardado ? `Proyecto #${guardado.raizId} / Version ${guardado.revision}` : 'Proyecto nuevo'}
         <span className={`corte-dot ${modificado ? 'pending' : ''}`} />{modificado ? 'Cambios sin guardar' : guardado ? 'Guardado' : 'Borrador'}</span></div>
       <div className="corte-actions">
-        <Herramienta icono={Undo2} titulo="Deshacer" disabled={!historial.pasado.length || ocupado || cargandoProducto || modo !== 'despiece'} onClick={() => { solicitud.current++; dispatch({ tipo: 'undo' }) }} />
-        <Herramienta icono={Redo2} titulo="Rehacer" disabled={!historial.futuro.length || ocupado || cargandoProducto || modo !== 'despiece'} onClick={() => { solicitud.current++; dispatch({ tipo: 'redo' }) }} />
+        <Herramienta icono={Undo2} titulo="Deshacer" disabled={!historial.pasado.length || ocupado || cargandoProducto || modo === 'generador'} onClick={() => { solicitud.current++; dispatch({ tipo: 'undo' }) }} />
+        <Herramienta icono={Redo2} titulo="Rehacer" disabled={!historial.futuro.length || ocupado || cargandoProducto || modo === 'generador'} onClick={() => { solicitud.current++; dispatch({ tipo: 'redo' }) }} />
         <Herramienta icono={FilePlus2} titulo="Nuevo proyecto" onClick={nuevo} disabled={ocupado} />
         <button className="corte-button" onClick={() => setListaAbierta(true)} disabled={ocupado}><FolderOpen size={17} />Proyectos</button>
-        {puedeGuardar && <button className="corte-button primary" onClick={() => guardar()} disabled={ocupado || cargandoProducto || modo !== 'despiece' || !proyecto.piezas.length}><Save size={17} />Guardar version</button>}
-        {puede('cortes-planos', 'crear') && guardado && <Herramienta icono={Copy} titulo="Guardar como copia" onClick={() => guardar(true)} disabled={ocupado || cargandoProducto || !proyecto.piezas.length || modo !== 'despiece'} />}
+        {puedeGuardar && <button className="corte-button primary" onClick={() => guardar()} disabled={ocupado || cargandoProducto || modo === 'generador' || !proyecto.piezas.length}><Save size={17} />Guardar version</button>}
+        {puede('cortes-planos', 'crear') && guardado && <Herramienta icono={Copy} titulo="Guardar como copia" onClick={() => guardar(true)} disabled={ocupado || cargandoProducto || !proyecto.piezas.length || modo === 'generador'} />}
       </div>
     </header>
     {(error || errorProductos) && <div role="alert" className="banner error">{error || errorProductos}</div>}
@@ -220,16 +221,19 @@ export default function CortesPlanos() {
 
       <section className="corte-despiece">
 
-        <AsistentePlanos key={generadorKey} proyecto={proyecto} bloqueado={ocupado || cargandoProducto || modo !== 'despiece'} onReferencias={(referencias) => campo('referencias', referencias)} onPiezas={aplicarPiezasIA} onMontaje={aplicarMontajeIA} />
+        {modo !== 'libre' && <AsistentePlanos key={generadorKey} proyecto={proyecto} bloqueado={ocupado || cargandoProducto || modo !== 'despiece'} onReferencias={(referencias) => campo('referencias', referencias)} onPiezas={aplicarPiezasIA} onMontaje={aplicarMontajeIA} />}
 
         <div className="corte-section-head"><div className="corte-tabs" role="tablist" aria-label="Despiece">
           <button role="tab" aria-selected={modo === 'despiece'} onClick={() => cambiarModo('despiece')}>Piezas ({proyecto.piezas.length})</button>
           <button role="tab" aria-selected={modo === 'generador'} onClick={() => cambiarModo('generador')}><Ruler size={16} />Generar por medidas</button>
+          <button role="tab" aria-selected={modo === 'libre'} onClick={() => cambiarModo('libre')}>Diseño libre</button>
         </div><div className="corte-actions">
-          <button className="corte-button" onClick={() => cambiarProyecto((p) => ({ ...p, diseno: null, piezas: [...p.piezas, piezaNueva(p.piezas)] }))} disabled={modo !== 'despiece'}><Plus size={16} />Agregar pieza</button>
+          {modo !== 'libre' && <button className="corte-button" onClick={() => cambiarProyecto((p) => ({ ...p, diseno: null, piezas: [...p.piezas, piezaNueva(p.piezas)] }))} disabled={modo !== 'despiece'}><Plus size={16} />Agregar pieza</button>}
           {proyecto.productoId && puede('cortes-planos', 'editar') && <button className="corte-button" onClick={guardarDespiece} disabled={!proyecto.piezas.length || modo !== 'despiece'}><Save size={16} />Guardar en producto</button>}
         </div></div>
-        {modo === 'generador' ? <GeneradorDespiece key={generadorKey} espesorInicial={proyecto.lamina.espesor} disenoInicial={proyecto.diseno} onModificar={() => { setCalculo(null); setGeneradorSucio(true) }} onGenerar={aplicarGenerado} /> : <>
+        {modo === 'libre' ? <Suspense fallback={<p>Cargando diseño libre...</p>}><DisenoLibre key={generadorKey} proyecto={proyecto} onCambiar={(p) => cambiarProyecto(() => p)} onDespiece={() => { setModo('despiece'); setVistaPlano('corte') }}
+          puedeDeshacer={!!historial.pasado.length && !ocupado && !cargandoProducto} puedeRehacer={!!historial.futuro.length && !ocupado && !cargandoProducto} puedeGuardar={puedeGuardar && !ocupado && !cargandoProducto}
+          onDeshacer={() => { solicitud.current++; dispatch({ tipo: 'undo' }) }} onRehacer={() => { solicitud.current++; dispatch({ tipo: 'redo' }) }} onGuardar={puedeGuardar ? () => guardar() : undefined}/></Suspense> : modo === 'generador' ? <GeneradorDespiece key={generadorKey} espesorInicial={proyecto.lamina.espesor} disenoInicial={proyecto.diseno} onModificar={() => { setCalculo(null); setGeneradorSucio(true) }} onGenerar={aplicarGenerado} /> : <>
           <div className="table-wrap"><table className="table corte-pieces"><thead><tr><th>Codigo</th><th>Pieza / MDF</th><th>Ancho (cm)</th><th>Alto (cm)</th><th>Cantidad</th><th>Rotacion</th><th>Cantos</th><th></th></tr></thead>
             <tbody>{proyecto.piezas.map((p) => <tr key={p.codigo} className={seleccionado?.replace(/-\d+$/, '') === p.codigo ? 'selected' : ''}>
               <td><button className="corte-piece-code" style={{ borderLeftColor: colorPieza(p.codigo) }} onClick={() => {
@@ -251,7 +255,7 @@ export default function CortesPlanos() {
         </>}
 
       </section>
-      <div className="corte-workspace">
+      {modo !== 'libre' && <div className="corte-workspace">
 
         <aside className="corte-config">
           <h3>Lamina y corte</h3>
@@ -315,7 +319,7 @@ export default function CortesPlanos() {
             <Metrica label={resultado?.costoIncompleto ? 'Costo parcial (faltan precios)' : 'Costo de laminas'} value={resultado ? formatCOP(resultado.costoTotal) : '-'} />
             <Metrica label="Mayor retazo" value={resultado?.retazoMayor?.ancho ? `${fmtCm(resultado.retazoMayor.ancho)} x ${fmtCm(resultado.retazoMayor.largo)} cm` : '-'} /></div>
         </section>
-      </div>
+      </div>}
     </fieldset>
 
     {proyecto.diseno && modo === 'despiece' && <VistasTecnicas diseno={proyecto.diseno} />}
@@ -326,7 +330,7 @@ export default function CortesPlanos() {
         catch (e) { setError(e.message) }
       }}><Download size={16} />CSV</button>
       <select aria-label="Formato PDF" value={formato} onChange={(e) => setFormato(e.target.value)}><option value="a4">A4 horizontal</option><option value="a3">A3 horizontal</option></select>
-      <button className="corte-button primary" onClick={pdf} disabled={!resultado || ocupado || modo !== 'despiece' || !!resultado.sinCabida.length}><Download size={16} />PDF de taller</button>
+      <button className="corte-button primary" onClick={pdf} disabled={!resultado || ocupado || modo === 'generador' || !!resultado.sinCabida.length}><Download size={16} />PDF de taller</button>
     </div></footer>
 
     {listaAbierta && <Proyectos onCerrar={() => setListaAbierta(false)} onAbrir={abrir} empresa={empresa} ocupado={ocupado} puedeEliminar={puede('cortes-planos', 'eliminar')} />}

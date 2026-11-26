@@ -24,9 +24,16 @@ export function validarMontaje(montaje, piezas) {
     if (ids.has(id)) throw new Error('Una pieza tiene dos posiciones de montaje.')
     ids.add(id)
     if (!['frente', 'lateral', 'horizontal'].includes(p.plano)) throw new Error('Orientación de pieza no válida.')
+    if (p.giro != null && ![0, 90].includes(p.giro)) throw new Error('El giro del tablero debe ser 0 o 90 grados.')
     if (![p.x, p.y, p.z].every((n) => typeof n === 'number' && Number.isFinite(n) && Math.abs(n) <= 100000)) throw new Error('La posición debe estar en mm entre -100000 y 100000.')
-    return { codigo: p.codigo, unidad: p.unidad, plano: p.plano, x: p.x, y: p.y, z: p.z }
+    return { codigo: p.codigo, unidad: p.unidad, plano: p.plano, x: p.x, y: p.y, z: p.z, ...(p.giro ? { giro: p.giro } : {}) }
   })
+}
+
+export function dimensionesTablero(pieza, espesorBase, lugar = {}) {
+  const e = Number(pieza.espesor ?? espesorBase)
+  const [ancho, alto] = lugar.giro === 90 ? [Number(pieza.alto), Number(pieza.ancho)] : [Number(pieza.ancho), Number(pieza.alto)]
+  return lugar.plano === 'lateral' ? [e, alto, ancho] : lugar.plano === 'horizontal' ? [ancho, e, alto] : [ancho, alto, e]
 }
 
 export function modeloPiezasManuales(piezas, espesorBase, montaje = [], modo = 'piezas', seleccion = null) {
@@ -45,9 +52,10 @@ export function modeloPiezasManuales(piezas, espesorBase, montaje = [], modo = '
       if (modo === 'individual' && seleccion && p.codigo !== seleccion) continue
       const plano = modo === 'montaje' ? lugar.plano : 'frente'
       const ancho = Number(p.ancho), alto = Number(p.alto)
-      const dimensiones = plano === 'frente' ? [ancho, alto, e] : plano === 'lateral' ? [e, alto, ancho] : [ancho, e, alto]
+      const dimensiones = dimensionesTablero(p, espesorBase, modo === 'montaje' ? lugar : { plano })
       const origen = modo === 'montaje' ? [lugar.x, lugar.y, lugar.z] : [cursor, 0, 0]
       piezasModelo.push({ id: `${p.codigo}-${unidad}`, codigo: p.codigo, nombre: p.nombre, ancho, alto, espesor: e, dimensiones, origen,
+        giro: modo === 'montaje' ? lugar.giro || 0 : 0,
         posicion: dimensiones.map((d, i) => origen[i] + d / 2), plano, grupo: 'manual', modulo: null, separar: [0, 0, 0], permiteRotar: p.permiteRotar })
       if (modo !== 'montaje') cursor += ancho + Math.max(60, ancho * .1)
     }

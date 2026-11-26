@@ -93,6 +93,7 @@ export function validarProyecto(proyecto) {
   }
   return { version: 1, productoId, productoNombre: String(proyecto.productoNombre || '').slice(0, 200),
     material: proyecto.material.trim(), unidades, lamina, ...opciones, piezas, diseno,
+    ...(proyecto.disenoLibre === true && !diseno ? { disenoLibre: true } : {}),
     ...(proyecto.referencias ? { referencias: validarReferenciasPlano(proyecto.referencias) } : {}),
     ...(proyecto.montajeManual ? { montajeManual: validarMontaje(proyecto.montajeManual, piezas) } : {}),
     ...(Object.keys(laminasPorEspesor).length ? { laminasPorEspesor } : {}) }
